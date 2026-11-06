@@ -53,6 +53,8 @@ class DocumentResponse(BaseModel):
 
 class DocumentDetail(DocumentResponse):
     text: str
+    qdrant_collection: str | None
+    qdrant_point_id: int | None
 
 
 class EmbeddingRPC:
@@ -184,7 +186,10 @@ async def create_document(payload: DocumentRequest, request: Request):
 
 async def read_document(request: Request, document_id: int):
     async with document_cursor(request) as cursor:
-        await cursor.execute("SELECT id, text, created_at FROM documents WHERE id = %s", (document_id,))
+        await cursor.execute(
+            "SELECT id, text, created_at, qdrant_collection, qdrant_point_id FROM documents WHERE id = %s",
+            (document_id,),
+        )
         document = await cursor.fetchone()
     if document is None:
         raise HTTPException(404, "Document not found.")
@@ -251,7 +256,8 @@ async def get_documents(
 ):
     async with document_cursor(request) as cursor:
         await cursor.execute(
-            "SELECT id, text, created_at FROM documents ORDER BY id LIMIT %s OFFSET %s",
+            "SELECT id, text, created_at, qdrant_collection, qdrant_point_id "
+            "FROM documents ORDER BY id LIMIT %s OFFSET %s",
             (limit, offset),
         )
         return await cursor.fetchall()
