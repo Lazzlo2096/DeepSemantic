@@ -1,7 +1,7 @@
 import asyncio
 import json
 import os
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import datetime
 from typing import Annotated
 from uuid import uuid4
@@ -10,11 +10,11 @@ import aio_pika
 import httpx
 from aio_pika.exceptions import AMQPException
 from fastapi import FastAPI, HTTPException, Path, Query, Request
-from psycopg import OperationalError
-from psycopg.conninfo import make_conninfo
-from psycopg.rows import dict_row
-from psycopg_pool import AsyncConnectionPool, PoolTimeout
 from pydantic import BaseModel, Field, StringConstraints, ValidationError, field_validator
+from sqlalchemy import select
+from sqlalchemy.exc import OperationalError, TimeoutError as PoolTimeout
+
+from database import create_database_engine, documents, initialize_schema
 
 
 QUEUE = "embeddings.requests"
@@ -115,32 +115,17 @@ async def lifespan(app: FastAPI):
     timeout = float(os.getenv("EMBEDDING_RPC_TIMEOUT", "60"))
     if not 0 < timeout < float("inf"):
         raise ValueError("EMBEDDING_RPC_TIMEOUT must be finite and positive")
-    conninfo = make_conninfo(
-        host=os.getenv("POSTGRES_HOST", "postgres"),
-        dbname=os.environ["POSTGRES_DB"],
-        user=os.environ["POSTGRES_USER"],
-        password=os.environ["POSTGRES_PASSWORD"],
-        connect_timeout=5,
-    )
-    pool = AsyncConnectionPool(conninfo, min_size=1, max_size=4, timeout=5, open=False)
-    qdrant = httpx.AsyncClient(base_url=os.getenv("QDRANT_URL", "http://qdrant:6333"), timeout=5)
-    async with pool, qdrant, await aio_pika.connect_robust(os.environ["AMQP_URL"], timeout=5) as connection:
-        async with pool.connection() as database:
-            await database.execute("SELECT pg_advisory_xact_lock(hashtext('deepsemantic.documents'))")
-            await database.execute("""
-                CREATE TABLE IF NOT EXISTS documents (
-                    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-                    text text NOT NULL,
-                    created_at timestamptz NOT NULL DEFAULT now()
-                )
-            """)
-            await database.execute("""
-                ALTER TABLE documents
-                    ADD COLUMN IF NOT EXISTS qdrant_collection text,
-                    ADD COLUMN IF NOT EXISTS qdrant_point_id bigint
-            """)
-        app.state.database = pool
-        app.state.qdrant = qdrant
+    async with AsyncExitStack() as stack:
+        engine = create_database_engine()
+        stack.push_async_callback(engine.dispose)
+        await initialize_schema(engine)
+        app.state.database = engine
+        app.state.qdrant = await stack.enter_async_context(
+            httpx.AsyncClient(base_url=os.getenv("QDRANT_URL", "http://qdrant:6333"), timeout=5)
+        )
+        connection = await stack.enter_async_context(
+            await aio_pika.connect_robust(os.environ["AMQP_URL"], timeout=5)
+        )
         channel = await connection.channel(on_return_raises=True)
         await channel.declare_queue(QUEUE, durable=True)
         replies = await channel.declare_queue(f"embeddings.reply.{uuid4().hex}", exclusive=True)
@@ -165,32 +150,27 @@ async def embeddings(payload: EmbeddingRequest, request: Request):
 
 
 @asynccontextmanager
-async def document_cursor(request: Request):
+async def document_connection(request: Request):
     try:
-        async with request.app.state.database.connection() as database:
-            async with database.cursor(row_factory=dict_row) as cursor:
-                yield cursor
+        async with request.app.state.database.begin() as connection:
+            yield connection
     except (OperationalError, PoolTimeout) as error:
         raise HTTPException(503, "PostgreSQL is unavailable.") from error
 
 
 @app.post("/documents", response_model=DocumentResponse, status_code=201)
 async def create_document(payload: DocumentRequest, request: Request):
-    async with document_cursor(request) as cursor:
-        await cursor.execute(
-            "INSERT INTO documents (text) VALUES (%s) RETURNING id, created_at",
-            (payload.text,),
+    async with document_connection(request) as connection:
+        result = await connection.execute(
+            documents.insert().values(text=payload.text).returning(documents.c.id, documents.c.created_at)
         )
-        return await cursor.fetchone()
+        return result.mappings().one()
 
 
 async def read_document(request: Request, document_id: int):
-    async with document_cursor(request) as cursor:
-        await cursor.execute(
-            "SELECT id, text, created_at, qdrant_collection, qdrant_point_id FROM documents WHERE id = %s",
-            (document_id,),
-        )
-        document = await cursor.fetchone()
+    async with document_connection(request) as connection:
+        result = await connection.execute(select(documents).where(documents.c.id == document_id))
+        document = result.mappings().one_or_none()
     if document is None:
         raise HTTPException(404, "Document not found.")
     return document
@@ -238,12 +218,13 @@ async def embed_document(request: Request, document_id: DocumentId):
         raise HTTPException(422, "Stored document text does not meet embedding input limits.") from error
     result = await request.app.state.rpc.embed(payload)
     await upsert_document_embedding(request.app.state.qdrant, document_id, result)
-    async with document_cursor(request) as cursor:
-        await cursor.execute(
-            "UPDATE documents SET qdrant_collection = %s, qdrant_point_id = %s WHERE id = %s",
-            (QDRANT_COLLECTION, document_id, document_id),
+    async with document_connection(request) as connection:
+        updated = await connection.execute(
+            documents.update()
+            .where(documents.c.id == document_id)
+            .values(qdrant_collection=QDRANT_COLLECTION, qdrant_point_id=document_id)
         )
-        if cursor.rowcount == 0:
+        if updated.rowcount == 0:
             raise HTTPException(404, "Document not found.")
     return result["embeddings"][0]
 
@@ -254,10 +235,8 @@ async def get_documents(
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0, le=MAX_BIGINT)] = 0,
 ):
-    async with document_cursor(request) as cursor:
-        await cursor.execute(
-            "SELECT id, text, created_at, qdrant_collection, qdrant_point_id "
-            "FROM documents ORDER BY id LIMIT %s OFFSET %s",
-            (limit, offset),
+    async with document_connection(request) as connection:
+        result = await connection.execute(
+            select(documents).order_by(documents.c.id).limit(limit).offset(offset)
         )
-        return await cursor.fetchall()
+        return result.mappings().all()
