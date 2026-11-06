@@ -10,11 +10,12 @@ import aio_pika
 import httpx
 from aio_pika.exceptions import AMQPException
 from fastapi import FastAPI, HTTPException, Path, Query, Request
-from pydantic import BaseModel, Field, StringConstraints, ValidationError, field_validator
-from sqlalchemy import select
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator
+from sqlalchemy import select, update
 from sqlalchemy.exc import OperationalError, TimeoutError as PoolTimeout
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from database import create_database_engine, documents
+from database import Document, create_database_engine
 
 
 QUEUE = "embeddings.requests"
@@ -47,6 +48,8 @@ class DocumentRequest(BaseModel):
 
 
 class DocumentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     created_at: datetime
 
@@ -118,7 +121,7 @@ async def lifespan(app: FastAPI):
     async with AsyncExitStack() as stack:
         engine = create_database_engine()
         stack.push_async_callback(engine.dispose)
-        app.state.database = engine
+        app.state.document_sessions = async_sessionmaker(engine, expire_on_commit=False)
         app.state.qdrant = await stack.enter_async_context(
             httpx.AsyncClient(base_url=os.getenv("QDRANT_URL", "http://qdrant:6333"), timeout=5)
         )
@@ -149,27 +152,25 @@ async def embeddings(payload: EmbeddingRequest, request: Request):
 
 
 @asynccontextmanager
-async def document_connection(request: Request):
+async def document_session(request: Request):
     try:
-        async with request.app.state.database.begin() as connection:
-            yield connection
+        async with request.app.state.document_sessions.begin() as session:
+            yield session
     except (OperationalError, PoolTimeout) as error:
         raise HTTPException(503, "PostgreSQL is unavailable.") from error
 
 
 @app.post("/documents", response_model=DocumentResponse, status_code=201)
 async def create_document(payload: DocumentRequest, request: Request):
-    async with document_connection(request) as connection:
-        result = await connection.execute(
-            documents.insert().values(text=payload.text).returning(documents.c.id, documents.c.created_at)
-        )
-        return result.mappings().one()
+    async with document_session(request) as session:
+        document = Document(text=payload.text)
+        session.add(document)
+    return document
 
 
 async def read_document(request: Request, document_id: int):
-    async with document_connection(request) as connection:
-        result = await connection.execute(select(documents).where(documents.c.id == document_id))
-        document = result.mappings().one_or_none()
+    async with document_session(request) as session:
+        document = await session.get(Document, document_id)
     if document is None:
         raise HTTPException(404, "Document not found.")
     return document
@@ -212,18 +213,19 @@ async def upsert_document_embedding(qdrant: httpx.AsyncClient, document_id: int,
 async def embed_document(request: Request, document_id: DocumentId):
     document = await read_document(request, document_id)
     try:
-        payload = EmbeddingRequest(texts=[document["text"]])
+        payload = EmbeddingRequest(texts=[document.text])
     except ValidationError as error:
         raise HTTPException(422, "Stored document text does not meet embedding input limits.") from error
     result = await request.app.state.rpc.embed(payload)
     await upsert_document_embedding(request.app.state.qdrant, document_id, result)
-    async with document_connection(request) as connection:
-        updated = await connection.execute(
-            documents.update()
-            .where(documents.c.id == document_id)
+    async with document_session(request) as session:
+        updated_id = await session.scalar(
+            update(Document)
+            .where(Document.id == document_id)
             .values(qdrant_collection=QDRANT_COLLECTION, qdrant_point_id=document_id)
+            .returning(Document.id)
         )
-        if updated.rowcount == 0:
+        if updated_id is None:
             raise HTTPException(404, "Document not found.")
     return result["embeddings"][0]
 
@@ -234,8 +236,8 @@ async def get_documents(
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0, le=MAX_BIGINT)] = 0,
 ):
-    async with document_connection(request) as connection:
-        result = await connection.execute(
-            select(documents).order_by(documents.c.id).limit(limit).offset(offset)
+    async with document_session(request) as session:
+        result = await session.scalars(
+            select(Document).order_by(Document.id).limit(limit).offset(offset)
         )
-        return result.mappings().all()
+        return result.all()

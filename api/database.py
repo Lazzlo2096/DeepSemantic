@@ -1,20 +1,24 @@
 import os
+from datetime import datetime
 
-from sqlalchemy import BigInteger, Column, DateTime, Identity, MetaData, Table, Text, func
+from sqlalchemy import BigInteger, DateTime, Identity, Text, func
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
-metadata = MetaData()
-documents = Table(
-    "documents",
-    metadata,
-    Column("id", BigInteger, Identity(always=True), primary_key=True),
-    Column("text", Text, nullable=False),
-    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
-    Column("qdrant_collection", Text),
-    Column("qdrant_point_id", BigInteger),
-)
+class Base(DeclarativeBase):
+    pass
+
+
+class Document(Base):
+    __tablename__ = "documents"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    qdrant_collection: Mapped[str | None] = mapped_column(Text)
+    qdrant_point_id: Mapped[int | None] = mapped_column(BigInteger)
 
 
 def create_database_engine() -> AsyncEngine:
