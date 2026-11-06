@@ -1,0 +1,6 @@
+fastapi>=0.115,<1
+uvicorn>=0.34,<1
+FlagEmbedding==1.4.2
+torch>=2.6,<3
+transformers>=4.52,<5
+huggingface-hub>=0.34,<1
