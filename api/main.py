@@ -4,6 +4,7 @@ import os
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import datetime
 from typing import Annotated
+from urllib.parse import quote
 from uuid import uuid4
 
 import aio_pika
@@ -207,6 +208,29 @@ async def upsert_document_embedding(qdrant: httpx.AsyncClient, document_id: int,
         raise HTTPException(503, "Could not save the embedding to Qdrant.") from error
     if response.json().get("result", {}).get("status") != "completed":
         raise HTTPException(503, "Qdrant did not confirm the embedding write.")
+
+
+@app.get("/documents/{document_id}/embedding", response_model=list[float])
+async def get_document_embedding(request: Request, document_id: DocumentId):
+    document = await read_document(request, document_id)
+    if document.qdrant_collection is None or document.qdrant_point_id is None:
+        raise HTTPException(404, "Document embedding not found.")
+
+    collection = quote(document.qdrant_collection, safe="")
+    try:
+        response = await request.app.state.qdrant.get(
+            f"/collections/{collection}/points/{document.qdrant_point_id}"
+        )
+        if response.status_code == 404:
+            raise HTTPException(404, "Document embedding not found.")
+        response.raise_for_status()
+    except httpx.HTTPError as error:
+        raise HTTPException(503, "Could not read the embedding from Qdrant.") from error
+
+    vector = response.json()["result"].get("vector")
+    if not isinstance(vector, list):
+        raise HTTPException(502, "Qdrant did not return a dense embedding.")
+    return vector
 
 
 @app.post("/documents/{document_id}/embedding", response_model=list[float])

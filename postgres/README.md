@@ -34,4 +34,5 @@ docker compose exec postgres sh -c 'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_
 
 - `GET /documents/{document_id}` возвращает `id`, `text`, `created_at`, `qdrant_collection` и `qdrant_point_id`. До индексации оба поля Qdrant возвращаются как `null`. Если документ отсутствует, API возвращает `404`.
 - `GET /documents?limit=20&offset=0` возвращает массив документов с теми же полями в порядке возрастания `id`. `limit` принимает значения от 1 до 100, `offset` задаёт число пропускаемых записей. Пустая страница возвращает `[]`.
+- `GET /documents/{document_id}/embedding` возвращает сохранённый в Qdrant эмбеддинг как JSON-массив. Если документ или его точка отсутствует, API возвращает `404`.
 - `POST /documents/{document_id}/embedding` читает текст из PostgreSQL, строит эмбеддинг и записывает его в коллекцию `documents_bge_m3` с ID документа в качестве ID точки. После подтверждения записи в Qdrant сервис заполняет `qdrant_collection` и `qdrant_point_id` в PostgreSQL и возвращает JSON-массив из 1024 чисел. Повторный запрос обновляет ту же точку. Для отсутствующего документа возвращается `404`, при превышении лимитов модели — `422`.
