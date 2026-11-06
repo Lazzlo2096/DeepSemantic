@@ -13,11 +13,12 @@ from psycopg import OperationalError
 from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
-from pydantic import BaseModel, Field, StringConstraints, field_validator
+from pydantic import BaseModel, Field, StringConstraints, ValidationError, field_validator
 
 
 QUEUE = "embeddings.requests"
 MAX_BIGINT = 2**63 - 1
+DocumentId = Annotated[int, Path(ge=1, le=MAX_BIGINT)]
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=32_768)]
 
 
@@ -172,14 +173,29 @@ async def create_document(payload: DocumentRequest, request: Request):
         return await cursor.fetchone()
 
 
-@app.get("/documents/{document_id}", response_model=DocumentDetail)
-async def get_document(request: Request, document_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)]):
+async def read_document(request: Request, document_id: int):
     async with document_cursor(request) as cursor:
         await cursor.execute("SELECT id, text, created_at FROM documents WHERE id = %s", (document_id,))
         document = await cursor.fetchone()
     if document is None:
         raise HTTPException(404, "Document not found.")
     return document
+
+
+@app.get("/documents/{document_id}", response_model=DocumentDetail)
+async def get_document(request: Request, document_id: DocumentId):
+    return await read_document(request, document_id)
+
+
+@app.post("/documents/{document_id}/embedding", response_model=list[float])
+async def embed_document(request: Request, document_id: DocumentId):
+    document = await read_document(request, document_id)
+    try:
+        payload = EmbeddingRequest(texts=[document["text"]])
+    except ValidationError as error:
+        raise HTTPException(422, "Stored document text does not meet embedding input limits.") from error
+    result = await request.app.state.rpc.embed(payload)
+    return result["embeddings"][0]
 
 
 @app.get("/documents", response_model=list[DocumentDetail])
