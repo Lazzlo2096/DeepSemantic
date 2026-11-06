@@ -14,11 +14,14 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      qdrant:
+        condition: service_started
     ports:
       - "127.0.0.1:${EMBEDDING_PORT:-8000}:8000"
     environment:
       <<: [*amqp-environment, *postgres-environment]
       EMBEDDING_RPC_TIMEOUT: "${EMBEDDING_RPC_TIMEOUT:-60}"
+      QDRANT_URL: "${QDRANT_URL:-http://qdrant:6333}"
     healthcheck:
       test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=4).close()"]
       interval: 10s

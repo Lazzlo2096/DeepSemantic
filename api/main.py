@@ -7,6 +7,7 @@ from typing import Annotated
 from uuid import uuid4
 
 import aio_pika
+import httpx
 from aio_pika.exceptions import AMQPException
 from fastapi import FastAPI, HTTPException, Path, Query, Request
 from psycopg import OperationalError
@@ -17,6 +18,7 @@ from pydantic import BaseModel, Field, StringConstraints, ValidationError, field
 
 
 QUEUE = "embeddings.requests"
+QDRANT_COLLECTION = "documents_bge_m3"
 MAX_BIGINT = 2**63 - 1
 DocumentId = Annotated[int, Path(ge=1, le=MAX_BIGINT)]
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=32_768)]
@@ -119,7 +121,8 @@ async def lifespan(app: FastAPI):
         connect_timeout=5,
     )
     pool = AsyncConnectionPool(conninfo, min_size=1, max_size=4, timeout=5, open=False)
-    async with pool, await aio_pika.connect_robust(os.environ["AMQP_URL"], timeout=5) as connection:
+    qdrant = httpx.AsyncClient(base_url=os.getenv("QDRANT_URL", "http://qdrant:6333"), timeout=5)
+    async with pool, qdrant, await aio_pika.connect_robust(os.environ["AMQP_URL"], timeout=5) as connection:
         async with pool.connection() as database:
             await database.execute("SELECT pg_advisory_xact_lock(hashtext('deepsemantic.documents'))")
             await database.execute("""
@@ -129,7 +132,13 @@ async def lifespan(app: FastAPI):
                     created_at timestamptz NOT NULL DEFAULT now()
                 )
             """)
+            await database.execute("""
+                ALTER TABLE documents
+                    ADD COLUMN IF NOT EXISTS qdrant_collection text,
+                    ADD COLUMN IF NOT EXISTS qdrant_point_id bigint
+            """)
         app.state.database = pool
+        app.state.qdrant = qdrant
         channel = await connection.channel(on_return_raises=True)
         await channel.declare_queue(QUEUE, durable=True)
         replies = await channel.declare_queue(f"embeddings.reply.{uuid4().hex}", exclusive=True)
@@ -187,6 +196,34 @@ async def get_document(request: Request, document_id: DocumentId):
     return await read_document(request, document_id)
 
 
+async def upsert_document_embedding(qdrant: httpx.AsyncClient, document_id: int, result):
+    collection_path = f"/collections/{QDRANT_COLLECTION}"
+    point = {
+        "id": document_id,
+        "vector": result["embeddings"][0],
+        "payload": {
+            "document_id": document_id,
+            "model": result["model"],
+            "model_revision": result["revision"],
+        },
+    }
+    try:
+        response = await qdrant.put(f"{collection_path}/points?wait=true", json={"points": [point]})
+        if response.status_code == 404:
+            created = await qdrant.put(
+                collection_path,
+                json={"vectors": {"size": result["dimensions"], "distance": "Cosine"}},
+            )
+            if created.status_code != 409:
+                created.raise_for_status()
+            response = await qdrant.put(f"{collection_path}/points?wait=true", json={"points": [point]})
+        response.raise_for_status()
+    except httpx.HTTPError as error:
+        raise HTTPException(503, "Could not save the embedding to Qdrant.") from error
+    if response.json().get("result", {}).get("status") != "completed":
+        raise HTTPException(503, "Qdrant did not confirm the embedding write.")
+
+
 @app.post("/documents/{document_id}/embedding", response_model=list[float])
 async def embed_document(request: Request, document_id: DocumentId):
     document = await read_document(request, document_id)
@@ -195,6 +232,14 @@ async def embed_document(request: Request, document_id: DocumentId):
     except ValidationError as error:
         raise HTTPException(422, "Stored document text does not meet embedding input limits.") from error
     result = await request.app.state.rpc.embed(payload)
+    await upsert_document_embedding(request.app.state.qdrant, document_id, result)
+    async with document_cursor(request) as cursor:
+        await cursor.execute(
+            "UPDATE documents SET qdrant_collection = %s, qdrant_point_id = %s WHERE id = %s",
+            (QDRANT_COLLECTION, document_id, document_id),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(404, "Document not found.")
     return result["embeddings"][0]
 
 
