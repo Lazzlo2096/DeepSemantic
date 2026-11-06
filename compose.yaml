@@ -1,16 +1,23 @@
 x-amqp-environment: &amqp-environment
   AMQP_URL: "${AMQP_URL:-amqp://deepsemantic:deepsemantic@rebbit:5672/}"
 
+x-postgres-environment: &postgres-environment
+  POSTGRES_DB: "${POSTGRES_DB:-deepsemantic}"
+  POSTGRES_USER: "${POSTGRES_USER:-deepsemantic}"
+  POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-deepsemantic}"
+
 services:
   api:
     build: ./api
     depends_on:
       rebbit:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     ports:
       - "127.0.0.1:${EMBEDDING_PORT:-8000}:8000"
     environment:
-      <<: *amqp-environment
+      <<: [*amqp-environment, *postgres-environment]
       EMBEDDING_RPC_TIMEOUT: "${EMBEDDING_RPC_TIMEOUT:-60}"
     healthcheck:
       test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=4).close()"]
@@ -60,10 +67,7 @@ services:
 
   postgres:
     image: postgres:17-alpine
-    environment:
-      POSTGRES_DB: "${POSTGRES_DB:-deepsemantic}"
-      POSTGRES_USER: "${POSTGRES_USER:-deepsemantic}"
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-deepsemantic}"
+    environment: *postgres-environment
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
