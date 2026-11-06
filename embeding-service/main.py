@@ -1,35 +1,18 @@
 import asyncio
+import json
 import logging
 import os
-from contextlib import asynccontextmanager, suppress
 from threading import Lock
-from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel, Field, StringConstraints
+import aio_pika
 
 
+QUEUE = "embeddings.requests"
 MODEL_ID = "BAAI/bge-m3"
 MODEL_REVISION = "5617a9f61b028005a4858fdac845db406aefb181"
 DIMENSIONS = 1024
 MAX_TEXTS = 32
-MAX_CHARACTERS = 32_768
-logger = logging.getLogger("uvicorn.error")
-
-Text = Annotated[
-    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_CHARACTERS)
-]
-
-
-class EmbeddingRequest(BaseModel):
-    texts: list[Text] = Field(min_length=1, max_length=MAX_TEXTS)
-
-
-class EmbeddingResponse(BaseModel):
-    model: str
-    revision: str
-    dimensions: int
-    embeddings: list[list[float]]
+logger = logging.getLogger(__name__)
 
 
 def load_model(device: str):
@@ -53,19 +36,35 @@ def load_model(device: str):
     )
 
 
-async def initialize_model(app: FastAPI, device: str):
-    logger.info("Loading %s on %s", MODEL_ID, device)
-    try:
-        app.state.model = await asyncio.to_thread(load_model, device)
-    except Exception:
-        app.state.model_error = "Embedding model failed to load. See server logs."
-        logger.exception("Failed to load %s", MODEL_ID)
-    else:
-        logger.info("%s is ready", MODEL_ID)
+def encode(model, texts: list[str], max_tokens: int, batch_size: int):
+    tokenized = model.tokenizer(
+        texts,
+        add_special_tokens=True,
+        truncation=True,
+        max_length=max_tokens + 1,
+        return_length=True,
+    )
+    for index, length in enumerate(tokenized["length"]):
+        if length > max_tokens:
+            return {
+                "status": 422,
+                "error": {
+                    "message": "Text exceeds the token limit",
+                    "text_index": index,
+                    "max_tokens": max_tokens,
+                },
+            }
+
+    vectors = model.encode(texts, batch_size=batch_size, max_length=max_tokens)["dense_vecs"]
+    return {
+        "model": MODEL_ID,
+        "revision": MODEL_REVISION,
+        "dimensions": DIMENSIONS,
+        "embeddings": vectors.astype("float32", copy=False).tolist(),
+    }
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+async def main():
     device = os.getenv("EMBEDDING_DEVICE", "cpu")
     max_tokens = int(os.getenv("EMBEDDING_MAX_TOKENS", "512"))
     batch_size = int(os.getenv("EMBEDDING_BATCH_SIZE", "8"))
@@ -74,65 +73,44 @@ async def lifespan(app: FastAPI):
     if not 1 <= batch_size <= MAX_TEXTS:
         raise ValueError(f"EMBEDDING_BATCH_SIZE must be between 1 and {MAX_TEXTS}")
 
-    app.state.max_tokens = max_tokens
-    app.state.batch_size = batch_size
-    app.state.inference_lock = Lock()
-    app.state.model = None
-    app.state.model_error = "Embedding model is loading."
-    loading = asyncio.create_task(initialize_model(app, device))
-    try:
-        yield
-    finally:
-        loading.cancel()
-        with suppress(asyncio.CancelledError):
-            await loading
-        app.state.model = None
+    logger.info("Loading %s on %s", MODEL_ID, device)
+    model = await asyncio.to_thread(load_model, device)
+    inference_lock = Lock()
 
+    def infer(body):
+        texts = json.loads(body)["texts"]
+        with inference_lock:
+            return encode(model, texts, max_tokens, batch_size)
 
-app = FastAPI(title="BGE-M3 Embedding Service", lifespan=lifespan)
+    async with await aio_pika.connect_robust(os.environ["AMQP_URL"], fail_fast=False) as connection:
+        channel = await connection.channel()
+        await channel.set_qos(prefetch_count=1)
+        queue = await channel.declare_queue(QUEUE, durable=True)
 
-
-@app.get("/health")
-def health(request: Request):
-    if request.app.state.model is None:
-        raise HTTPException(status_code=503, detail=request.app.state.model_error)
-    return {"status": "ok"}
-
-
-@app.post("/embeddings", response_model=EmbeddingResponse)
-def embeddings(payload: EmbeddingRequest, request: Request):
-    state = request.app.state
-    model = state.model
-    if model is None:
-        raise HTTPException(status_code=503, detail=state.model_error)
-    with state.inference_lock:
-        tokenized = model.tokenizer(
-            payload.texts,
-            add_special_tokens=True,
-            truncation=True,
-            max_length=state.max_tokens + 1,
-            return_length=True,
-        )
-        for index, length in enumerate(tokenized["length"]):
-            if length > state.max_tokens:
-                raise HTTPException(
-                    status_code=422,
-                    detail={
-                        "message": "Text exceeds the token limit",
-                        "text_index": index,
-                        "max_tokens": state.max_tokens,
-                    },
+        async def process(message):
+            async with message.process(requeue=True):
+                if not message.reply_to or not message.correlation_id:
+                    return
+                try:
+                    response = await asyncio.to_thread(infer, message.body)
+                except Exception:
+                    logger.exception("Embedding inference failed")
+                    response = {"status": 500, "error": "Embedding inference failed."}
+                await channel.default_exchange.publish(
+                    aio_pika.Message(
+                        json.dumps(response).encode(),
+                        content_type="application/json",
+                        correlation_id=message.correlation_id,
+                    ),
+                    routing_key=message.reply_to,
+                    mandatory=False,
                 )
 
-        vectors = model.encode(
-            payload.texts,
-            batch_size=state.batch_size,
-            max_length=state.max_tokens,
-        )["dense_vecs"]
+        await queue.consume(process)
+        logger.info("%s is ready and consuming %s", MODEL_ID, QUEUE)
+        await asyncio.Future()
 
-    return EmbeddingResponse(
-        model=MODEL_ID,
-        revision=MODEL_REVISION,
-        dimensions=DIMENSIONS,
-        embeddings=vectors.astype("float32", copy=False).tolist(),
-    )
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    asyncio.run(main())

@@ -13,7 +13,7 @@ down:
     docker compose down
 
 logs:
-    docker compose logs --follow embeding-service
+    docker compose logs --follow
 
 ps:
     docker compose ps
