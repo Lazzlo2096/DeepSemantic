@@ -18,9 +18,15 @@ docker compose exec postgres sh -c 'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_
 
 В уже инициализированном pgAdmin файл можно загрузить через **Tools → Import/Export Servers**, сохранив существующие подключения.
 
+## Миграции
+
+Ревизии Alembic лежат в `postgres/migrations/versions/`. При запуске через `just up` сервис `migrate` выполняет `alembic upgrade head` после готовности PostgreSQL. API запускается после успешного завершения миграций. Первые две ревизии поддерживают и пустую базу, и таблицу, которую ранее создавал API.
+
+Проверить текущую ревизию можно командой `docker compose run --rm migrate current`.
+
 ## Документы
 
-API создаёт таблицу `documents` при запуске, в том числе при подключении к существующему тому. В таблице хранятся `id`, исходный `text` и время создания `created_at`.
+В таблице `documents` хранятся `id`, исходный `text` и время создания `created_at`.
 
 Поля `qdrant_collection` (`text`) и `qdrant_point_id` (`bigint`) предназначены для ссылки на точку в Qdrant. Пока ссылка не записана, оба поля имеют значение `NULL`.
 

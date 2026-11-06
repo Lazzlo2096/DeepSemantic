@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field, StringConstraints, ValidationError, field
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError, TimeoutError as PoolTimeout
 
-from database import create_database_engine, documents, initialize_schema
+from database import create_database_engine, documents
 
 
 QUEUE = "embeddings.requests"
@@ -118,7 +118,6 @@ async def lifespan(app: FastAPI):
     async with AsyncExitStack() as stack:
         engine = create_database_engine()
         stack.push_async_callback(engine.dispose)
-        await initialize_schema(engine)
         app.state.database = engine
         app.state.qdrant = await stack.enter_async_context(
             httpx.AsyncClient(base_url=os.getenv("QDRANT_URL", "http://qdrant:6333"), timeout=5)

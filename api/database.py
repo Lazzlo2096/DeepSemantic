@@ -1,6 +1,6 @@
 import os
 
-from sqlalchemy import BigInteger, Column, DateTime, Identity, MetaData, Table, Text, func, select, text
+from sqlalchemy import BigInteger, Column, DateTime, Identity, MetaData, Table, Text, func
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
@@ -33,15 +33,3 @@ def create_database_engine() -> AsyncEngine:
         pool_timeout=5,
         pool_pre_ping=True,
     )
-
-
-async def initialize_schema(engine: AsyncEngine):
-    async with engine.begin() as connection:
-        await connection.execute(select(func.pg_advisory_xact_lock(func.hashtext("deepsemantic.documents"))))
-        await connection.run_sync(metadata.create_all)
-        # Keep preexisting databases compatible until Alembic owns schema upgrades.
-        await connection.execute(text("""
-            ALTER TABLE documents
-                ADD COLUMN IF NOT EXISTS qdrant_collection text,
-                ADD COLUMN IF NOT EXISTS qdrant_point_id bigint
-        """))

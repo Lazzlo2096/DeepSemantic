@@ -12,8 +12,8 @@ services:
     depends_on:
       rebbit:
         condition: service_healthy
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       qdrant:
         condition: service_started
     ports:
@@ -78,6 +78,13 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  migrate:
+    build: ./postgres/migrations
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: *postgres-environment
 
   pgadmin:
     image: dpage/pgadmin4:9.19
