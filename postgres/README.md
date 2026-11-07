@@ -24,6 +24,23 @@ docker compose exec postgres sh -c 'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_
 
 Проверить текущую ревизию можно командой `docker compose run --rm migrate current`.
 
+## Счётчики задания импорта arXiv
+
+`arxiv_import_result` принимает ID задания из `POST /arxiv/imports` и сопоставляет `candidate_arxiv_ids` с `arxiv_papers` по ID версии статьи и бакету задания. Функция возвращает счётчики в JSONB.
+
+```sql
+SELECT arxiv_import_result('6f9619ff8b86d011b42d00c04fc964ff'::uuid);
+```
+
+- `articles_found` — число элементов в массиве, включая повторяющиеся ID.
+- `pdf_available` — кандидаты, для которых есть запись в каталоге в бакете задания.
+- `pdf_reused` — кандидаты из `pdf_available` с `downloaded_at` раньше первого запуска задания (`started_at`).
+- `pdf_failures` — кандидаты без записи в каталоге в бакете задания.
+- `text_failures` — кандидаты с записью о PDF, у которой нет ключа извлечённого текста.
+- `chunk_failures` — кандидаты со статусом `texted`, у которых обработка дошла только до текста.
+
+Это срез текущего каталога. Счётчики `*_failures` показывают недостающие результаты этапов, в том числе пока импорт ещё идёт. Если задания нет или список кандидатов ещё не сохранён, функция возвращает `NULL`. Для пустого массива все счётчики равны нулю.
+
 ## Счётчики каталога arXiv
 
 `arxiv_catalog_result` возвращает JSONB в формате `arxiv_imports.result` с полем `pdf_available`. Функция считает записи в `arxiv_papers` по бакету и датам первой подачи в UTC, включая обе даты:
