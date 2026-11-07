@@ -87,7 +87,7 @@ def log_import_update(job_id: UUID, previous: dict, current: dict) -> None:
         if previous[column] != value
     }
     if changes:
-        log_import_event("arxiv.import_updated", None, table="arxiv_imports", operation="update",
+        log_import_event("arxiv_import.update", None, table="arxiv_imports", operation="update",
                          import_id=job_id.hex, changes=changes)
 
 
@@ -96,8 +96,9 @@ def log_status_change(arxiv_id: str, change: tuple[str | None, str] | None, job:
         return
     old_status, new_status = change
     if old_status != new_status:
+        operation = "insert" if old_status is None else "update"
         log_import_event(
-            "paper.status_changed", job, table="arxiv_papers", operation="update",
+            f"arxiv_papers.{operation}", job, table="arxiv_papers", operation=operation,
             arxiv_id=arxiv_id, changes={"status": {"old": old_status, "new": new_status}},
         )
 
@@ -557,14 +558,14 @@ def finish_import(db, job: ImportJob, result: ImportResult) -> None:
         status=status, delay=JOB_RETRY_DELAY, result=Jsonb(result.counters()), error=result.last_error,
     )
     if updated:
-        log_import_event("arxiv.import_attempt_finished", job, attempt=job.attempts,
+        log_import_event("arxiv_import.attempt_finished", job, attempt=job.attempts,
                          status=status, error=result.last_error, **result.counters())
     else:
         logging.warning("Lost lease before saving arXiv import %s attempt %d", job.id.hex, job.attempts)
 
 
 def process_import(db, job: ImportJob) -> None:
-    log_import_event("arxiv.import_started", job, attempt=job.attempts, bucket=job.bucket,
+    log_import_event("arxiv_import.started", job, attempt=job.attempts, bucket=job.bucket,
                      date_from=job.date_from.isoformat(), date_to=job.date_to.isoformat())
     with ThreadPoolExecutor(max_workers=1) as executor:
         work = executor.submit(import_articles, job.date_from, job.date_to, job.bucket, job.query, job=job)

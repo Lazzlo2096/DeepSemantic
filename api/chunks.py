@@ -190,7 +190,7 @@ async def save_chunk_embedding_references(
 def log_paper_status_changes(changes: list[tuple[str, PaperStatus, PaperStatus]]) -> None:
     for arxiv_id, old_status, new_status in changes:
         print(json.dumps({
-            "event": "paper.status_changed",
+            "event": "arxiv_papers.update",
             "table": "arxiv_papers",
             "operation": "update",
             "arxiv_id": arxiv_id,

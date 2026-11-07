@@ -17,12 +17,12 @@ Alloy читает логи `arxiv-grabber`, `paper-indexer`, `api` и `embeding
 ```logql
 {service_name=~"arxiv-grabber|paper-indexer|api"}
 | json
-| event="paper.status_changed"
+| event=~"arxiv_papers[.](insert|update)"
 | table="arxiv_papers"
 | arxiv_id="2611.07970v1"
 ```
 
-Добавь `| changes_status_new="embeddinged"`, чтобы увидеть завершение индексации. Событие содержит `operation="update"` и переход в `changes.status`. Переходы записываются после коммита в PostgreSQL. У первой записи `changes.status.old` равен `null`.
+При первой записи статьи воркер пишет `arxiv_papers.insert` с `operation="insert"` и `null` в `changes.status.old`. При смене статуса пишется `arxiv_papers.update` с `operation="update"` и значениями `old` и `new` в `changes.status`. Оба события записываются после коммита в PostgreSQL. Добавь `| changes_status_new="embeddinged"`, чтобы увидеть завершение индексации.
 
 Чтобы увидеть вставки и обновления `arxiv_imports`, в **Explore → Loki** переключи редактор на **Code**, выбери диапазон времени и нажми **Run query** после ввода запроса.
 
@@ -33,7 +33,7 @@ Alloy читает логи `arxiv-grabber`, `paper-indexer`, `api` и `embeding
 | table="arxiv_imports"
 ```
 
-У вставки `operation="insert"`, а в `row` находится сохранённая строка. У обновления `operation="update"`, а в `changes` перечислены только изменившиеся колонки с полями `old` и `new`. API и воркер пишут эти события после коммита, в том числе при обновлении прогресса и продлении аренды. Например, `| operation="update" | changes_status_new="failed"` отберёт переходы в `failed`.
+Событие `arxiv_import.insert` содержит `operation="insert"` и сохранённую строку в `row`. Событие `arxiv_import.update` содержит `operation="update"` и изменившиеся колонки с полями `old` и `new` в `changes`. API и воркер пишут эти события после коммита. Начало попытки видно по изменению `attempts`, а её завершение по переходу статуса из `running`. Добавь `| event="arxiv_import.update" | changes_status_new="failed"`, чтобы увидеть переходы в `failed`.
 
 Для задания импорта используй его ID из ответа `POST /arxiv/imports`. Чтобы отфильтровать запрос выше, добавь `| import_id="…"`. Чтобы увидеть и другие события задания, выполни такой запрос:
 
@@ -43,4 +43,4 @@ Alloy читает логи `arxiv-grabber`, `paper-indexer`, `api` и `embeding
 | import_id="4411913797a7461a864a0581086d4765"
 ```
 
-По этому фильтру видны постановка в очередь, попытки, ошибки обработки отдельных статей и их переходы статуса. `paper-indexer` индексирует статьи отдельно и связывает свои события со статьёй через `arxiv_id`.
+По этому фильтру видны постановка в очередь, начало попытки (`arxiv_import.started`), итог попытки со счётчиками и ошибкой (`arxiv_import.attempt_finished`), а также ошибки обработки отдельных статей и их переходы статуса. `paper-indexer` индексирует статьи отдельно и связывает свои события со статьёй через `arxiv_id`.

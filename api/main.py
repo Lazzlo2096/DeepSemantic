@@ -173,7 +173,7 @@ async def enqueue_arxiv_import(payload: ArxivImportRequest, request: Request):
             parameters,
         )).one()
     print(json.dumps({
-        "event": "arxiv.import_queued",
+        "event": "arxiv_import.insert",
         "table": "arxiv_imports",
         "operation": "insert",
         "import_id": job_id.hex,
