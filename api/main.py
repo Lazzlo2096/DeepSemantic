@@ -10,17 +10,16 @@ import httpx
 from aio_pika.exceptions import AMQPException
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from chunks import router as chunks_router
-from database import create_database_engine
+from database import create_database_engine, database_session
 from embedding_schemas import EmbeddingRequest, EmbeddingResponse
 from papers import router as papers_router
 
 
 QUEUE = "embeddings.requests"
-ARXIV_QUEUE = "arxiv.imports"
-ARXIV_QUEUE_ARGUMENTS = {"x-single-active-consumer": True, "x-consumer-timeout": 86_400_000}
 
 
 class ArxivImportRequest(BaseModel):
@@ -29,7 +28,7 @@ class ArxivImportRequest(BaseModel):
     date_from: date
     date_to: date
     bucket: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
-    query: str = Field(default="", max_length=2000)
+    query: str = Field(default="", max_length=2000, pattern=r"^[^\x00]*$")
 
     @model_validator(mode="after")
     def validate_dates(self):
@@ -117,9 +116,6 @@ async def lifespan(app: FastAPI):
         rpc = EmbeddingRPC(channel, replies, timeout)
         await replies.consume(rpc.on_reply, no_ack=True)
         app.state.rpc = rpc
-        arxiv_channel = await connection.channel(on_return_raises=True)
-        await arxiv_channel.declare_queue(ARXIV_QUEUE, durable=True, arguments=ARXIV_QUEUE_ARGUMENTS)
-        app.state.arxiv_channel = arxiv_channel
         yield
 
 
@@ -141,19 +137,16 @@ async def embeddings(payload: EmbeddingRequest, request: Request):
 
 @app.post("/arxiv/imports", response_model=ArxivImportAccepted, status_code=202, tags=["arXiv"])
 async def enqueue_arxiv_import(payload: ArxivImportRequest, request: Request):
-    job_id = uuid4().hex
-    try:
-        async with asyncio.timeout(5):
-            await request.app.state.arxiv_channel.default_exchange.publish(
-                aio_pika.Message(
-                    payload.model_dump_json(exclude_none=True).encode(),
-                    content_type="application/json",
-                    delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-                    message_id=job_id,
-                ),
-                routing_key=ARXIV_QUEUE,
-                mandatory=True,
-            )
-    except (AMQPException, OSError, TimeoutError) as error:
-        raise HTTPException(503, "Could not confirm publication of the arXiv import.") from error
-    return ArxivImportAccepted(id=job_id)
+    parameters = payload.model_dump()
+    if payload.bucket is None:
+        parameters["bucket"] = os.getenv("RUSTFS_BUCKET", "arxiv-papers")
+    async with database_session(request) as session:
+        job_id = await session.scalar(
+            text("""
+                INSERT INTO arxiv_imports (date_from, date_to, bucket, query)
+                VALUES (:date_from, :date_to, :bucket, :query)
+                RETURNING id
+            """),
+            parameters,
+        )
+    return ArxivImportAccepted(id=job_id.hex)

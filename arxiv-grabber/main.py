@@ -1,18 +1,17 @@
 import argparse
-import asyncio
-import json
 import logging
 import os
 import re
 import shutil
 import time
 from collections.abc import Iterator
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, wait
+from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, timezone
 from tempfile import TemporaryFile
+from uuid import UUID
 from xml.etree import ElementTree
 
-import aio_pika
 import boto3
 import psycopg
 import requests
@@ -20,11 +19,11 @@ from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from pypdf import PdfReader
 from pypdf.errors import PyPdfError
+from psycopg.rows import class_row
+from psycopg.types.json import Jsonb
 
 
 ARXIV_API = "https://export.arxiv.org/api/query"
-ARXIV_QUEUE = "arxiv.imports"
-ARXIV_QUEUE_ARGUMENTS = {"x-single-active-consumer": True, "x-consumer-timeout": 86_400_000}
 ARXIV_ID = re.compile(r"(?:\d{4}\.\d{4,5}|[a-z][a-z.-]*/\d{7})v[1-9]\d*")
 NAMESPACES = {"a": "http://www.w3.org/2005/Atom", "os": "http://a9.com/-/spec/opensearch/1.1/"}
 PAGE_SIZE = 100
@@ -32,6 +31,11 @@ MAX_RESULTS = 10_000
 REQUEST_INTERVAL = 3
 CHUNK_SIZE = 1_000
 CHUNK_OVERLAP = CHUNK_SIZE * 15 // 100
+QUEUE_POLL_SECONDS = 3
+JOB_LEASE = timedelta(minutes=2)
+HEARTBEAT_SECONDS = 30
+MAX_JOB_ATTEMPTS = 3
+JOB_RETRY_DELAY = timedelta(minutes=1)
 
 
 @dataclass(frozen=True)
@@ -41,6 +45,25 @@ class Article:
     authors: list[str]
     abstract: str
     submitted_at: datetime
+
+
+@dataclass
+class ImportResult:
+    pdf_available: int = 0
+    pdf_failures: int = 0
+    text_failures: int = 0
+    chunk_failures: int = 0
+    last_error: str | None = None
+
+
+@dataclass(frozen=True)
+class ImportJob:
+    id: UUID
+    date_from: date
+    date_to: date
+    bucket: str
+    query: str
+    attempts: int
 
 
 class ArxivClient:
@@ -237,16 +260,23 @@ def store_paper_chunks(db, s3, arxiv_id: str, bucket: str, text_key: str) -> int
     return len(chunks)
 
 
-def import_articles(date_from: date, date_to: date, bucket: str, query: str, *, wait_for_lock: bool = False) -> int:
+def connect_database():
+    return psycopg.connect(
+        host=os.getenv("POSTGRES_HOST", "postgres"),
+        dbname=os.environ["POSTGRES_DB"],
+        user=os.environ["POSTGRES_USER"],
+        password=os.environ["POSTGRES_PASSWORD"],
+        connect_timeout=5,
+        autocommit=True,
+    )
+
+
+def import_articles(
+    date_from: date, date_to: date, bucket: str, query: str, *, wait_for_lock: bool = False,
+) -> ImportResult:
+    result = ImportResult()
     try:
-        with psycopg.connect(
-            host=os.getenv("POSTGRES_HOST", "postgres"),
-            dbname=os.environ["POSTGRES_DB"],
-            user=os.environ["POSTGRES_USER"],
-            password=os.environ["POSTGRES_PASSWORD"],
-            connect_timeout=5,
-            autocommit=True,
-        ) as db, requests.Session() as session:
+        with connect_database() as db, requests.Session() as session:
             # Serialize imports in this database to keep arXiv traffic single-connection.
             if wait_for_lock:
                 db.execute("SELECT pg_advisory_lock(hashtext('deepsemantic.arxiv-grabber'))")
@@ -265,14 +295,14 @@ def import_articles(date_from: date, date_to: date, bucket: str, query: str, *, 
             )
             ensure_bucket(s3, bucket)
             arxiv = ArxivClient(session)
-            succeeded = failed = text_failed = chunks_failed = 0
             for article in arxiv.articles(date_from, date_to, query):
                 object_key = f"arxiv/{article.arxiv_id}.pdf"
                 try:
                     pdf = store_pdf(arxiv, s3, bucket, article.arxiv_id, object_key)
                 except (requests.RequestException, BotoCoreError, ClientError, OSError, ValueError) as error:
-                    logging.error("%s: %s", article.arxiv_id, error)
-                    failed += 1
+                    result.last_error = f"Could not save PDF for {article.arxiv_id}: {error}"
+                    logging.error("%s", result.last_error)
+                    result.pdf_failures += 1
                     continue
 
                 catalog = db.execute(
@@ -308,15 +338,16 @@ def import_articles(date_from: date, date_to: date, bucket: str, query: str, *, 
                     (article.arxiv_id, bucket, object_key, article.title, article.authors,
                      article.abstract, article.submitted_at, pdf["LastModified"]),
                 ).fetchone()
-                succeeded += 1
+                result.pdf_available += 1
                 logging.info("%s -> s3://%s/%s", article.arxiv_id, bucket, object_key)
 
                 text_object_key = None
                 try:
                     text_object_key = store_extracted_text(s3, bucket, object_key, pdf["ETag"])
                 except (BotoCoreError, ClientError, OSError, PyPdfError, ValueError) as error:
-                    logging.error("Could not extract text for %s: %s", article.arxiv_id, error)
-                    text_failed += 1
+                    result.last_error = f"Could not extract text for {article.arxiv_id}: {error}"
+                    logging.error("%s", result.last_error)
+                    result.text_failures += 1
 
                 if catalog is not None:
                     with db.transaction():
@@ -338,64 +369,119 @@ def import_articles(date_from: date, date_to: date, bucket: str, query: str, *, 
                         if count:
                             logging.info("Saved %d chunks for %s in %s", count, article.arxiv_id, catalog_bucket)
                     except (BotoCoreError, ClientError, OSError, psycopg.Error, ValueError) as error:
-                        logging.error("Could not save chunks for %s: %s", article.arxiv_id, error)
-                        chunks_failed += 1
+                        result.last_error = f"Could not save chunks for {article.arxiv_id}: {error}"
+                        logging.error("%s", result.last_error)
+                        result.chunk_failures += 1
 
             logging.info("Articles available in RustFS: %d. PDF failures: %d. Text failures: %d. Chunk failures: %d",
-                         succeeded, failed, text_failed, chunks_failed)
-            return int(failed > 0 or text_failed > 0 or chunks_failed > 0)
+                         result.pdf_available, result.pdf_failures, result.text_failures, result.chunk_failures)
     except (psycopg.Error, requests.RequestException, BotoCoreError, ClientError,
             ElementTree.ParseError, KeyError, RuntimeError, ValueError) as error:
-        logging.error("%s", error)
-        return 1
+        result.last_error = str(error)
+        logging.error("%s", result.last_error)
+    return result
 
 
-async def run_worker(default_bucket: str) -> None:
-    # A broker reconnect can redeliver work while the original download thread is still running.
-    import_lock = asyncio.Lock()
+def claim_import(db) -> ImportJob | None:
+    db.execute(
+        """
+        UPDATE arxiv_imports
+        SET status = 'failed', finished_at = now(), lease_until = NULL,
+            last_error = 'Worker lease expired on the final attempt.'
+        WHERE status = 'running' AND lease_until <= now() AND attempts >= %s
+        """,
+        (MAX_JOB_ATTEMPTS,),
+    )
+    with db.cursor(row_factory=class_row(ImportJob)) as cursor:
+        return cursor.execute(
+            """
+            WITH candidate AS (
+                SELECT id FROM arxiv_imports
+                WHERE attempts < %s AND (
+                    (status = 'queued' AND available_at <= now()) OR
+                    (status = 'running' AND lease_until <= now())
+                )
+                ORDER BY available_at, created_at, id
+                LIMIT 1 FOR UPDATE SKIP LOCKED
+            )
+            UPDATE arxiv_imports AS job
+            SET status = 'running', attempts = job.attempts + 1,
+                started_at = COALESCE(job.started_at, now()), lease_until = now() + %s
+            FROM candidate
+            WHERE job.id = candidate.id
+            RETURNING job.id, job.date_from, job.date_to, job.bucket, job.query, job.attempts
+            """,
+            (MAX_JOB_ATTEMPTS, JOB_LEASE),
+        ).fetchone()
 
-    async def process(message: aio_pika.IncomingMessage) -> None:
-        job_id = message.message_id or "unknown"
+
+def finish_import(db, job: ImportJob, result: ImportResult) -> None:
+    counters = asdict(result)
+    last_error = counters.pop("last_error")
+    status = "completed"
+    if last_error is not None:
+        status = "queued" if job.attempts < MAX_JOB_ATTEMPTS else "failed"
+    updated = db.execute(
+        """
+        UPDATE arxiv_imports
+        SET status = %(status)s, lease_until = NULL,
+            available_at = CASE WHEN %(status)s = 'queued' THEN now() + %(delay)s ELSE available_at END,
+            finished_at = CASE WHEN %(status)s <> 'queued' THEN now() END,
+            result = %(result)s, last_error = %(error)s
+        WHERE id = %(id)s AND attempts = %(attempts)s AND status = 'running' AND lease_until > now()
+        """,
+        {"status": status, "delay": JOB_RETRY_DELAY, "result": Jsonb(counters),
+         "error": last_error, "id": job.id, "attempts": job.attempts},
+    ).rowcount
+    if updated:
+        logging.info("arXiv import %s attempt %d: %s", job.id.hex, job.attempts, status)
+    else:
+        logging.warning("Lost lease before saving arXiv import %s attempt %d", job.id.hex, job.attempts)
+
+
+def process_import(db, job: ImportJob) -> None:
+    logging.info("Starting arXiv import %s attempt %d (%s to %s, bucket %s)",
+                 job.id.hex, job.attempts, job.date_from, job.date_to, job.bucket)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        work = executor.submit(import_articles, job.date_from, job.date_to, job.bucket, job.query, wait_for_lock=True)
+        while not wait((work,), timeout=HEARTBEAT_SECONDS).done:
+            updated = db.execute(
+                """
+                UPDATE arxiv_imports SET lease_until = now() + %s
+                WHERE id = %s AND attempts = %s AND status = 'running' AND lease_until > now()
+                """,
+                (JOB_LEASE, job.id, job.attempts),
+            ).rowcount
+            if not updated:
+                logging.warning("Lost lease for arXiv import %s attempt %d", job.id.hex, job.attempts)
+                return
         try:
-            payload = json.loads(message.body)
-            date_from = date.fromisoformat(payload["date_from"])
-            date_to = date.fromisoformat(payload["date_to"])
-            bucket = payload.get("bucket", default_bucket)
-            query = payload.get("query", "")
-            if date_from > date_to or not isinstance(bucket, str) or not bucket or not isinstance(query, str):
-                raise ValueError("Invalid dates, bucket or query")
-        except (KeyError, TypeError, ValueError) as error:
-            logging.error("Invalid arXiv import %s: %s", job_id, error)
-            await message.reject(requeue=False)
-            return
+            result = work.result()
+        except Exception as error:
+            logging.exception("Unexpected error in arXiv import %s", job.id.hex)
+            result = ImportResult(last_error=str(error))
+        finish_import(db, job, result)
 
-        async with import_lock:
-            logging.info("Starting arXiv import %s (%s to %s, bucket %s)", job_id, date_from, date_to, bucket)
-            try:
-                result = await asyncio.to_thread(import_articles, date_from, date_to, bucket, query, wait_for_lock=True)
-            except Exception:
-                logging.exception("Unexpected error in arXiv import %s", job_id)
-                result = 1
 
-            if result == 0:
-                logging.info("Completed arXiv import %s", job_id)
-                await message.ack()
-            else:
-                logging.error("Failed arXiv import %s", job_id)
-                await message.reject(requeue=False)
-
-    async with await aio_pika.connect_robust(os.environ["AMQP_URL"], fail_fast=False) as connection:
-        channel = await connection.channel()
-        await channel.set_qos(prefetch_count=1)
-        queue = await channel.declare_queue(ARXIV_QUEUE, durable=True, arguments=ARXIV_QUEUE_ARGUMENTS)
-        await queue.consume(process)
-        logging.info("Consuming %s", ARXIV_QUEUE)
-        await asyncio.Future()
+def run_worker() -> None:
+    logging.info("Polling PostgreSQL for arXiv imports")
+    while True:
+        try:
+            with connect_database() as db:
+                while True:
+                    job = claim_import(db)
+                    if job is None:
+                        time.sleep(QUEUE_POLL_SECONDS)
+                    else:
+                        process_import(db, job)
+        except psycopg.OperationalError as error:
+            logging.warning("arXiv queue database connection failed: %s", error)
+            time.sleep(QUEUE_POLL_SECONDS)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Download arXiv PDFs by submission date (UTC).")
-    parser.add_argument("--worker", action="store_true", help="Consume arXiv import jobs from RabbitMQ")
+    parser.add_argument("--worker", action="store_true", help="Consume arXiv import jobs from PostgreSQL")
     parser.add_argument("--from", dest="date_from", type=date.fromisoformat)
     parser.add_argument("--to", dest="date_to", type=date.fromisoformat)
     parser.add_argument("--bucket")
@@ -407,7 +493,7 @@ def main() -> int:
     if args.worker:
         if any(value is not None for value in (args.date_from, args.date_to, args.bucket, args.query)):
             parser.error("--worker cannot be combined with import options")
-        asyncio.run(run_worker(default_bucket))
+        run_worker()
         return 0
 
     if args.date_from is None or args.date_to is None:
@@ -415,7 +501,8 @@ def main() -> int:
     if args.date_from > args.date_to:
         parser.error("--from must be on or before --to")
     bucket = args.bucket if args.bucket is not None else default_bucket
-    return import_articles(args.date_from, args.date_to, bucket, args.query or "")
+    result = import_articles(args.date_from, args.date_to, bucket, args.query or "")
+    return int(result.last_error is not None)
 
 
 if __name__ == "__main__":

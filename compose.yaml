@@ -38,7 +38,9 @@ services:
         condition: service_started
     ports:
       - "127.0.0.1:${EMBEDDING_PORT:-8000}:8000"
-    environment: *embedding-client-environment
+    environment:
+      <<: *embedding-client-environment
+      RUSTFS_BUCKET: "${RUSTFS_BUCKET:-arxiv-papers}"
     healthcheck:
       test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=4).close()"]
       interval: 10s
@@ -154,14 +156,12 @@ services:
     command: ["--worker"]
     restart: unless-stopped
     depends_on:
-      rebbit:
-        condition: service_healthy
       migrate:
         condition: service_completed_successfully
       rustfs:
         condition: service_healthy
     environment:
-      <<: [*amqp-environment, *postgres-environment, *rustfs-environment]
+      <<: [*postgres-environment, *rustfs-environment]
       RUSTFS_ENDPOINT: http://rustfs:9000
       RUSTFS_BUCKET: "${RUSTFS_BUCKET:-arxiv-papers}"
 
