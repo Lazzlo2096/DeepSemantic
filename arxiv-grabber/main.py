@@ -204,14 +204,13 @@ def import_articles(date_from: date, date_to: date, bucket: str, query: str, *, 
                 db.execute(
                     """
                     INSERT INTO arxiv_downloads
-                        (arxiv_id, bucket, date_from, date_to, object_key, title, authors,
-                         abstract, submitted_at, downloaded_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (arxiv_id, bucket, date_from, date_to)
+                        (arxiv_id, bucket, object_key, title, authors, abstract, submitted_at, downloaded_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (arxiv_id, bucket)
                     DO UPDATE SET downloaded_at = EXCLUDED.downloaded_at
                     """,
-                    (article.arxiv_id, bucket, date_from, date_to, object_key,
-                     article.title, article.authors, article.abstract, article.submitted_at, downloaded_at),
+                    (article.arxiv_id, bucket, object_key, article.title, article.authors,
+                     article.abstract, article.submitted_at, downloaded_at),
                 )
                 succeeded += 1
                 logging.info("%s -> s3://%s/%s", article.arxiv_id, bucket, object_key)
