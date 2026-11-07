@@ -33,9 +33,40 @@
 
       <section id="catalog" aria-labelledby="results-title">
         <div class="results-bar">
-          <h2 id="results-title" tabindex="-1">Последние загрузки</h2>
+          <h2 id="results-title" tabindex="-1">Каталог статей</h2>
           <p id="status" role="status">Загружаем статьи…</p>
         </div>
+        <form id="catalog-filters" class="catalog-filters" aria-label="Фильтры каталога">
+          <div class="filter-fields">
+            <label>
+              Сортировка
+              <select name="sort">
+                <option value="downloaded_desc">Последние загрузки</option>
+                <option value="submitted_desc">По дате подачи · новые</option>
+                <option value="submitted_asc">По дате подачи · старые</option>
+                <option value="status">По этапу обработки</option>
+              </select>
+            </label>
+            <label>
+              Статус
+              <select name="status">
+                <option value="">Все статусы</option>
+              </select>
+            </label>
+            <label>
+              Дата подачи с (UTC)
+              <input name="date_from" type="date" min="0001-01-01" max="9999-12-31">
+            </label>
+            <label>
+              Дата подачи по (UTC)
+              <input name="date_to" type="date" min="0001-01-01" max="9999-12-31">
+            </label>
+          </div>
+          <div class="filter-actions">
+            <button type="submit">Применить</button>
+            <button id="clear-filters" type="button">Сбросить</button>
+          </div>
+        </form>
         <button id="retry" type="button" hidden>Повторить загрузку</button>
         <div id="papers" class="paper-list"></div>
         <nav id="pagination" class="pagination" aria-label="Страницы каталога" hidden>

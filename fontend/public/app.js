@@ -16,6 +16,10 @@ const next = document.querySelector("#next");
 const template = document.querySelector("#paper-template");
 const resultsTitle = document.querySelector("#results-title");
 const catalog = document.querySelector("#catalog");
+const catalogFilters = document.querySelector("#catalog-filters");
+const dateFrom = catalogFilters.elements.namedItem("date_from");
+const dateTo = catalogFilters.elements.namedItem("date_to");
+const statusFilter = catalogFilters.elements.namedItem("status");
 const searchForm = document.querySelector("#search-form");
 const searchQuery = document.querySelector("#search-query");
 const searchSubmit = document.querySelector("#search-submit");
@@ -28,7 +32,13 @@ const scoreFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 })
 
 let currentPage = 0;
 let requestedPage = 0;
-let hasNext = false;
+let pageCount = 0;
+let appliedFilters = new URLSearchParams();
+let catalogRequest;
+
+for (const [value, label] of stageLabels) {
+  statusFilter.add(new Option(label, value));
+}
 
 function arxivUrl(arxivId) {
   const path = arxivId.split("/").map(encodeURIComponent).join("/");
@@ -54,6 +64,9 @@ function renderPaper(paper) {
 }
 
 async function loadPage(page, moveFocus = false) {
+  catalogRequest?.abort();
+  const request = new AbortController();
+  catalogRequest = request;
   requestedPage = page;
   previous.disabled = true;
   next.disabled = true;
@@ -63,33 +76,68 @@ async function loadPage(page, moveFocus = false) {
 
   try {
     const offset = page * PAGE_SIZE;
-    const response = await fetch(`/api/papers?limit=${PAGE_SIZE + 1}&offset=${offset}`);
+    const params = new URLSearchParams(appliedFilters);
+    params.set("limit", PAGE_SIZE);
+    params.set("offset", offset);
+    const response = await fetch(`/api/papers?${params}`, { signal: request.signal });
+    if (request.signal.aborted) return;
     if (!response.ok) {
       throw new Error(`Catalog request returned ${response.status}`);
     }
 
+    const totalHeader = response.headers.get("X-Total-Count");
+    const total = Number(totalHeader);
+    if (totalHeader === null || !Number.isSafeInteger(total) || total < 0) {
+      throw new Error("Invalid catalog count");
+    }
+
+    const totalPages = Math.ceil(total / PAGE_SIZE);
+    if (page > 0 && page >= totalPages) {
+      await loadPage(Math.max(0, totalPages - 1), moveFocus);
+      return;
+    }
+
     const papers = await response.json();
-    const visiblePapers = papers.slice(0, PAGE_SIZE);
-    list.replaceChildren(...visiblePapers.map(renderPaper));
+    if (request.signal.aborted) return;
+    list.replaceChildren(...papers.map(renderPaper));
     currentPage = page;
-    hasNext = papers.length > PAGE_SIZE;
-    pageNumber.textContent = `Страница ${page + 1}`;
-    pagination.hidden = page === 0 && !hasNext;
-    status.textContent = visiblePapers.length
-      ? `Записи ${offset + 1}–${offset + visiblePapers.length}`
-      : page === 0 ? "В каталоге пока нет статей." : "На этой странице нет статей.";
+    pageCount = totalPages;
+    pageNumber.textContent = `Страница ${page + 1} из ${pageCount}`;
+    pagination.hidden = pageCount === 0;
+    status.textContent = papers.length
+      ? `Записи ${offset + 1}–${offset + papers.length}`
+      : params.has("status") || params.has("date_from") || params.has("date_to")
+        ? "По этим фильтрам статьи не найдены."
+        : "В каталоге пока нет статей.";
 
     if (moveFocus) {
       resultsTitle.focus();
     }
   } catch {
-    status.textContent = "Не удалось загрузить статьи. Попробуй ещё раз.";
-    retry.hidden = false;
+    if (!request.signal.aborted) {
+      status.textContent = "Не удалось загрузить статьи. Попробуй ещё раз.";
+      retry.hidden = false;
+    }
   } finally {
-    previous.disabled = currentPage === 0;
-    next.disabled = !hasNext;
-    list.setAttribute("aria-busy", "false");
+    if (!request.signal.aborted) {
+      catalogRequest = undefined;
+      previous.disabled = currentPage === 0;
+      next.disabled = currentPage + 1 >= pageCount;
+      list.setAttribute("aria-busy", "false");
+    }
   }
+}
+
+function applyFilters() {
+  appliedFilters = new URLSearchParams();
+  for (const [name, value] of new FormData(catalogFilters)) {
+    if (value) appliedFilters.set(name, value);
+  }
+  currentPage = 0;
+  pageCount = 0;
+  list.replaceChildren();
+  pagination.hidden = true;
+  loadPage(0);
 }
 
 function renderSearchResult(chunk) {
@@ -160,4 +208,19 @@ backToCatalog.addEventListener("click", () => {
 previous.addEventListener("click", () => loadPage(currentPage - 1, true));
 next.addEventListener("click", () => loadPage(currentPage + 1, true));
 retry.addEventListener("click", () => loadPage(requestedPage, true));
-loadPage(0);
+catalogFilters.addEventListener("input", () => dateTo.setCustomValidity(""));
+catalogFilters.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (dateFrom.value && dateTo.value && dateFrom.value > dateTo.value) {
+    dateTo.setCustomValidity("Дата окончания должна быть не раньше даты начала.");
+    dateTo.reportValidity();
+    return;
+  }
+  applyFilters();
+});
+document.querySelector("#clear-filters").addEventListener("click", () => {
+  catalogFilters.reset();
+  dateTo.setCustomValidity("");
+  applyFilters();
+});
+applyFilters();
