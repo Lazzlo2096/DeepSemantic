@@ -1,0 +1,11 @@
+:80 {
+	handle /api/papers {
+		uri strip_prefix /api
+		reverse_proxy api:8000
+	}
+
+	handle {
+		root * /srv
+		file_server
+	}
+}

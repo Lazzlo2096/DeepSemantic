@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Статьи arXiv · DeepSemantic</title>
+    <meta name="description" content="Каталог статей arXiv, загруженных в DeepSemantic.">
+    <link rel="stylesheet" href="/styles.css">
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="shell brand">
+        <span class="brand-mark" aria-hidden="true">DS</span>
+        <span>DeepSemantic</span>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow">Каталог публикаций</p>
+        <h1 id="page-title">Статьи arXiv</h1>
+        <p>Публикации, загруженные в DeepSemantic. Открой аннотацию или перейди к оригиналу на arXiv.</p>
+      </section>
+
+      <section aria-labelledby="results-title">
+        <div class="results-bar">
+          <h2 id="results-title" tabindex="-1">Последние загрузки</h2>
+          <p id="status" role="status">Загружаем статьи…</p>
+        </div>
+        <button id="retry" type="button" hidden>Повторить загрузку</button>
+        <div id="papers" class="paper-list"></div>
+        <nav id="pagination" class="pagination" aria-label="Страницы каталога" hidden>
+          <button id="previous" type="button">← Назад</button>
+          <span id="page-number"></span>
+          <button id="next" type="button">Дальше →</button>
+        </nav>
+      </section>
+      <noscript><p>Для загрузки каталога включи JavaScript.</p></noscript>
+    </main>
+
+    <template id="paper-template">
+      <article class="paper">
+        <div class="paper-meta">
+          <span class="paper-id"></span>
+          <time class="paper-date" title="Дата подачи в UTC"></time>
+        </div>
+        <h3><a class="paper-title"></a></h3>
+        <p class="paper-authors"></p>
+        <details>
+          <summary>Аннотация</summary>
+          <p class="paper-abstract"></p>
+        </details>
+      </article>
+    </template>
+  </body>
+</html>

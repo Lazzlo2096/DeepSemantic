@@ -11,6 +11,17 @@ x-rustfs-environment: &rustfs-environment
   RUSTFS_SECRET_KEY: "${RUSTFS_SECRET_KEY:-deepsemantic-local}"
 
 services:
+  fontend:
+    image: caddy:2-alpine
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "127.0.0.1:${FONTEND_PORT:-8080}:80"
+    volumes:
+      - ./fontend/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./fontend/public:/srv:ro
+
   api:
     build: ./api
     depends_on:
