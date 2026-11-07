@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -17,6 +18,8 @@ import psycopg
 import requests
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
+from pypdf import PdfReader
+from pypdf.errors import PyPdfError
 
 
 ARXIV_API = "https://export.arxiv.org/api/query"
@@ -144,9 +147,9 @@ def ensure_bucket(s3, bucket: str) -> None:
         s3.create_bucket(Bucket=bucket)
 
 
-def store_pdf(arxiv: ArxivClient, s3, bucket: str, arxiv_id: str, object_key: str) -> datetime:
+def store_pdf(arxiv: ArxivClient, s3, bucket: str, arxiv_id: str, object_key: str) -> dict:
     try:
-        return s3.head_object(Bucket=bucket, Key=object_key)["LastModified"]
+        return s3.head_object(Bucket=bucket, Key=object_key)
     except ClientError as error:
         if error.response["ResponseMetadata"]["HTTPStatusCode"] != 404:
             raise
@@ -160,7 +163,39 @@ def store_pdf(arxiv: ArxivClient, s3, bucket: str, arxiv_id: str, object_key: st
             raise ValueError(f"arXiv did not return a PDF for {arxiv_id}")
         pdf.seek(0)
         s3.upload_fileobj(pdf, bucket, object_key, ExtraArgs={"ContentType": "application/pdf"})
-    return s3.head_object(Bucket=bucket, Key=object_key)["LastModified"]
+    return s3.head_object(Bucket=bucket, Key=object_key)
+
+
+def store_extracted_text(s3, bucket: str, pdf_key: str, pdf_etag: str) -> str:
+    text_key = pdf_key.removesuffix(".pdf") + ".txt"
+    source_etag = pdf_etag.strip('"')
+    try:
+        existing = s3.head_object(Bucket=bucket, Key=text_key)
+        if existing["ContentLength"] > 0 and existing["Metadata"].get("source-etag") == source_etag:
+            return text_key
+    except ClientError as error:
+        if error.response["ResponseMetadata"]["HTTPStatusCode"] != 404:
+            raise
+
+    with TemporaryFile() as pdf, TemporaryFile() as text:
+        response = s3.get_object(Bucket=bucket, Key=pdf_key, IfMatch=pdf_etag)
+        with response["Body"] as body:
+            shutil.copyfileobj(body, pdf, length=1024 * 1024)
+        pdf.seek(0)
+        for page in PdfReader(pdf).pages:
+            page_text = page.extract_text().strip()
+            if page_text:
+                text.write(page_text.encode("utf-8") + b"\n\n")
+        if not text.tell():
+            raise ValueError("PDF has no extractable text")
+        text.seek(0)
+        s3.upload_fileobj(
+            text,
+            bucket,
+            text_key,
+            ExtraArgs={"ContentType": "text/plain; charset=utf-8", "Metadata": {"source-etag": source_etag}},
+        )
+    return text_key
 
 
 def import_articles(date_from: date, date_to: date, bucket: str, query: str, *, wait_for_lock: bool = False) -> int:
@@ -191,32 +226,42 @@ def import_articles(date_from: date, date_to: date, bucket: str, query: str, *, 
             )
             ensure_bucket(s3, bucket)
             arxiv = ArxivClient(session)
-            succeeded = failed = 0
+            succeeded = failed = text_failed = 0
             for article in arxiv.articles(date_from, date_to, query):
                 object_key = f"arxiv/{article.arxiv_id}.pdf"
                 try:
-                    downloaded_at = store_pdf(arxiv, s3, bucket, article.arxiv_id, object_key)
+                    pdf = store_pdf(arxiv, s3, bucket, article.arxiv_id, object_key)
                 except (requests.RequestException, BotoCoreError, ClientError, OSError, ValueError) as error:
                     logging.error("%s: %s", article.arxiv_id, error)
                     failed += 1
                     continue
 
+                text_object_key = None
+                try:
+                    text_object_key = store_extracted_text(s3, bucket, object_key, pdf["ETag"])
+                except (BotoCoreError, ClientError, OSError, PyPdfError, ValueError) as error:
+                    logging.error("Could not extract text for %s: %s", article.arxiv_id, error)
+                    text_failed += 1
+
                 db.execute(
                     """
                     INSERT INTO arxiv_downloads
-                        (arxiv_id, bucket, object_key, title, authors, abstract, submitted_at, downloaded_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        (arxiv_id, bucket, object_key, title, authors, abstract,
+                         submitted_at, downloaded_at, text_object_key)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (arxiv_id, bucket)
-                    DO UPDATE SET downloaded_at = EXCLUDED.downloaded_at
+                    DO UPDATE SET downloaded_at = EXCLUDED.downloaded_at,
+                                  text_object_key = EXCLUDED.text_object_key
                     """,
                     (article.arxiv_id, bucket, object_key, article.title, article.authors,
-                     article.abstract, article.submitted_at, downloaded_at),
+                     article.abstract, article.submitted_at, pdf["LastModified"], text_object_key),
                 )
                 succeeded += 1
                 logging.info("%s -> s3://%s/%s", article.arxiv_id, bucket, object_key)
 
-            logging.info("Articles available in RustFS: %d. Failed: %d", succeeded, failed)
-            return int(failed > 0)
+            logging.info("Articles available in RustFS: %d. PDF failures: %d. Text failures: %d",
+                         succeeded, failed, text_failed)
+            return int(failed > 0 or text_failed > 0)
     except (psycopg.Error, requests.RequestException, BotoCoreError, ClientError,
             ElementTree.ParseError, KeyError, RuntimeError, ValueError) as error:
         logging.error("%s", error)

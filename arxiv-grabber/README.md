@@ -32,16 +32,18 @@ docker compose run --build --rm arxiv-grabber --from 2023-06-05 --to 2023-06-05 
 
 PDF сохраняются под ключом `arxiv/<arxiv_id>.pdf`, где `arxiv_id` включает версию статьи. Уже существующий объект используется повторно. Если отдельный PDF не загрузился, скрипт обрабатывает оставшиеся статьи и возвращает код `1`. Повторный запуск проверяет наличие объектов и догружает пропущенные PDF.
 
+При импорте воркер извлекает текст со всех страниц и сохраняет его в UTF-8 под ключом `arxiv/<arxiv_id>.txt` в том же бакете. Для ранее скачанных PDF достаточно повторить импорт за нужный диапазон. Воркер использует готовый текст, если он относится к тому же PDF. Для PDF без текстового слоя требуется OCR. При ошибке извлечения воркер сохраняет запись о PDF, оставляет `text_object_key` пустым и сообщает об ошибке в логе. [Документация по извлечению текста](https://pypdf.readthedocs.io/en/stable/user/extract-text.html).
+
 ## Каталог в pgAdmin
 
 В [pgAdmin](http://127.0.0.1:5050) откройте **DeepSemantic PostgreSQL → Databases → deepsemantic → Schemas → public → Tables → arxiv_downloads**. В запущенном pgAdmin обновите узел **Tables**, чтобы увидеть новую таблицу.
 
 ```sql
-SELECT arxiv_id, title, submitted_at, bucket, object_key, downloaded_at
+SELECT arxiv_id, title, submitted_at, bucket, object_key, text_object_key, downloaded_at
 FROM public.arxiv_downloads
 ORDER BY downloaded_at DESC, arxiv_id;
 ```
 
-Строка появляется после подтверждения, что PDF есть в RustFS. `submitted_at` — дата и время первой подачи, `downloaded_at` — время загрузки объекта в бакет по данным RustFS. Для каждой версии статьи в каждом бакете хранится одна строка. Импорты с пересекающимися диапазонами используют одну и ту же строку и один PDF в выбранном бакете.
+Строка появляется после подтверждения, что PDF есть в RustFS. `submitted_at` — дата и время первой подачи, `downloaded_at` — время загрузки объекта в бакет по данным RustFS. `text_object_key` указывает на текстовый файл в `bucket` и заполняется после его сохранения. Для каждой версии статьи в каждом бакете хранится одна строка. Импорты с пересекающимися диапазонами используют одну и ту же строку и один PDF в выбранном бакете.
 
 Запросы к arXiv выполняются последовательно с интервалом не менее трёх секунд. Для массовой загрузки архивов arXiv предоставляет [доступ к PDF через S3](https://info.arxiv.org/help/bulk_data_s3.html). [Руководство по API arXiv](https://info.arxiv.org/help/api/user-manual.html) · [Условия использования API](https://info.arxiv.org/help/api/tou.html).
