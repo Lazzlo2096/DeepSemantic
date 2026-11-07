@@ -103,6 +103,7 @@ async def lifespan(app: FastAPI):
     async with AsyncExitStack() as stack:
         engine = create_database_engine()
         stack.push_async_callback(engine.dispose)
+        app.state.db_engine = engine
         app.state.db_sessions = async_sessionmaker(engine, expire_on_commit=False)
         app.state.qdrant = await stack.enter_async_context(
             httpx.AsyncClient(base_url=os.getenv("QDRANT_URL", "http://qdrant:6333"), timeout=5)

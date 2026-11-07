@@ -5,4 +5,5 @@
 !chunks.py
 !papers.py
 !embedding_schemas.py
+!paper_embeddings.py
 !requirements.txt

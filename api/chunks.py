@@ -61,19 +61,24 @@ async def get_chunk(request: Request, chunk_id: ChunkId):
     return await read_chunk(request, chunk_id)
 
 
-async def upsert_chunk_embedding(qdrant: httpx.AsyncClient, chunk_id: int, result):
+async def upsert_chunk_embeddings(qdrant: httpx.AsyncClient, chunk_ids: list[int], result):
     collection_path = f"/collections/{QDRANT_COLLECTION}"
-    point = {
-        "id": chunk_id,
-        "vector": result["embeddings"][0],
-        "payload": {
-            "document_id": chunk_id,
-            "model": result["model"],
-            "model_revision": result["revision"],
-        },
-    }
+    if len(result["embeddings"]) != len(chunk_ids):
+        raise HTTPException(502, "Embedding worker returned the wrong number of vectors.")
+    points = [
+        {
+            "id": chunk_id,
+            "vector": vector,
+            "payload": {
+                "document_id": chunk_id,
+                "model": result["model"],
+                "model_revision": result["revision"],
+            },
+        }
+        for chunk_id, vector in zip(chunk_ids, result["embeddings"], strict=True)
+    ]
     try:
-        response = await qdrant.put(f"{collection_path}/points?wait=true", json={"points": [point]})
+        response = await qdrant.put(f"{collection_path}/points?wait=true", json={"points": points})
         if response.status_code == 404:
             created = await qdrant.put(
                 collection_path,
@@ -81,12 +86,30 @@ async def upsert_chunk_embedding(qdrant: httpx.AsyncClient, chunk_id: int, resul
             )
             if created.status_code != 409:
                 created.raise_for_status()
-            response = await qdrant.put(f"{collection_path}/points?wait=true", json={"points": [point]})
+            response = await qdrant.put(f"{collection_path}/points?wait=true", json={"points": points})
         response.raise_for_status()
     except httpx.HTTPError as error:
         raise HTTPException(503, "Could not save the embedding to Qdrant.") from error
     if response.json().get("result", {}).get("status") != "completed":
         raise HTTPException(503, "Qdrant did not confirm the embedding write.")
+
+
+async def save_chunk_embedding_references(session, chunk_ids: list[int]) -> None:
+    updated = await session.scalars(
+        update(Chunk)
+        .where(Chunk.id.in_(chunk_ids))
+        .values(qdrant_collection=QDRANT_COLLECTION, qdrant_point_id=Chunk.id)
+        .returning(Chunk.id)
+    )
+    if set(updated) != set(chunk_ids):
+        raise HTTPException(404, "Chunk not found.")
+
+    papers = await session.scalars(
+        text("SELECT DISTINCT arxiv_id FROM paper_chunks WHERE chunk_id = ANY(:chunk_ids) ORDER BY arxiv_id"),
+        {"chunk_ids": chunk_ids},
+    )
+    for arxiv_id in papers:
+        await session.execute(text("SELECT refresh_arxiv_paper_status(:arxiv_id)"), {"arxiv_id": arxiv_id})
 
 
 @router.get("/{chunk_id}/embedding", response_model=list[float])
@@ -120,20 +143,9 @@ async def embed_chunk(request: Request, chunk_id: ChunkId):
     except ValidationError as error:
         raise HTTPException(422, "Stored chunk text does not meet embedding input limits.") from error
     result = await request.app.state.rpc.embed(payload)
-    await upsert_chunk_embedding(request.app.state.qdrant, chunk_id, result)
+    await upsert_chunk_embeddings(request.app.state.qdrant, [chunk_id], result)
     async with database_session(request) as session:
-        updated_id = await session.scalar(
-            update(Chunk)
-            .where(Chunk.id == chunk_id)
-            .values(qdrant_collection=QDRANT_COLLECTION, qdrant_point_id=chunk_id)
-            .returning(Chunk.id)
-        )
-        if updated_id is None:
-            raise HTTPException(404, "Chunk not found.")
-        await session.execute(
-            text("SELECT refresh_arxiv_paper_status(arxiv_id) FROM paper_chunks WHERE chunk_id = :chunk_id"),
-            {"chunk_id": chunk_id},
-        )
+        await save_chunk_embedding_references(session, [chunk_id])
     return result["embeddings"][0]
 
 
