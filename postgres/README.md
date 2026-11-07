@@ -24,6 +24,16 @@ docker compose exec postgres sh -c 'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_
 
 Проверить текущую ревизию можно командой `docker compose run --rm migrate current`.
 
+## Счётчики каталога arXiv
+
+`arxiv_catalog_result` возвращает JSONB в формате `arxiv_imports.result` с полем `pdf_available`. Функция считает записи в `arxiv_papers` по бакету и датам первой подачи в UTC, включая обе даты:
+
+```sql
+SELECT arxiv_catalog_result(DATE '2026-11-02', DATE '2026-11-03', 'arxiv-papers');
+```
+
+Это срез текущего каталога: он включает записи предыдущих импортов и не проверяет наличие файлов в RustFS. Каталог не хранит принадлежность статьи к заданию или категории arXiv, поэтому функция не применяет `arxiv_imports.query` и не возвращает число найденных статей, повторно использованных PDF и ошибок по этапам.
+
 ## Чанки
 
 В таблице `chunks` хранятся `id`, текст чанка `text` и время создания `created_at`. Миграция переименовывает `documents` с сохранением строк и их ID. Маршруты `/chunks` работают с таблицей `chunks`.
