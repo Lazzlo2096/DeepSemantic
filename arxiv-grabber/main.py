@@ -1,4 +1,6 @@
 import argparse
+import asyncio
+import json
 import logging
 import os
 import re
@@ -9,6 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 from tempfile import TemporaryFile
 from xml.etree import ElementTree
 
+import aio_pika
 import boto3
 import psycopg
 import requests
@@ -17,6 +20,8 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 
 ARXIV_API = "https://export.arxiv.org/api/query"
+ARXIV_QUEUE = "arxiv.imports"
+ARXIV_QUEUE_ARGUMENTS = {"x-single-active-consumer": True, "x-consumer-timeout": 86_400_000}
 ARXIV_ID = re.compile(r"(?:\d{4}\.\d{4,5}|[a-z][a-z.-]*/\d{7})v[1-9]\d*")
 NAMESPACES = {"a": "http://www.w3.org/2005/Atom", "os": "http://a9.com/-/spec/opensearch/1.1/"}
 PAGE_SIZE = 100
@@ -158,17 +163,7 @@ def store_pdf(arxiv: ArxivClient, s3, bucket: str, arxiv_id: str, object_key: st
     return s3.head_object(Bucket=bucket, Key=object_key)["LastModified"]
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Download arXiv PDFs by submission date (UTC).")
-    parser.add_argument("--from", dest="date_from", required=True, type=date.fromisoformat)
-    parser.add_argument("--to", dest="date_to", required=True, type=date.fromisoformat)
-    parser.add_argument("--bucket", default=os.getenv("RUSTFS_BUCKET", "arxiv-papers"))
-    parser.add_argument("--query", default="", help="Optional arXiv filter, e.g. cat:cs.AI")
-    args = parser.parse_args()
-    if args.date_from > args.date_to:
-        parser.error("--from must be on or before --to")
-
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+def import_articles(date_from: date, date_to: date, bucket: str, query: str, *, wait_for_lock: bool = False) -> int:
     try:
         with psycopg.connect(
             host=os.getenv("POSTGRES_HOST", "postgres"),
@@ -179,9 +174,12 @@ def main() -> int:
             autocommit=True,
         ) as db, requests.Session() as session:
             # Serialize imports in this database to keep arXiv traffic single-connection.
-            locked, = db.execute("SELECT pg_try_advisory_lock(hashtext('deepsemantic.arxiv-grabber'))").fetchone()
-            if not locked:
-                raise RuntimeError("Another arxiv-grabber import is running")
+            if wait_for_lock:
+                db.execute("SELECT pg_advisory_lock(hashtext('deepsemantic.arxiv-grabber'))")
+            else:
+                locked, = db.execute("SELECT pg_try_advisory_lock(hashtext('deepsemantic.arxiv-grabber'))").fetchone()
+                if not locked:
+                    raise RuntimeError("Another arxiv-grabber import is running")
 
             s3 = boto3.client(
                 "s3",
@@ -191,13 +189,13 @@ def main() -> int:
                 region_name="us-east-1",
                 config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
             )
-            ensure_bucket(s3, args.bucket)
+            ensure_bucket(s3, bucket)
             arxiv = ArxivClient(session)
             succeeded = failed = 0
-            for article in arxiv.articles(args.date_from, args.date_to, args.query):
+            for article in arxiv.articles(date_from, date_to, query):
                 object_key = f"arxiv/{article.arxiv_id}.pdf"
                 try:
-                    downloaded_at = store_pdf(arxiv, s3, args.bucket, article.arxiv_id, object_key)
+                    downloaded_at = store_pdf(arxiv, s3, bucket, article.arxiv_id, object_key)
                 except (requests.RequestException, BotoCoreError, ClientError, OSError, ValueError) as error:
                     logging.error("%s: %s", article.arxiv_id, error)
                     failed += 1
@@ -212,11 +210,11 @@ def main() -> int:
                     ON CONFLICT (arxiv_id, bucket, date_from, date_to)
                     DO UPDATE SET downloaded_at = EXCLUDED.downloaded_at
                     """,
-                    (article.arxiv_id, args.bucket, args.date_from, args.date_to, object_key,
+                    (article.arxiv_id, bucket, date_from, date_to, object_key,
                      article.title, article.authors, article.abstract, article.submitted_at, downloaded_at),
                 )
                 succeeded += 1
-                logging.info("%s -> s3://%s/%s", article.arxiv_id, args.bucket, object_key)
+                logging.info("%s -> s3://%s/%s", article.arxiv_id, bucket, object_key)
 
             logging.info("Articles available in RustFS: %d. Failed: %d", succeeded, failed)
             return int(failed > 0)
@@ -224,6 +222,74 @@ def main() -> int:
             ElementTree.ParseError, KeyError, RuntimeError, ValueError) as error:
         logging.error("%s", error)
         return 1
+
+
+async def run_worker(default_bucket: str) -> None:
+    # A broker reconnect can redeliver work while the original download thread is still running.
+    import_lock = asyncio.Lock()
+
+    async def process(message: aio_pika.IncomingMessage) -> None:
+        job_id = message.message_id or "unknown"
+        try:
+            payload = json.loads(message.body)
+            date_from = date.fromisoformat(payload["date_from"])
+            date_to = date.fromisoformat(payload["date_to"])
+            bucket = payload.get("bucket", default_bucket)
+            query = payload.get("query", "")
+            if date_from > date_to or not isinstance(bucket, str) or not bucket or not isinstance(query, str):
+                raise ValueError("Invalid dates, bucket or query")
+        except (KeyError, TypeError, ValueError) as error:
+            logging.error("Invalid arXiv import %s: %s", job_id, error)
+            await message.reject(requeue=False)
+            return
+
+        async with import_lock:
+            logging.info("Starting arXiv import %s (%s to %s, bucket %s)", job_id, date_from, date_to, bucket)
+            try:
+                result = await asyncio.to_thread(import_articles, date_from, date_to, bucket, query, wait_for_lock=True)
+            except Exception:
+                logging.exception("Unexpected error in arXiv import %s", job_id)
+                result = 1
+
+            if result == 0:
+                logging.info("Completed arXiv import %s", job_id)
+                await message.ack()
+            else:
+                logging.error("Failed arXiv import %s", job_id)
+                await message.reject(requeue=False)
+
+    async with await aio_pika.connect_robust(os.environ["AMQP_URL"], fail_fast=False) as connection:
+        channel = await connection.channel()
+        await channel.set_qos(prefetch_count=1)
+        queue = await channel.declare_queue(ARXIV_QUEUE, durable=True, arguments=ARXIV_QUEUE_ARGUMENTS)
+        await queue.consume(process)
+        logging.info("Consuming %s", ARXIV_QUEUE)
+        await asyncio.Future()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Download arXiv PDFs by submission date (UTC).")
+    parser.add_argument("--worker", action="store_true", help="Consume arXiv import jobs from RabbitMQ")
+    parser.add_argument("--from", dest="date_from", type=date.fromisoformat)
+    parser.add_argument("--to", dest="date_to", type=date.fromisoformat)
+    parser.add_argument("--bucket")
+    parser.add_argument("--query", help="Optional arXiv filter, e.g. cat:cs.AI")
+    args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    default_bucket = os.getenv("RUSTFS_BUCKET", "arxiv-papers")
+    if args.worker:
+        if any(value is not None for value in (args.date_from, args.date_to, args.bucket, args.query)):
+            parser.error("--worker cannot be combined with import options")
+        asyncio.run(run_worker(default_bucket))
+        return 0
+
+    if args.date_from is None or args.date_to is None:
+        parser.error("--from and --to are required for a direct import")
+    if args.date_from > args.date_to:
+        parser.error("--from must be on or before --to")
+    bucket = args.bucket if args.bucket is not None else default_bucket
+    return import_articles(args.date_from, args.date_to, bucket, args.query or "")
 
 
 if __name__ == "__main__":

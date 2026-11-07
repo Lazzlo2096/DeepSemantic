@@ -2,7 +2,7 @@ import asyncio
 import json
 import os
 from contextlib import AsyncExitStack, asynccontextmanager
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated
 from urllib.parse import quote
 from uuid import uuid4
@@ -11,7 +11,7 @@ import aio_pika
 import httpx
 from aio_pika.exceptions import AMQPException
 from fastapi import FastAPI, HTTPException, Path, Query, Request
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator, model_validator
 from sqlalchemy import select, update
 from sqlalchemy.exc import OperationalError, TimeoutError as PoolTimeout
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -20,6 +20,8 @@ from database import Document, create_database_engine
 
 
 QUEUE = "embeddings.requests"
+ARXIV_QUEUE = "arxiv.imports"
+ARXIV_QUEUE_ARGUMENTS = {"x-single-active-consumer": True, "x-consumer-timeout": 86_400_000}
 QDRANT_COLLECTION = "documents_bge_m3"
 MAX_BIGINT = 2**63 - 1
 DocumentId = Annotated[int, Path(ge=1, le=MAX_BIGINT)]
@@ -35,6 +37,25 @@ class EmbeddingResponse(BaseModel):
     revision: str
     dimensions: int
     embeddings: list[list[float]]
+
+
+class ArxivImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    date_from: date
+    date_to: date
+    bucket: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
+    query: str = Field(default="", max_length=2000)
+
+    @model_validator(mode="after")
+    def validate_dates(self):
+        if self.date_from > self.date_to:
+            raise ValueError("date_from must be on or before date_to")
+        return self
+
+
+class ArxivImportAccepted(BaseModel):
+    id: str
 
 
 class DocumentRequest(BaseModel):
@@ -135,6 +156,9 @@ async def lifespan(app: FastAPI):
         rpc = EmbeddingRPC(channel, replies, timeout)
         await replies.consume(rpc.on_reply, no_ack=True)
         app.state.rpc = rpc
+        arxiv_channel = await connection.channel(on_return_raises=True)
+        await arxiv_channel.declare_queue(ARXIV_QUEUE, durable=True, arguments=ARXIV_QUEUE_ARGUMENTS)
+        app.state.arxiv_channel = arxiv_channel
         yield
 
 
@@ -150,6 +174,26 @@ async def health(request: Request):
 @app.post("/embeddings", response_model=EmbeddingResponse)
 async def embeddings(payload: EmbeddingRequest, request: Request):
     return await request.app.state.rpc.embed(payload)
+
+
+@app.post("/arxiv/imports", response_model=ArxivImportAccepted, status_code=202, tags=["arXiv"])
+async def enqueue_arxiv_import(payload: ArxivImportRequest, request: Request):
+    job_id = uuid4().hex
+    try:
+        async with asyncio.timeout(5):
+            await request.app.state.arxiv_channel.default_exchange.publish(
+                aio_pika.Message(
+                    payload.model_dump_json(exclude_none=True).encode(),
+                    content_type="application/json",
+                    delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+                    message_id=job_id,
+                ),
+                routing_key=ARXIV_QUEUE,
+                mandatory=True,
+            )
+    except (AMQPException, OSError, TimeoutError) as error:
+        raise HTTPException(503, "Could not confirm publication of the arXiv import.") from error
+    return ArxivImportAccepted(id=job_id)
 
 
 @asynccontextmanager

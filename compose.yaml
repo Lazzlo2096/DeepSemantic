@@ -123,14 +123,17 @@ services:
 
   arxiv-grabber:
     build: ./arxiv-grabber
-    profiles: ["arxiv"]
+    command: ["--worker"]
+    restart: unless-stopped
     depends_on:
+      rebbit:
+        condition: service_healthy
       migrate:
         condition: service_completed_successfully
       rustfs:
         condition: service_healthy
     environment:
-      <<: [*postgres-environment, *rustfs-environment]
+      <<: [*amqp-environment, *postgres-environment, *rustfs-environment]
       RUSTFS_ENDPOINT: http://rustfs:9000
       RUSTFS_BUCKET: "${RUSTFS_BUCKET:-arxiv-papers}"
 
