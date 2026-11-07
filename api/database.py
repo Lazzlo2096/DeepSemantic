@@ -40,6 +40,7 @@ class ArxivPaper(Base):
     abstract: Mapped[str] = mapped_column(Text)
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     downloaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(Text, server_default="downloaded")
 
 
 @asynccontextmanager

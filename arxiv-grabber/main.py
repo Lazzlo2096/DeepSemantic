@@ -233,6 +233,7 @@ def store_paper_chunks(db, s3, arxiv_id: str, bucket: str, text_key: str) -> int
             """,
             ((text, arxiv_id, index) for index, text in enumerate(chunks)),
         )
+        cursor.execute("SELECT refresh_arxiv_paper_status(%s)", (arxiv_id,))
     return len(chunks)
 
 
@@ -274,19 +275,12 @@ def import_articles(date_from: date, date_to: date, bucket: str, query: str, *, 
                     failed += 1
                     continue
 
-                text_object_key = None
-                try:
-                    text_object_key = store_extracted_text(s3, bucket, object_key, pdf["ETag"])
-                except (BotoCoreError, ClientError, OSError, PyPdfError, ValueError) as error:
-                    logging.error("Could not extract text for %s: %s", article.arxiv_id, error)
-                    text_failed += 1
-
                 catalog = db.execute(
                     """
                     INSERT INTO arxiv_papers AS paper
                         (arxiv_id, bucket, object_key, title, authors, abstract,
-                         submitted_at, downloaded_at, text_object_key)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         submitted_at, downloaded_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (arxiv_id)
                     DO UPDATE SET bucket = EXCLUDED.bucket,
                                   object_key = EXCLUDED.object_key,
@@ -295,7 +289,16 @@ def import_articles(date_from: date, date_to: date, bucket: str, query: str, *, 
                                   abstract = EXCLUDED.abstract,
                                   submitted_at = EXCLUDED.submitted_at,
                                   downloaded_at = EXCLUDED.downloaded_at,
-                                  text_object_key = EXCLUDED.text_object_key
+                                  text_object_key = CASE
+                                      WHEN (paper.bucket, paper.object_key, paper.downloaded_at) =
+                                           (EXCLUDED.bucket, EXCLUDED.object_key, EXCLUDED.downloaded_at)
+                                      THEN paper.text_object_key
+                                  END,
+                                  status = CASE
+                                      WHEN (paper.bucket, paper.object_key, paper.downloaded_at) =
+                                           (EXCLUDED.bucket, EXCLUDED.object_key, EXCLUDED.downloaded_at)
+                                      THEN paper.status ELSE 'downloaded'
+                                  END
                     WHERE paper.bucket = EXCLUDED.bucket
                        OR EXCLUDED.downloaded_at > paper.downloaded_at
                        OR (EXCLUDED.downloaded_at = paper.downloaded_at
@@ -303,12 +306,27 @@ def import_articles(date_from: date, date_to: date, bucket: str, query: str, *, 
                     RETURNING bucket, text_object_key
                     """,
                     (article.arxiv_id, bucket, object_key, article.title, article.authors,
-                     article.abstract, article.submitted_at, pdf["LastModified"], text_object_key),
+                     article.abstract, article.submitted_at, pdf["LastModified"]),
                 ).fetchone()
                 succeeded += 1
                 logging.info("%s -> s3://%s/%s", article.arxiv_id, bucket, object_key)
 
-                if catalog is None:
+                text_object_key = None
+                try:
+                    text_object_key = store_extracted_text(s3, bucket, object_key, pdf["ETag"])
+                except (BotoCoreError, ClientError, OSError, PyPdfError, ValueError) as error:
+                    logging.error("Could not extract text for %s: %s", article.arxiv_id, error)
+                    text_failed += 1
+
+                if catalog is not None:
+                    with db.transaction():
+                        db.execute(
+                            "UPDATE arxiv_papers SET text_object_key = %s WHERE arxiv_id = %s",
+                            (text_object_key, article.arxiv_id),
+                        )
+                        db.execute("SELECT refresh_arxiv_paper_status(%s)", (article.arxiv_id,))
+                    catalog = bucket, text_object_key
+                else:
                     catalog = db.execute(
                         "SELECT bucket, text_object_key FROM arxiv_papers WHERE arxiv_id = %s",
                         (article.arxiv_id,),

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, ConfigDict
@@ -24,6 +24,7 @@ class PaperResponse(BaseModel):
     abstract: str
     submitted_at: datetime
     downloaded_at: datetime
+    status: Literal["downloaded", "texted", "chunked", "embeddinged"]
 
 
 @router.get("", response_model=list[PaperResponse])

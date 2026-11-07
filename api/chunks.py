@@ -5,7 +5,7 @@ from urllib.parse import quote
 import httpx
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 
 from database import MAX_BIGINT, Chunk, database_session
 from embedding_schemas import EmbeddingRequest
@@ -130,6 +130,10 @@ async def embed_chunk(request: Request, chunk_id: ChunkId):
         )
         if updated_id is None:
             raise HTTPException(404, "Chunk not found.")
+        await session.execute(
+            text("SELECT refresh_arxiv_paper_status(arxiv_id) FROM paper_chunks WHERE chunk_id = :chunk_id"),
+            {"chunk_id": chunk_id},
+        )
     return result["embeddings"][0]
 
 
