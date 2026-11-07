@@ -20,7 +20,6 @@ from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from pypdf import PdfReader
 from pypdf.errors import PyPdfError
-from psycopg.types.json import Jsonb
 
 
 ARXIV_API = "https://export.arxiv.org/api/query"
@@ -409,8 +408,7 @@ def import_articles(
                 if job is None or (not force and time.monotonic() < next_progress):
                     return
                 updated = update_running_import(
-                    db, job, "result = %(result)s, last_error = %(error)s",
-                    result=Jsonb(result.counters()), error=result.last_error,
+                    db, job, "last_error = %(error)s", error=result.last_error,
                 )
                 if not updated:
                     raise RuntimeError(f"Lost lease for arXiv import {job.id.hex} attempt {job.attempts}")
@@ -539,7 +537,7 @@ def claim_import(db) -> ImportJob | None:
         UPDATE arxiv_imports AS job
         SET status = 'running', attempts = candidate.attempts + 1,
             started_at = COALESCE(candidate.started_at, now()), lease_until = now() + %s,
-            result = NULL, last_error = NULL
+            last_error = NULL
         FROM candidate
         WHERE job.id = candidate.id
         RETURNING job.id, job.date_from, job.date_to, job.bucket, job.query, job.attempts,
@@ -564,9 +562,9 @@ def finish_import(db, job: ImportJob, result: ImportResult) -> None:
         status = %(status)s, lease_until = NULL,
         available_at = CASE WHEN %(status)s = 'queued' THEN now() + %(delay)s ELSE previous.available_at END,
         finished_at = CASE WHEN %(status)s <> 'queued' THEN now() END,
-        result = %(result)s, last_error = %(error)s
+        last_error = %(error)s
         """,
-        status=status, delay=JOB_RETRY_DELAY, result=Jsonb(result.counters()), error=result.last_error,
+        status=status, delay=JOB_RETRY_DELAY, error=result.last_error,
     )
     if updated:
         log_import_event("arxiv_import.attempt_finished", job, attempt=job.attempts,

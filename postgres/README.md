@@ -26,7 +26,7 @@ docker compose exec postgres sh -c 'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_
 
 ## Счётчики задания импорта arXiv
 
-`arxiv_import_result` принимает ID задания из `POST /arxiv/imports` и сопоставляет `candidate_arxiv_ids` с `arxiv_papers` по ID версии статьи и бакету задания. Функция возвращает одну строку с шестью колонками типа `bigint`.
+`arxiv_import_result` принимает ID задания из `POST /arxiv/imports` и сопоставляет `candidate_arxiv_ids` с `arxiv_papers` по ID версии статьи и бакету задания. Функция возвращает одну строку с шестью колонками типа `bigint`. API использует эту строку для поля `result` в `GET /arxiv/imports`.
 
 ```sql
 SELECT * FROM arxiv_import_result('6f9619ff8b86d011b42d00c04fc964ff'::uuid);
@@ -43,7 +43,7 @@ SELECT * FROM arxiv_import_result('6f9619ff8b86d011b42d00c04fc964ff'::uuid);
 
 ## Счётчики каталога arXiv
 
-`arxiv_catalog_result` возвращает JSONB в формате `arxiv_imports.result` с полем `pdf_available`. Функция считает записи в `arxiv_papers` по бакету и датам первой подачи в UTC, включая обе даты:
+`arxiv_catalog_result` возвращает JSONB с полем `pdf_available`. Функция считает записи в `arxiv_papers` по бакету и датам первой подачи в UTC, включая обе даты:
 
 ```sql
 SELECT arxiv_catalog_result(DATE '2026-11-02', DATE '2026-11-03', 'arxiv-papers');

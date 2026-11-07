@@ -191,11 +191,16 @@ async def list_arxiv_imports(
     async with database_session(request) as session:
         rows = await session.execute(
             text("""
-                SELECT id, date_from, date_to, bucket, query, status, attempts, created_at,
-                       available_at, started_at, finished_at, result, last_error
-                FROM arxiv_imports
-                ORDER BY created_at DESC, id DESC
-                LIMIT :limit OFFSET :offset
+                SELECT job.*, to_jsonb(counters) AS result
+                FROM (
+                    SELECT id, date_from, date_to, bucket, query, status, attempts, created_at,
+                           available_at, started_at, finished_at, last_error
+                    FROM arxiv_imports
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT :limit OFFSET :offset
+                ) AS job
+                LEFT JOIN LATERAL arxiv_import_result(job.id) AS counters ON true
+                ORDER BY job.created_at DESC, job.id DESC
             """),
             {"limit": limit, "offset": offset},
         )
