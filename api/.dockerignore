@@ -2,4 +2,6 @@
 !Dockerfile
 !main.py
 !database.py
+!chunks.py
+!embedding_schemas.py
 !requirements.txt
