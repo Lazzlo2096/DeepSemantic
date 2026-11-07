@@ -107,7 +107,6 @@ form.addEventListener("submit", async (event) => {
     dateTo.reportValidity();
     return;
   }
-  if (!payload.bucket) delete payload.bucket;
   payload.query = payload.query.trim();
 
   submit.disabled = true;
