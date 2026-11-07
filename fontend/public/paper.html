@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Статья arXiv · DeepSemantic</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script type="module" src="/paper.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="shell brand">
+        <span class="brand-mark" aria-hidden="true">DS</span>
+        <span>DeepSemantic</span>
+      </div>
+    </header>
+
+    <main class="shell">
+      <a id="catalog-back" class="catalog-back" href="/">← Вернуться к каталогу</a>
+      <header class="intro">
+        <p class="eyebrow" id="paper-id">Статья arXiv</p>
+        <h1 id="paper-title">Статья</h1>
+        <p id="paper-authors" hidden></p>
+        <a id="paper-arxiv" class="paper-arxiv" target="_blank" rel="noopener"
+           aria-label="Оригинал на arXiv, новая вкладка" hidden>Оригинал на arXiv ↗</a>
+      </header>
+
+      <section aria-labelledby="chunks-title">
+        <div class="results-bar">
+          <h2 id="chunks-title">Чанки статьи</h2>
+          <p id="status" role="status">Загружаем статью…</p>
+        </div>
+        <div id="paper-chunks" class="paper-list"></div>
+      </section>
+      <noscript><p>Для загрузки статьи включи JavaScript.</p></noscript>
+    </main>
+
+    <template id="chunk-template">
+      <article class="paper">
+        <h3 class="chunk-heading"></h3>
+        <p class="chunk-text"></p>
+      </article>
+    </template>
+  </body>
+</html>

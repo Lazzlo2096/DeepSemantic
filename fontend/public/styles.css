@@ -87,6 +87,10 @@ h2 { margin: 0; font-size: 1.25rem; scroll-margin-top: 20px; }
 h3 { margin: 9px 0 5px; font-size: 1.08rem; line-height: 1.4; overflow-wrap: anywhere; }
 .paper-title { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .paper-title:hover { color: var(--accent); }
+.paper-arxiv { margin-inline-start: 6px; color: var(--accent); font-size: 0.85rem; white-space: nowrap; }
+#paper-title { font-size: clamp(1.6rem, 5vw, 2.6rem); overflow-wrap: anywhere; }
+.catalog-back { display: inline-block; margin-bottom: 14px; color: var(--accent); }
+.chunk-text { margin: 8px 0 0; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .paper-authors { margin: 0 0 12px; color: var(--muted); font-size: 0.9rem; line-height: 1.5; }
 summary { width: fit-content; cursor: pointer; color: var(--accent); font-size: 0.9rem; font-weight: 600; }
 .paper-abstract { max-width: 76ch; margin: 10px 0 0; color: #334258; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }

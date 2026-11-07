@@ -3,7 +3,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import case, func, select, true
+from sqlalchemy import case, func, select, text, true
 from sqlalchemy.orm import aliased
 
 from database import MAX_BIGINT, ArxivPaper, database_session
@@ -28,6 +28,12 @@ class PaperResponse(BaseModel):
     submitted_at: datetime
     downloaded_at: datetime
     status: PaperStatus
+
+
+class PaperChunkResponse(BaseModel):
+    chunk_id: int
+    chunk_index: int
+    text: str
 
 
 def paper_order(paper, sort: PaperSort):
@@ -87,6 +93,25 @@ async def list_papers(
         rows = (await session.execute(statement)).all()
         response.headers["X-Total-Count"] = str(rows[0].total_count)
         return [paper for paper, _ in rows if paper is not None]
+
+
+@router.get("/{arxiv_id:path}/chunks", response_model=list[PaperChunkResponse])
+async def list_paper_chunks(request: Request, arxiv_id: ArxivId):
+    async with database_session(request) as session:
+        rows = (await session.execute(
+            text("""
+                SELECT chunk.id AS chunk_id, link.chunk_index, chunk.text
+                FROM arxiv_papers AS paper
+                LEFT JOIN paper_chunks AS link ON link.arxiv_id = paper.arxiv_id
+                LEFT JOIN chunks AS chunk ON chunk.id = link.chunk_id
+                WHERE paper.arxiv_id = :arxiv_id
+                ORDER BY link.chunk_index
+            """),
+            {"arxiv_id": arxiv_id},
+        )).mappings().all()
+    if not rows:
+        raise HTTPException(404, "Paper not found.")
+    return [row for row in rows if row["chunk_id"] is not None]
 
 
 @router.get("/{arxiv_id:path}", response_model=PaperResponse)

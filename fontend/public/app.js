@@ -1,3 +1,5 @@
+import { arxivUrl } from "./arxiv.js";
+
 const PAGE_SIZE = 12;
 const stageLabels = new Map([
   ["downloaded", "PDF скачан"],
@@ -42,9 +44,11 @@ for (const [value, label] of stageLabels) {
   statusFilter.add(new Option(label, value));
 }
 
-function arxivUrl(arxivId) {
-  const path = arxivId.split("/").map(encodeURIComponent).join("/");
-  return `https://arxiv.org/abs/${path}`;
+function linkPaper(card, arxivId) {
+  card.querySelector(".paper-title").href = `/paper.html?${new URLSearchParams({ id: arxivId })}`;
+  const original = card.querySelector(".paper-arxiv");
+  original.href = arxivUrl(arxivId);
+  original.hidden = false;
 }
 
 function renderPaper(paper) {
@@ -54,7 +58,7 @@ function renderPaper(paper) {
   const stage = card.querySelector(".paper-stage");
 
   title.textContent = paper.title || paper.arxiv_id;
-  title.href = arxivUrl(paper.arxiv_id);
+  linkPaper(card, paper.arxiv_id);
   card.querySelector(".paper-id").textContent = `arXiv:${paper.arxiv_id}`;
   date.dateTime = paper.submitted_at;
   date.textContent = dateFormat.format(new Date(paper.submitted_at));
@@ -212,7 +216,7 @@ function renderSearchResult(chunk) {
   const title = card.querySelector(".search-paper");
   title.textContent = chunk.paper_title || chunk.arxiv_id || "Фрагмент без статьи";
   if (chunk.arxiv_id) {
-    title.href = arxivUrl(chunk.arxiv_id);
+    linkPaper(card, chunk.arxiv_id);
   }
   card.querySelector(".search-fragment").textContent = `Чанк №${chunk.chunk_id}`;
   card.querySelector(".search-score").textContent = `Сходство ${scoreFormat.format(chunk.score)}`;

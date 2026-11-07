@@ -20,7 +20,7 @@
       <section class="intro" aria-labelledby="page-title">
         <p class="eyebrow">Каталог публикаций</p>
         <h1 id="page-title">Статьи arXiv</h1>
-        <p>Публикации, загруженные в DeepSemantic. Открой аннотацию или перейди к оригиналу на arXiv.</p>
+        <p>Публикации, загруженные в DeepSemantic. Открой статью, чтобы прочитать её чанки.</p>
         <form id="search-form" class="search-form" role="search">
           <label for="search-query">Поиск по смыслу</label>
           <div class="search-controls">
@@ -94,7 +94,10 @@
           <time class="paper-date" title="Дата подачи в UTC"></time>
           <span class="paper-stage"></span>
         </div>
-        <h3><a class="paper-title"></a></h3>
+        <h3>
+          <a class="paper-title"></a>
+          <a class="paper-arxiv" target="_blank" rel="noopener" aria-label="Оригинал на arXiv, новая вкладка" hidden>arXiv ↗</a>
+        </h3>
         <p class="paper-authors"></p>
         <details>
           <summary>Аннотация</summary>
@@ -109,7 +112,10 @@
           <span class="search-fragment"></span>
           <span class="paper-stage search-score"></span>
         </div>
-        <h3><a class="paper-title search-paper"></a></h3>
+        <h3>
+          <a class="paper-title search-paper"></a>
+          <a class="paper-arxiv" target="_blank" rel="noopener" aria-label="Оригинал на arXiv, новая вкладка" hidden>arXiv ↗</a>
+        </h3>
         <p class="search-excerpt"></p>
       </article>
     </template>

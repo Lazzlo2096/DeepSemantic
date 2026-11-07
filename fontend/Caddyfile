@@ -1,5 +1,5 @@
 :80 {
-	@catalog_api path /api/papers /api/chunks/search
+	@catalog_api path /api/papers /api/papers/* /api/chunks/search
 	handle @catalog_api {
 		uri strip_prefix /api
 		reverse_proxy api:8000
