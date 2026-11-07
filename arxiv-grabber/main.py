@@ -249,7 +249,13 @@ def store_extracted_text(s3, bucket: str, pdf_key: str, pdf_etag: str) -> str:
         for page in PdfReader(pdf).pages:
             page_text = page.extract_text().strip()
             if page_text:
-                text.write(page_text.encode("utf-8") + b"\n\n")
+                try:
+                    encoded_page = page_text.encode("utf-8")
+                except UnicodeEncodeError:
+                    # Recover valid surrogate pairs and replace isolated surrogates with U+FFFD.
+                    page_text = page_text.encode("utf-16-le", "surrogatepass").decode("utf-16-le", "replace")
+                    encoded_page = page_text.encode("utf-8")
+                text.write(encoded_page + b"\n\n")
         if not text.tell():
             raise ValueError("PDF has no extractable text")
         text.seek(0)
