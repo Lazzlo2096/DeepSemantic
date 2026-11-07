@@ -1,0 +1,21 @@
+x-host-ollama: &host-ollama "http://host.docker.internal:11434"
+
+services:
+  ollama:
+    profiles: [container-inference]
+
+  ollama-init:
+    depends_on: !reset {}
+    environment:
+      OLLAMA_HOST: *host-ollama
+
+  paper-summarizer:
+    environment:
+      OLLAMA_URL: *host-ollama
+
+  embeding-service:
+    profiles: [container-inference]
+
+  paper-indexer:
+    depends_on:
+      embeding-service: !reset null

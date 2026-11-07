@@ -1,6 +1,7 @@
 # Ollama и Gemma 3
 
 Ollama запускается вместе с проектом через `just up`. Для NVIDIA GPU используйте `just up-gpu`.
+Для AMD Radeon на Windows используйте [режим с Ollama и BGE-M3 на хосте](../embeding-service/README.md#запуск-на-amd-radeon-в-windows).
 Чтобы запустить только Ollama и загрузку модели, выполните следующие команды из корня проекта.
 
 ```powershell

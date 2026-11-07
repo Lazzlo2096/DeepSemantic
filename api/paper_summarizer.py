@@ -297,7 +297,8 @@ async def main() -> None:
         region_name="us-east-1",
         config=Config(signature_version="s3v4", s3={"addressing_style": "path"}, connect_timeout=5, read_timeout=30),
     )
-    async with httpx.AsyncClient(base_url="http://ollama:11434", timeout=httpx.Timeout(300, connect=5)) as client:
+    ollama_url = os.getenv("OLLAMA_URL", "http://ollama:11434")
+    async with httpx.AsyncClient(base_url=ollama_url, timeout=httpx.Timeout(300, connect=5)) as client:
         summarizer = Summarizer(client, tokenizer, model, context_tokens)
         logging.info("Polling PostgreSQL for paper summaries (%s, %s context tokens)", model, context_tokens)
         while True:
