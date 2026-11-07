@@ -1,4 +1,10 @@
 const PAGE_SIZE = 12;
+const stageLabels = new Map([
+  ["downloaded", "PDF скачан"],
+  ["texted", "Текст извлечён"],
+  ["chunked", "Чанки готовы"],
+  ["embeddinged", "Эмбеддинги готовы"],
+]);
 const dateFormat = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeZone: "UTC" });
 const list = document.querySelector("#papers");
 const status = document.querySelector("#status");
@@ -18,6 +24,7 @@ function renderPaper(paper) {
   const card = template.content.cloneNode(true);
   const title = card.querySelector(".paper-title");
   const date = card.querySelector(".paper-date");
+  const stage = card.querySelector(".paper-stage");
   const idPath = paper.arxiv_id.split("/").map(encodeURIComponent).join("/");
 
   title.textContent = paper.title || paper.arxiv_id;
@@ -25,6 +32,8 @@ function renderPaper(paper) {
   card.querySelector(".paper-id").textContent = `arXiv:${paper.arxiv_id}`;
   date.dateTime = paper.submitted_at;
   date.textContent = dateFormat.format(new Date(paper.submitted_at));
+  stage.dataset.stage = paper.status ?? "";
+  stage.textContent = stageLabels.get(paper.status) ?? "Статус неизвестен";
   card.querySelector(".paper-authors").textContent = paper.authors.join(", ");
   card.querySelector(".paper-abstract").textContent = paper.abstract || "Аннотация отсутствует.";
   return card;
