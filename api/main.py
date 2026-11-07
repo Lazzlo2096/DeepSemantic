@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from chunks import router as chunks_router
 from database import MAX_BIGINT, create_database_engine, database_session
 from embedding_schemas import EmbeddingRequest, EmbeddingResponse
+from paper_summaries import router as paper_summaries_router
 from papers import router as papers_router
 
 
@@ -142,6 +143,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="BGE-M3 Embedding Service", lifespan=lifespan)
 app.include_router(chunks_router)
+app.include_router(paper_summaries_router)
 app.include_router(papers_router)
 
 

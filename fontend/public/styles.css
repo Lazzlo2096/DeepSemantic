@@ -92,6 +92,10 @@ h3 { margin: 9px 0 5px; font-size: 1.08rem; line-height: 1.4; overflow-wrap: any
 #paper-title { font-size: clamp(1.6rem, 5vw, 2.6rem); overflow-wrap: anywhere; }
 .catalog-back { display: inline-block; margin-bottom: 14px; color: var(--accent); }
 .chunk-text { margin: 8px 0 0; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+#paper-summary { margin-bottom: 24px; overflow-wrap: anywhere; }
+#summary-status { margin: 0; color: var(--muted); font-size: 0.9rem; }
+#summary-result { line-height: 1.6; }
+#summary-result h3 + :is(p, ul) { margin-top: 4px; }
 .paper-authors { margin: 0 0 12px; color: var(--muted); font-size: 0.9rem; line-height: 1.5; }
 summary { width: fit-content; cursor: pointer; color: var(--accent); font-size: 0.9rem; font-weight: 600; }
 .paper-abstract { max-width: 76ch; margin: 10px 0 0; color: #334258; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }

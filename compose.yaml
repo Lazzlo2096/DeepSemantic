@@ -63,6 +63,24 @@ services:
         condition: service_started
     environment: *embedding-client-environment
 
+  paper-summarizer:
+    build:
+      context: ./api
+      target: summarizer
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      ollama-init:
+        condition: service_completed_successfully
+      rustfs:
+        condition: service_healthy
+    environment:
+      <<: [*postgres-environment, *rustfs-environment]
+      RUSTFS_ENDPOINT: http://rustfs:9000
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-gemma3:4b}"
+      SUMMARY_CONTEXT_TOKENS: "${SUMMARY_CONTEXT_TOKENS:-4096}"
+
   embeding-service:
     build: ./embeding-service
     depends_on:

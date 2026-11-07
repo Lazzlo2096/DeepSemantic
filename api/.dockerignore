@@ -6,4 +6,6 @@
 !papers.py
 !embedding_schemas.py
 !paper_embeddings.py
+!paper_summaries.py
+!paper_summarizer.py
 !requirements.txt

@@ -25,6 +25,25 @@
            aria-label="Оригинал на arXiv, новая вкладка" hidden>Оригинал на arXiv ↗</a>
       </header>
 
+      <section id="paper-summary" class="paper" aria-labelledby="summary-title" hidden>
+        <div class="results-bar">
+          <h2 id="summary-title">Суммаризация</h2>
+          <button id="summarize" type="button" disabled>Суммаризировать</button>
+        </div>
+        <p id="summary-status" role="status">Проверяем статус…</p>
+        <div id="summary-result" hidden>
+          <p data-summary="overview"></p>
+          <h3>Задача</h3>
+          <p data-summary="objective"></p>
+          <h3>Метод</h3>
+          <p data-summary="method"></p>
+          <h3>Ключевые результаты</h3>
+          <ul data-summary="results"></ul>
+          <h3>Ограничения</h3>
+          <ul data-summary="limitations"></ul>
+        </div>
+      </section>
+
       <section aria-labelledby="chunks-title">
         <div class="results-bar">
           <h2 id="chunks-title">Чанки статьи</h2>
