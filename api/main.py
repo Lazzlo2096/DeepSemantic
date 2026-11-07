@@ -16,7 +16,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import OperationalError, TimeoutError as PoolTimeout
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from database import Document, create_database_engine
+from database import Chunk, create_database_engine
 
 
 QUEUE = "embeddings.requests"
@@ -208,14 +208,14 @@ async def document_session(request: Request):
 @app.post("/documents", response_model=DocumentResponse, status_code=201)
 async def create_document(payload: DocumentRequest, request: Request):
     async with document_session(request) as session:
-        document = Document(text=payload.text)
+        document = Chunk(text=payload.text)
         session.add(document)
     return document
 
 
 async def read_document(request: Request, document_id: int):
     async with document_session(request) as session:
-        document = await session.get(Document, document_id)
+        document = await session.get(Chunk, document_id)
     if document is None:
         raise HTTPException(404, "Document not found.")
     return document
@@ -288,10 +288,10 @@ async def embed_document(request: Request, document_id: DocumentId):
     await upsert_document_embedding(request.app.state.qdrant, document_id, result)
     async with document_session(request) as session:
         updated_id = await session.scalar(
-            update(Document)
-            .where(Document.id == document_id)
+            update(Chunk)
+            .where(Chunk.id == document_id)
             .values(qdrant_collection=QDRANT_COLLECTION, qdrant_point_id=document_id)
-            .returning(Document.id)
+            .returning(Chunk.id)
         )
         if updated_id is None:
             raise HTTPException(404, "Document not found.")
@@ -306,6 +306,6 @@ async def get_documents(
 ):
     async with document_session(request) as session:
         result = await session.scalars(
-            select(Document).order_by(Document.id).limit(limit).offset(offset)
+            select(Chunk).order_by(Chunk.id).limit(limit).offset(offset)
         )
         return result.all()

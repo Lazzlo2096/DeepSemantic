@@ -11,8 +11,8 @@ class Base(DeclarativeBase):
     pass
 
 
-class Document(Base):
-    __tablename__ = "documents"
+class Chunk(Base):
+    __tablename__ = "chunks"
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     text: Mapped[str] = mapped_column(Text)

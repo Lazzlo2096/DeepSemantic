@@ -24,11 +24,13 @@ docker compose exec postgres sh -c 'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_
 
 Проверить текущую ревизию можно командой `docker compose run --rm migrate current`.
 
-## Документы
+## Чанки
 
-В таблице `documents` хранятся `id`, исходный `text` и время создания `created_at`.
+В таблице `chunks` хранятся `id`, текст чанка `text` и время создания `created_at`. Миграция переименовывает `documents` с сохранением строк и их ID. Маршруты `/documents` работают с таблицей `chunks`.
 
 Поля `qdrant_collection` (`text`) и `qdrant_point_id` (`bigint`) предназначены для ссылки на точку в Qdrant. Пока ссылка не записана, оба поля имеют значение `NULL`.
+
+Таблица `paper_chunks` связывает `chunk_id` с `chunks.id`, а пару `(arxiv_id, bucket)` с записью в `arxiv_downloads`. `chunk_index` начинается с нуля и уникален внутри одной версии статьи в одном бакете. Для чтения чанков по порядку используется `ORDER BY chunk_index`.
 
 В [Swagger UI](http://127.0.0.1:8000/docs) отправьте `POST /documents` с телом `{"text":"Текст для индексации"}`. Успешный запрос возвращает `201 Created` с полями `id` и `created_at`. Пустой или пробельный текст возвращает `422`. Построение эмбеддинга выполняется отдельным вызовом.
 
