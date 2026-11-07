@@ -351,8 +351,8 @@ def save_paper(db, article: Article, bucket: str, object_key: str, downloaded_at
             """
             INSERT INTO arxiv_papers AS paper
                 (arxiv_id, bucket, object_key, title, authors, abstract,
-                 submitted_at, downloaded_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                 submitted_at, downloaded_at, arxiv_import_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (arxiv_id)
             DO UPDATE SET bucket = EXCLUDED.bucket,
                           object_key = EXCLUDED.object_key,
@@ -361,6 +361,11 @@ def save_paper(db, article: Article, bucket: str, object_key: str, downloaded_at
                           abstract = EXCLUDED.abstract,
                           submitted_at = EXCLUDED.submitted_at,
                           downloaded_at = EXCLUDED.downloaded_at,
+                          arxiv_import_id = CASE
+                              WHEN (paper.bucket, paper.object_key, paper.downloaded_at) =
+                                   (EXCLUDED.bucket, EXCLUDED.object_key, EXCLUDED.downloaded_at)
+                              THEN paper.arxiv_import_id ELSE EXCLUDED.arxiv_import_id
+                          END,
                           text_object_key = CASE
                               WHEN (paper.bucket, paper.object_key, paper.downloaded_at) =
                                    (EXCLUDED.bucket, EXCLUDED.object_key, EXCLUDED.downloaded_at)
@@ -378,7 +383,7 @@ def save_paper(db, article: Article, bucket: str, object_key: str, downloaded_at
             RETURNING bucket, text_object_key, status
             """,
             (article.arxiv_id, bucket, object_key, article.title, article.authors,
-             article.abstract, article.submitted_at, downloaded_at),
+             article.abstract, article.submitted_at, downloaded_at, job.id if job is not None else None),
         ).fetchone()
     if catalog is None:
         return None

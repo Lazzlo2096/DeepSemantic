@@ -49,10 +49,12 @@ PDF сохраняются под ключом `arxiv/<arxiv_id>.pdf`, где `a
 Откройте **DeepSemantic PostgreSQL → Databases → deepsemantic → Schemas → public → Tables → arxiv_papers**. Если pgAdmin уже открыт, обновите узел **Tables**. [pgAdmin](http://127.0.0.1:5050)
 
 ```sql
-SELECT arxiv_id, title, submitted_at, bucket, object_key, text_object_key, downloaded_at
+SELECT arxiv_id, arxiv_import_id, title, submitted_at, bucket, object_key, text_object_key, downloaded_at
 FROM public.arxiv_papers
 ORDER BY downloaded_at DESC, arxiv_id;
 ```
+
+`arxiv_import_id` ссылается на задание, при котором текущая копия PDF попала в каталог. Повторное использование той же копии сохраняет эту связь. Для старых записей и копий, добавленных через CLI, поле равно `NULL`.
 
 Строка появляется после подтверждения, что PDF есть в RustFS. `arxiv_id` включает версию статьи и является первичным ключом. `submitted_at` — дата и время первой подачи, `downloaded_at` — время загрузки объекта в бакет по данным RustFS. `text_object_key` указывает на текстовый файл в `bucket` и заполняется после его сохранения. При импорте той же версии в другой бакет каталог указывает на копию с более свежим `downloaded_at`. При равенстве времени выбирается бакет, который идёт первым по имени.
 
