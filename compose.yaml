@@ -10,6 +10,11 @@ x-rustfs-environment: &rustfs-environment
   RUSTFS_ACCESS_KEY: "${RUSTFS_ACCESS_KEY:-deepsemantic}"
   RUSTFS_SECRET_KEY: "${RUSTFS_SECRET_KEY:-deepsemantic-local}"
 
+x-embedding-client-environment: &embedding-client-environment
+  <<: [*amqp-environment, *postgres-environment]
+  EMBEDDING_RPC_TIMEOUT: "${EMBEDDING_RPC_TIMEOUT:-60}"
+  QDRANT_URL: "${QDRANT_URL:-http://qdrant:6333}"
+
 services:
   fontend:
     image: caddy:2-alpine
@@ -33,16 +38,28 @@ services:
         condition: service_started
     ports:
       - "127.0.0.1:${EMBEDDING_PORT:-8000}:8000"
-    environment:
-      <<: [*amqp-environment, *postgres-environment]
-      EMBEDDING_RPC_TIMEOUT: "${EMBEDDING_RPC_TIMEOUT:-60}"
-      QDRANT_URL: "${QDRANT_URL:-http://qdrant:6333}"
+    environment: *embedding-client-environment
     healthcheck:
       test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=4).close()"]
       interval: 10s
       timeout: 5s
       start_period: 10m
       retries: 3
+
+  paper-indexer:
+    build: ./api
+    command: ["python", "-m", "paper_embeddings", "--watch"]
+    restart: unless-stopped
+    depends_on:
+      rebbit:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      qdrant:
+        condition: service_started
+      embeding-service:
+        condition: service_started
+    environment: *embedding-client-environment
 
   embeding-service:
     build: ./embeding-service

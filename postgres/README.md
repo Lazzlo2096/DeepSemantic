@@ -39,7 +39,9 @@ docker compose exec postgres sh -c 'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_
 - `GET /chunks/{chunk_id}/embedding` возвращает сохранённый в Qdrant эмбеддинг как JSON-массив. Если чанк или его точка отсутствует, API возвращает `404`.
 - `POST /chunks/{chunk_id}/embedding` читает текст из PostgreSQL, строит эмбеддинг и записывает его в коллекцию `documents_bge_m3` с ID чанка в качестве ID точки. После подтверждения записи в Qdrant сервис заполняет `qdrant_collection` и `qdrant_point_id` в PostgreSQL и возвращает JSON-массив из 1024 чисел. Повторный запрос обновляет ту же точку. Для отсутствующего чанка возвращается `404`, при превышении лимитов модели — `422`.
 
-Для пакетной индексации всех статей со статусом `chunked` запусти из корня проекта:
+При `just up` сервис `paper-indexer` автоматически индексирует статьи со статусом `chunked`. После каждого прохода он ждёт 15 секунд и проверяет, появились ли новые чанки. Прогресс виден в `docker compose logs -f paper-indexer`.
+
+Для разового прохода при остановленном `paper-indexer` можно запустить из корня проекта:
 
 ```sh
 docker compose run --rm --no-deps api python -m paper_embeddings

@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import logging
 
@@ -11,6 +12,7 @@ from main import app, lifespan
 
 
 BATCH_SIZE = 8
+POLL_INTERVAL_SECONDS = 15
 INDEX_LOCK = text("SELECT pg_try_advisory_lock(hashtext('deepsemantic.paper-embeddings'))")
 INDEX_UNLOCK = text("SELECT pg_advisory_unlock(hashtext('deepsemantic.paper-embeddings'))")
 PENDING_CHUNKS = text("""
@@ -82,15 +84,26 @@ async def index_chunked_papers(state) -> int:
             await lock_connection.execute(INDEX_UNLOCK)
 
 
-async def main() -> int:
+async def main(watch: bool = False) -> int:
     async with lifespan(app):
-        return await index_chunked_papers(app.state)
+        if not watch:
+            return await index_chunked_papers(app.state)
+
+        while True:
+            try:
+                await index_chunked_papers(app.state)
+            except (HTTPException, RuntimeError) as error:
+                logging.warning("Paper indexing will retry in %d seconds: %s", POLL_INTERVAL_SECONDS, error)
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Index chunks of arXiv papers.")
+    parser.add_argument("--watch", action="store_true", help="Keep checking for newly chunked papers")
+    args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
-        raise SystemExit(asyncio.run(main()))
+        raise SystemExit(asyncio.run(main(args.watch)))
     except (HTTPException, RuntimeError) as error:
         logging.error("Paper indexing stopped: %s", error)
         raise SystemExit(1) from error
