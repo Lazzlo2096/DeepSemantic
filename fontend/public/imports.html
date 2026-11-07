@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Импорт arXiv · DeepSemantic</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script type="module" src="/imports.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="shell brand">
+        <span class="brand-mark" aria-hidden="true">DS</span>
+        <span>DeepSemantic</span>
+        <a class="topbar-link" href="/">Каталог статей</a>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow">Загрузка публикаций</p>
+        <h1 id="page-title">Импорт arXiv</h1>
+        <p>Выбери диапазон дат подачи статей. Обе даты включаются целиком по UTC.</p>
+        <form id="import-form">
+          <div class="filter-fields">
+            <label>
+              Дата с
+              <input type="date" name="date_from" required min="0001-01-01" max="9999-12-31">
+            </label>
+            <label>
+              Дата по
+              <input type="date" name="date_to" required min="0001-01-01" max="9999-12-31">
+            </label>
+            <label>
+              Фильтр arXiv
+              <input name="query" maxlength="2000" placeholder="Например, cat:cs.AI">
+            </label>
+            <label>
+              Бакет RustFS
+              <input name="bucket" maxlength="63" pattern="[a-z0-9][a-z0-9.\-]{1,61}[a-z0-9]" placeholder="По умолчанию">
+            </label>
+          </div>
+          <div class="filter-actions">
+            <button id="import-submit" type="submit">Запустить импорт</button>
+            <p id="import-feedback" role="status"></p>
+          </div>
+        </form>
+      </section>
+
+      <section aria-labelledby="imports-title">
+        <div class="results-bar">
+          <h2 id="imports-title">Задания импорта</h2>
+          <button id="refresh-imports" type="button">Обновить</button>
+        </div>
+        <p id="imports-status" role="status">Загружаем задания…</p>
+        <div class="imports-table-wrap" id="imports-table-wrap" role="region" aria-labelledby="imports-title" tabindex="0" hidden>
+          <table class="imports-table" aria-labelledby="imports-title">
+            <thead>
+              <tr>
+                <th scope="col">Задание</th>
+                <th scope="col">Параметры</th>
+                <th scope="col">Статус</th>
+                <th scope="col">Результат</th>
+              </tr>
+            </thead>
+            <tbody id="imports-list"></tbody>
+          </table>
+        </div>
+        <nav id="imports-pagination" class="pagination" aria-label="Страницы заданий" hidden>
+          <button id="imports-previous" type="button">← Назад</button>
+          <span id="imports-page"></span>
+          <button id="imports-next" type="button">Дальше →</button>
+        </nav>
+      </section>
+      <noscript><p>Для запуска и просмотра заданий включи JavaScript.</p></noscript>
+    </main>
+
+    <template id="import-row-template">
+      <tr>
+        <td>
+          <time class="import-created"></time>
+          <code class="import-meta import-job-id"></code>
+        </td>
+        <td>
+          <div class="import-dates"></div>
+          <div class="import-meta import-bucket"></div>
+          <div class="import-meta import-query"></div>
+        </td>
+        <td>
+          <span class="paper-stage"></span>
+          <div class="import-meta import-attempts"></div>
+          <div class="import-meta import-timing"></div>
+        </td>
+        <td>
+          <div class="import-result"></div>
+          <p class="import-error" hidden></p>
+        </td>
+      </tr>
+    </template>
+  </body>
+</html>

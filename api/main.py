@@ -2,19 +2,20 @@ import asyncio
 import json
 import os
 from contextlib import AsyncExitStack, asynccontextmanager
-from datetime import date
-from uuid import uuid4
+from datetime import date, datetime
+from typing import Annotated, Literal
+from uuid import UUID, uuid4
 
 import aio_pika
 import httpx
 from aio_pika.exceptions import AMQPException
-from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from fastapi import FastAPI, HTTPException, Query, Request
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from chunks import router as chunks_router
-from database import create_database_engine, database_session
+from database import MAX_BIGINT, create_database_engine, database_session
 from embedding_schemas import EmbeddingRequest, EmbeddingResponse
 from papers import router as papers_router
 
@@ -39,6 +40,26 @@ class ArxivImportRequest(BaseModel):
 
 class ArxivImportAccepted(BaseModel):
     id: str
+
+
+class ArxivImportJob(BaseModel):
+    id: UUID
+    date_from: date
+    date_to: date
+    bucket: str
+    query: str
+    status: Literal["queued", "running", "completed", "failed"]
+    attempts: int
+    created_at: datetime
+    available_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    result: dict[str, int] | None
+    last_error: str | None
+
+    @field_serializer("id")
+    def serialize_id(self, job_id: UUID) -> str:
+        return job_id.hex
 
 
 class EmbeddingRPC:
@@ -150,3 +171,23 @@ async def enqueue_arxiv_import(payload: ArxivImportRequest, request: Request):
             parameters,
         )
     return ArxivImportAccepted(id=job_id.hex)
+
+
+@app.get("/arxiv/imports", response_model=list[ArxivImportJob], tags=["arXiv"])
+async def list_arxiv_imports(
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0, le=MAX_BIGINT)] = 0,
+):
+    async with database_session(request) as session:
+        rows = await session.execute(
+            text("""
+                SELECT id, date_from, date_to, bucket, query, status, attempts, created_at,
+                       available_at, started_at, finished_at, result, last_error
+                FROM arxiv_imports
+                ORDER BY created_at DESC, id DESC
+                LIMIT :limit OFFSET :offset
+            """),
+            {"limit": limit, "offset": offset},
+        )
+        return rows.mappings().all()
