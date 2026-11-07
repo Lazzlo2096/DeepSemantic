@@ -8,3 +8,12 @@ datasources:
     url: http://loki:3100
     isDefault: true
     editable: false
+
+  - name: Loki HTTP
+    uid: deepsemantic-loki-http
+    type: yesoreyeram-infinity-datasource
+    access: proxy
+    editable: false
+    jsonData:
+      allowedHosts:
+        - http://loki:3100

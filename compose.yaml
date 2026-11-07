@@ -230,8 +230,11 @@ services:
       GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-deepsemantic}"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_PLUGINS_PREINSTALL_SYNC: "yesoreyeram-infinity-datasource@4.1.6"
     volumes:
       - ./observability/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/loki.yaml:ro
+      - ./observability/grafana-dashboards.yaml:/etc/grafana/provisioning/dashboards/deepsemantic.yaml:ro
+      - ./observability/dashboards:/etc/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
 
   # qryn-view:
