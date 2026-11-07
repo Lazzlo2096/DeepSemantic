@@ -76,6 +76,19 @@ services:
     volumes:
       - embedding-model-cache:/var/cache/huggingface
 
+  ollama:
+    extends:
+      file: ./ollama/compose.yaml
+      service: ollama
+
+  ollama-init:
+    extends:
+      file: ./ollama/compose.yaml
+      service: ollama-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+
   rebbit:
     image: rabbitmq:4.2-management-alpine
     hostname: rebbit
@@ -205,6 +218,7 @@ services:
 
 volumes:
   embedding-model-cache:
+  ollama-model-cache:
   rabbitmq-data:
   qdrant-data:
   postgres-data:

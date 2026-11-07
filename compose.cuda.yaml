@@ -6,3 +6,6 @@ services:
     gpus: all
     environment:
       EMBEDDING_DEVICE: "cuda:0"
+
+  ollama:
+    gpus: all
