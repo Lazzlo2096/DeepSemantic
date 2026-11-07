@@ -1,0 +1,8 @@
+services:
+  embeding-service:
+    build:
+      args:
+        TORCH_VARIANT: cu128
+    gpus: all
+    environment:
+      EMBEDDING_DEVICE: "cuda:0"

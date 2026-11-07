@@ -6,8 +6,10 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+ARG TORCH_VARIANT=cpu
 RUN python -m pip install --no-cache-dir \
-    --extra-index-url https://download.pytorch.org/whl/cpu torch==2.7.1+cpu
+    --extra-index-url "https://download.pytorch.org/whl/${TORCH_VARIANT}" \
+    "torch==2.7.1+${TORCH_VARIANT}"
 
 COPY requirements.txt .
 RUN python -m pip install --no-cache-dir -r requirements.txt

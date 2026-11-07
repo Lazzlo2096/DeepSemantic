@@ -6,6 +6,12 @@
 
 При первом запуске воркер скачивает около 2,3 ГБ весов [BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3) в том `embedding-model-cache`. `just logs` показывает журналы всех сервисов, `just ps` — состояние контейнеров. `just down` сохраняет тома модели и RabbitMQ.
 
+## Запуск на NVIDIA GPU
+
+`just up` использует CPU. На машине с NVIDIA GPU запустите `just up-gpu`. Этот режим даёт воркеру доступ к GPU, устанавливает PyTorch с CUDA 12.8 и запускает BGE-M3 на `cuda:0` в FP16. Для Docker Desktop на Windows нужны [WSL 2 и драйвер NVIDIA с поддержкой GPU](https://docs.docker.com/desktop/features/gpu/).
+
+Проверить, видит ли PyTorch видеокарту внутри воркера, можно командой `docker compose exec embeding-service python -c "import torch; print(torch.cuda.is_available())"`.
+
 ## API и очередь
 
 `POST /embeddings` принимает от 1 до 32 текстов. API публикует задание в очередь `embeddings.requests`. Воркер отправляет результат в очередь ответов API с тем же идентификатором запроса. HTTP-ответ содержит `model`, `revision`, `dimensions` и массив нормализованных векторов размерности 1024 в порядке входных текстов.
