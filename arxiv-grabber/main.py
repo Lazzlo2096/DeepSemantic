@@ -30,6 +30,8 @@ NAMESPACES = {"a": "http://www.w3.org/2005/Atom", "os": "http://a9.com/-/spec/op
 PAGE_SIZE = 100
 MAX_RESULTS = 10_000
 REQUEST_INTERVAL = 3
+CHUNK_SIZE = 1_000
+CHUNK_OVERLAP = CHUNK_SIZE * 15 // 100
 
 
 @dataclass(frozen=True)
@@ -198,6 +200,42 @@ def store_extracted_text(s3, bucket: str, pdf_key: str, pdf_etag: str) -> str:
     return text_key
 
 
+def split_text(text: str) -> Iterator[str]:
+    text = " ".join(text.replace("\x00", "").split())
+    for start in range(0, len(text), CHUNK_SIZE - CHUNK_OVERLAP):
+        end = start + CHUNK_SIZE
+        yield text[start:end]
+        if end >= len(text):
+            break
+
+
+def store_paper_chunks(db, s3, arxiv_id: str, bucket: str, text_key: str) -> int:
+    # Imports share an advisory lock, and each paper's complete chunk set is written atomically.
+    existing = db.execute(
+        "SELECT 1 FROM paper_chunks WHERE arxiv_id = %s AND bucket = %s LIMIT 1",
+        (arxiv_id, bucket),
+    ).fetchone()
+    if existing is not None:
+        return 0
+
+    response = s3.get_object(Bucket=bucket, Key=text_key)
+    with response["Body"] as body:
+        chunks = list(split_text(body.read().decode("utf-8")))
+    if not chunks:
+        raise ValueError("Extracted text has no chunk content")
+
+    with db.transaction(), db.cursor() as cursor:
+        cursor.executemany(
+            """
+            WITH new_chunk AS (INSERT INTO chunks (text) VALUES (%s) RETURNING id)
+            INSERT INTO paper_chunks (chunk_id, arxiv_id, bucket, chunk_index)
+            SELECT id, %s, %s, %s FROM new_chunk
+            """,
+            ((text, arxiv_id, bucket, index) for index, text in enumerate(chunks)),
+        )
+    return len(chunks)
+
+
 def import_articles(date_from: date, date_to: date, bucket: str, query: str, *, wait_for_lock: bool = False) -> int:
     try:
         with psycopg.connect(
@@ -226,7 +264,7 @@ def import_articles(date_from: date, date_to: date, bucket: str, query: str, *, 
             )
             ensure_bucket(s3, bucket)
             arxiv = ArxivClient(session)
-            succeeded = failed = text_failed = 0
+            succeeded = failed = text_failed = chunks_failed = 0
             for article in arxiv.articles(date_from, date_to, query):
                 object_key = f"arxiv/{article.arxiv_id}.pdf"
                 try:
@@ -259,9 +297,18 @@ def import_articles(date_from: date, date_to: date, bucket: str, query: str, *, 
                 succeeded += 1
                 logging.info("%s -> s3://%s/%s", article.arxiv_id, bucket, object_key)
 
-            logging.info("Articles available in RustFS: %d. PDF failures: %d. Text failures: %d",
-                         succeeded, failed, text_failed)
-            return int(failed > 0 or text_failed > 0)
+                if text_object_key is not None:
+                    try:
+                        count = store_paper_chunks(db, s3, article.arxiv_id, bucket, text_object_key)
+                        if count:
+                            logging.info("Saved %d chunks for %s in %s", count, article.arxiv_id, bucket)
+                    except (BotoCoreError, ClientError, OSError, psycopg.Error, ValueError) as error:
+                        logging.error("Could not save chunks for %s: %s", article.arxiv_id, error)
+                        chunks_failed += 1
+
+            logging.info("Articles available in RustFS: %d. PDF failures: %d. Text failures: %d. Chunk failures: %d",
+                         succeeded, failed, text_failed, chunks_failed)
+            return int(failed > 0 or text_failed > 0 or chunks_failed > 0)
     except (psycopg.Error, requests.RequestException, BotoCoreError, ClientError,
             ElementTree.ParseError, KeyError, RuntimeError, ValueError) as error:
         logging.error("%s", error)
