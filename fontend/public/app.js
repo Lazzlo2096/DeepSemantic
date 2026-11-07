@@ -24,6 +24,7 @@ const searchForm = document.querySelector("#search-form");
 const searchQuery = document.querySelector("#search-query");
 const searchSubmit = document.querySelector("#search-submit");
 const searchResults = document.querySelector("#search-results");
+const searchTitle = document.querySelector("#search-title");
 const searchStatus = document.querySelector("#search-status");
 const searchChunks = document.querySelector("#search-chunks");
 const searchTemplate = document.querySelector("#search-result-template");
@@ -35,6 +36,7 @@ let requestedPage = 0;
 let pageCount = 0;
 let appliedFilters = new URLSearchParams();
 let catalogRequest;
+let searchRequest;
 
 for (const [value, label] of stageLabels) {
   statusFilter.add(new Option(label, value));
@@ -81,6 +83,10 @@ async function loadPage(page, moveFocus = false) {
     params.set("offset", offset);
     const response = await fetch(`/api/papers?${params}`, { signal: request.signal });
     if (request.signal.aborted) return;
+    if (response.status === 422) {
+      status.textContent = "Проверь диапазон дат и примени фильтры снова.";
+      return;
+    }
     if (!response.ok) {
       throw new Error(`Catalog request returned ${response.status}`);
     }
@@ -93,7 +99,9 @@ async function loadPage(page, moveFocus = false) {
 
     const totalPages = Math.ceil(total / PAGE_SIZE);
     if (page > 0 && page >= totalPages) {
-      await loadPage(Math.max(0, totalPages - 1), moveFocus);
+      const lastPage = Math.max(0, totalPages - 1);
+      setPageInUrl(lastPage, true);
+      await loadPage(lastPage, moveFocus);
       return;
     }
 
@@ -128,16 +136,75 @@ async function loadPage(page, moveFocus = false) {
   }
 }
 
-function applyFilters() {
-  appliedFilters = new URLSearchParams();
-  for (const [name, value] of new FormData(catalogFilters)) {
-    if (value) appliedFilters.set(name, value);
+function updateUrl(url, replace = false) {
+  if (url.href === location.href) return;
+  if (replace) {
+    history.replaceState(null, "", url);
+  } else {
+    history.pushState(null, "", url);
   }
+}
+
+function setPageInUrl(page, replace = false) {
+  const url = new URL(location.href);
+  if (page > 0) {
+    url.searchParams.set("page", page + 1);
+  } else {
+    url.searchParams.delete("page");
+  }
+  updateUrl(url, replace);
+}
+
+function applyFilters() {
+  const url = new URL(location.href);
+  for (const [name, value] of new FormData(catalogFilters)) {
+    if (value && !(name === "sort" && value === "downloaded_desc")) {
+      url.searchParams.set(name, value);
+    } else {
+      url.searchParams.delete(name);
+    }
+  }
+  url.searchParams.delete("page");
+  updateUrl(url);
+  showLocation();
+}
+
+function showLocation(moveFocus = false) {
+  const params = new URLSearchParams(location.search);
+  searchQuery.value = params.get("query") ?? "";
+  const query = searchQuery.value.trim();
+  catalog.hidden = Boolean(query);
+  searchResults.hidden = !query;
+
+  if (query) {
+    catalogRequest?.abort();
+    catalogRequest = undefined;
+    loadSearch(query, moveFocus);
+    return;
+  }
+
+  searchRequest?.abort();
+  searchRequest = undefined;
+  searchSubmit.disabled = false;
+  searchChunks.setAttribute("aria-busy", "false");
+  catalogFilters.reset();
+  dateTo.setCustomValidity("");
+  appliedFilters = new URLSearchParams();
+  for (const [name, defaultValue] of new FormData(catalogFilters)) {
+    const field = catalogFilters.elements.namedItem(name);
+    field.value = params.get(name) ?? defaultValue;
+    if (!field.validity.valid || !field.value) field.value = defaultValue;
+    if (field.value) appliedFilters.set(name, field.value);
+  }
+
+  const requestedIndex = Number(params.get("page")) - 1;
+  const validPage = requestedIndex >= 0 && Number.isInteger(requestedIndex)
+    && Number.isSafeInteger(requestedIndex * PAGE_SIZE);
   currentPage = 0;
   pageCount = 0;
   list.replaceChildren();
   pagination.hidden = true;
-  loadPage(0);
+  loadPage(validPage ? requestedIndex : 0, moveFocus);
 }
 
 function renderSearchResult(chunk) {
@@ -153,19 +220,11 @@ function renderSearchResult(chunk) {
   return card;
 }
 
-searchForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const query = searchQuery.value.trim();
-  if (!query) {
-    searchQuery.value = "";
-    searchQuery.reportValidity();
-    return;
-  }
-
-  catalog.hidden = true;
-  searchResults.hidden = false;
+async function loadSearch(query, moveFocus) {
+  searchRequest?.abort();
+  const request = new AbortController();
+  searchRequest = request;
   searchSubmit.disabled = true;
-  backToCatalog.disabled = true;
   searchChunks.replaceChildren();
   searchChunks.setAttribute("aria-busy", "true");
   searchStatus.textContent = "Ищем похожие фрагменты…";
@@ -175,7 +234,9 @@ searchForm.addEventListener("submit", async (event) => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query }),
+      signal: request.signal,
     });
+    if (request.signal.aborted) return;
     if (response.status === 422) {
       searchStatus.textContent = "Запрос слишком длинный для поиска. Сократи его и попробуй снова.";
       return;
@@ -185,28 +246,54 @@ searchForm.addEventListener("submit", async (event) => {
     }
 
     const matches = await response.json();
+    if (request.signal.aborted) return;
     searchChunks.replaceChildren(...matches.map(renderSearchResult));
     searchStatus.textContent = matches.length
       ? `Найдено фрагментов: ${matches.length}`
       : "Похожие фрагменты не найдены. Поиск работает по индексированным чанкам.";
-    document.querySelector("#search-title").focus();
+    if (moveFocus) searchTitle.focus();
   } catch {
-    searchStatus.textContent = "Не удалось выполнить поиск. Попробуй ещё раз.";
+    if (!request.signal.aborted) {
+      searchStatus.textContent = "Не удалось выполнить поиск. Попробуй ещё раз.";
+    }
   } finally {
-    searchSubmit.disabled = false;
-    backToCatalog.disabled = false;
-    searchChunks.setAttribute("aria-busy", "false");
+    if (!request.signal.aborted) {
+      searchRequest = undefined;
+      searchSubmit.disabled = false;
+      searchChunks.setAttribute("aria-busy", "false");
+    }
   }
+}
+
+searchForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const query = searchQuery.value.trim();
+  if (!query) {
+    searchQuery.value = "";
+    searchQuery.reportValidity();
+    return;
+  }
+
+  const url = new URL(location.href);
+  url.searchParams.set("query", query);
+  updateUrl(url);
+  showLocation(true);
 });
 
 backToCatalog.addEventListener("click", () => {
-  searchResults.hidden = true;
-  catalog.hidden = false;
-  resultsTitle.focus();
+  const url = new URL(location.href);
+  url.searchParams.delete("query");
+  updateUrl(url);
+  showLocation(true);
 });
 
-previous.addEventListener("click", () => loadPage(currentPage - 1, true));
-next.addEventListener("click", () => loadPage(currentPage + 1, true));
+function goToPage(page) {
+  setPageInUrl(page);
+  loadPage(page, true);
+}
+
+previous.addEventListener("click", () => goToPage(currentPage - 1));
+next.addEventListener("click", () => goToPage(currentPage + 1));
 retry.addEventListener("click", () => loadPage(requestedPage, true));
 catalogFilters.addEventListener("input", () => dateTo.setCustomValidity(""));
 catalogFilters.addEventListener("submit", (event) => {
@@ -223,4 +310,5 @@ document.querySelector("#clear-filters").addEventListener("click", () => {
   dateTo.setCustomValidity("");
   applyFilters();
 });
-applyFilters();
+window.addEventListener("popstate", () => showLocation());
+showLocation();
