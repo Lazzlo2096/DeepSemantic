@@ -3,8 +3,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import func, select, text, true
-from sqlalchemy.orm import aliased
+from sqlalchemy import column, func, select, table, text, true
 
 from database import MAX_BIGINT, ArxivPaper, PaperStatus, database_session
 
@@ -29,6 +28,10 @@ class PaperResponse(BaseModel):
     status: PaperStatus
 
 
+class PaperListItem(PaperResponse):
+    has_summary: bool
+
+
 class PaperChunkResponse(BaseModel):
     chunk_id: int
     chunk_index: int
@@ -45,7 +48,7 @@ def paper_order(paper, sort: PaperSort):
     return paper.downloaded_at.desc(), paper.arxiv_id
 
 
-@router.get("", response_model=list[PaperResponse])
+@router.get("", response_model=list[PaperListItem])
 async def list_papers(
     request: Request,
     response: Response,
@@ -75,18 +78,24 @@ async def list_papers(
         .offset(offset)
         .subquery()
     )
-    paper = aliased(ArxivPaper, page)
     total = select(func.count().label("total_count")).select_from(ArxivPaper).where(*filters).subquery()
+    summaries = table("paper_summaries", column("arxiv_id"), column("status"))
+    has_summary = (
+        select(summaries.c.arxiv_id)
+        .where(summaries.c.arxiv_id == page.c.arxiv_id, summaries.c.status == "completed")
+        .correlate(page)
+        .exists()
+    )
     # Keep the count on empty pages and read it from the same snapshot as the page.
     statement = (
-        select(paper, total.c.total_count)
+        select(*page.c, total.c.total_count, has_summary.label("has_summary"))
         .select_from(total.outerjoin(page, true()))
-        .order_by(*paper_order(paper, sort))
+        .order_by(*paper_order(page.c, sort))
     )
     async with database_session(request) as session:
-        rows = (await session.execute(statement)).all()
-        response.headers["X-Total-Count"] = str(rows[0].total_count)
-        return [paper for paper, _ in rows if paper is not None]
+        rows = (await session.execute(statement)).mappings().all()
+        response.headers["X-Total-Count"] = str(rows[0]["total_count"])
+        return [row for row in rows if row["arxiv_id"] is not None]
 
 
 @router.get("/{arxiv_id:path}/chunks", response_model=list[PaperChunkResponse])

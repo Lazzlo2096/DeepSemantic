@@ -85,6 +85,7 @@ h2 { margin: 0; font-size: 1.25rem; scroll-margin-top: 20px; }
 .paper-stage[data-stage="texted"] { background: #e4edff; color: #23458d; }
 .paper-stage[data-stage="chunked"] { background: #efe8fb; color: #5c397f; }
 .paper-stage[data-stage="embeddinged"] { background: #e2f2e8; color: #21603c; }
+.paper-summary-status[data-ready="true"] { background: #def5ef; color: #17594e; }
 h3 { margin: 9px 0 5px; font-size: 1.08rem; line-height: 1.4; overflow-wrap: anywhere; }
 .paper-title { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .paper-title:hover { color: var(--accent); }

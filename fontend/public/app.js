@@ -64,6 +64,10 @@ function renderPaper(paper) {
   date.textContent = dateFormat.format(new Date(paper.submitted_at));
   stage.dataset.stage = paper.status ?? "";
   stage.textContent = stageLabels.get(paper.status) ?? "Статус неизвестен";
+  const summaryStatus = card.querySelector(".paper-summary-status");
+  const summaryReady = paper.has_summary === true;
+  summaryStatus.dataset.ready = String(summaryReady);
+  summaryStatus.textContent = summaryReady ? "Суммаризация готова" : "Суммаризация не готова";
   card.querySelector(".paper-authors").textContent = paper.authors.join(", ");
   card.querySelector(".paper-abstract").textContent = paper.abstract || "Аннотация отсутствует.";
   return card;
@@ -315,4 +319,7 @@ document.querySelector("#clear-filters").addEventListener("click", () => {
   applyFilters();
 });
 window.addEventListener("popstate", () => showLocation());
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted && !catalog.hidden) showLocation();
+});
 showLocation();
