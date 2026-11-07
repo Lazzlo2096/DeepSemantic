@@ -1,0 +1,18 @@
+:80 {
+	@loki {
+		method GET
+		path /ready /loki/api/v1/query /loki/api/v1/query_range /loki/api/v1/labels /loki/api/v1/label/* /loki/api/v1/series /loki/api/v1/index/stats /loki/api/v1/index/volume /loki/api/v1/index/volume_range /loki/api/v1/status/buildinfo
+	}
+	handle @loki {
+		# qryn-view sends backwards or forwards. Loki expects backward or forward.
+		uri query direction ^(backward|forward)s$ $1
+		reverse_proxy loki:3100
+	}
+	handle /loki/* {
+		respond 404
+	}
+	handle {
+		root * /srv/qryn-view
+		file_server
+	}
+}

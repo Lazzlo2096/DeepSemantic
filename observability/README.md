@@ -1,10 +1,12 @@
 # Логи DeepSemantic
 
-`just up` запускает Grafana Alloy, Loki и Grafana. Для уже запущенного стека можно отдельно выполнить `docker compose up -d loki alloy grafana`.
+`just up` запускает Grafana Alloy, Loki, Grafana и qryn-view. Для уже запущенного стека можно отдельно выполнить `docker compose up -d --build loki alloy grafana qryn-view`.
 
 Alloy читает логи `arxiv-grabber`, `paper-indexer`, `api` и `embeding-service` из текущего проекта Docker Compose. Loki хранит их семь дней в томе `loki-data`. Alloy сохраняет позиции чтения в томе `alloy-data`, а настройки Grafana хранятся в томе `grafana-data`.
 
 Открой Grafana, войди с логином `admin` и паролем `deepsemantic`, затем выбери **Explore → Loki**. Порт и начальные учётные данные можно задать через `GRAFANA_PORT`, `GRAFANA_ADMIN_USER` и `GRAFANA_ADMIN_PASSWORD`. [Grafana Explore](http://127.0.0.1:3000/explore)
+
+qryn-view подключается к Loki автоматически. В панели **Logs** введи LogQL-запрос, выбери период кнопкой с часами и нажми **Show Results**. Порт можно задать через `QRYN_VIEW_PORT`. [qryn-view](http://127.0.0.1:3101/)
 
 Запрос LogQL для общего потока:
 
