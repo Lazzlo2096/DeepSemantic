@@ -420,6 +420,18 @@ def import_articles(
                 result.articles_found += size
                 report_progress(force=True)
 
+            arxiv = ArxivClient(session)
+            articles = arxiv.articles(date_from, date_to, query, count_page)
+            if job is not None:
+                candidates = list(articles)
+                updated = update_running_import(
+                    db, job, "candidate_arxiv_ids = %(ids)s::text[]",
+                    ids=[article.arxiv_id for article in candidates],
+                )
+                if not updated:
+                    raise RuntimeError(f"Lost lease for arXiv import {job.id.hex} attempt {job.attempts}")
+                articles = iter(candidates)
+
             s3 = boto3.client(
                 "s3",
                 endpoint_url=os.environ["RUSTFS_ENDPOINT"],
@@ -429,8 +441,7 @@ def import_articles(
                 config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
             )
             ensure_bucket(s3, bucket)
-            arxiv = ArxivClient(session)
-            for article in arxiv.articles(date_from, date_to, query, count_page):
+            for article in articles:
                 object_key = f"arxiv/{article.arxiv_id}.pdf"
                 try:
                     pdf, reused = store_pdf(arxiv, s3, bucket, article.arxiv_id, object_key)
