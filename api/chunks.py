@@ -4,11 +4,11 @@ from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, HTTPException, Path, Query, Request
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from sqlalchemy import select, text, update
 
 from database import MAX_BIGINT, Chunk, database_session
-from embedding_schemas import EmbeddingRequest
+from embedding_schemas import EmbeddingRequest, Text
 
 
 router = APIRouter(prefix="/chunks", tags=["chunks"])
@@ -38,6 +38,71 @@ class ChunkDetail(ChunkResponse):
     text: str
     qdrant_collection: str | None
     qdrant_point_id: int | None
+
+
+class ChunkSearchRequest(BaseModel):
+    query: Text
+    limit: int = Field(default=10, ge=1, le=50)
+
+
+class ChunkSearchResult(BaseModel):
+    chunk_id: int
+    text: str
+    score: float
+    arxiv_id: str | None
+    paper_title: str | None
+    chunk_index: int | None
+
+
+@router.post("/search", response_model=list[ChunkSearchResult])
+async def search_chunks(payload: ChunkSearchRequest, request: Request):
+    embedding = await request.app.state.rpc.embed(EmbeddingRequest(texts=[payload.query]))
+    try:
+        response = await request.app.state.qdrant.post(
+            f"/collections/{QDRANT_COLLECTION}/points/query",
+            json={
+                "query": embedding["embeddings"][0],
+                "limit": payload.limit,
+                "filter": {"must": [
+                    {"key": "model", "match": {"value": embedding["model"]}},
+                    {"key": "model_revision", "match": {"value": embedding["revision"]}},
+                ]},
+            },
+        )
+        if response.status_code == 404:
+            return []
+        response.raise_for_status()
+    except httpx.HTTPError as error:
+        raise HTTPException(503, "Could not search Qdrant.") from error
+
+    scores = {
+        point["id"]: point["score"]
+        for point in response.json()["result"]["points"]
+        if isinstance(point["id"], int) and 1 <= point["id"] <= MAX_BIGINT
+    }
+    if not scores:
+        return []
+
+    async with database_session(request) as session:
+        rows = (await session.execute(
+            text("""
+                SELECT chunk.id AS chunk_id, chunk.text, paper.arxiv_id,
+                       paper.title AS paper_title, link.chunk_index
+                FROM chunks AS chunk
+                LEFT JOIN paper_chunks AS link ON link.chunk_id = chunk.id
+                LEFT JOIN arxiv_papers AS paper ON paper.arxiv_id = link.arxiv_id
+                WHERE chunk.id = ANY(:chunk_ids)
+                  AND chunk.qdrant_collection = :collection
+                  AND chunk.qdrant_point_id = chunk.id
+            """),
+            {"chunk_ids": list(scores), "collection": QDRANT_COLLECTION},
+        )).mappings().all()
+    chunks_by_id = {row["chunk_id"]: row for row in rows}
+    return [
+        ChunkSearchResult(**chunks_by_id[chunk_id], score=score)
+        for chunk_id, score in scores.items()
+        if chunk_id in chunks_by_id
+    ]
 
 
 @router.post("", response_model=ChunkResponse, status_code=201)

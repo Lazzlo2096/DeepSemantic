@@ -21,9 +21,17 @@
         <p class="eyebrow">Каталог публикаций</p>
         <h1 id="page-title">Статьи arXiv</h1>
         <p>Публикации, загруженные в DeepSemantic. Открой аннотацию или перейди к оригиналу на arXiv.</p>
+        <form id="search-form" class="search-form" role="search">
+          <label for="search-query">Поиск по смыслу</label>
+          <div class="search-controls">
+            <input id="search-query" name="query" type="search" required maxlength="1000"
+                   placeholder="Например, как модели запоминают прошлые разговоры">
+            <button id="search-submit" type="submit">Найти</button>
+          </div>
+        </form>
       </section>
 
-      <section aria-labelledby="results-title">
+      <section id="catalog" aria-labelledby="results-title">
         <div class="results-bar">
           <h2 id="results-title" tabindex="-1">Последние загрузки</h2>
           <p id="status" role="status">Загружаем статьи…</p>
@@ -35,6 +43,15 @@
           <span id="page-number"></span>
           <button id="next" type="button">Дальше →</button>
         </nav>
+      </section>
+
+      <section id="search-results" aria-labelledby="search-title" hidden>
+        <div class="results-bar">
+          <h2 id="search-title" tabindex="-1">Похожие фрагменты</h2>
+          <button id="back-to-catalog" type="button">Вернуться к каталогу</button>
+        </div>
+        <p id="search-status" role="status"></p>
+        <div id="search-chunks" class="paper-list"></div>
       </section>
       <noscript><p>Для загрузки каталога включи JavaScript.</p></noscript>
     </main>
@@ -52,6 +69,17 @@
           <summary>Аннотация</summary>
           <p class="paper-abstract"></p>
         </details>
+      </article>
+    </template>
+
+    <template id="search-result-template">
+      <article class="paper">
+        <div class="paper-meta">
+          <span class="search-fragment"></span>
+          <span class="paper-stage search-score"></span>
+        </div>
+        <h3><a class="paper-title search-paper"></a></h3>
+        <p class="search-excerpt"></p>
       </article>
     </template>
   </body>
