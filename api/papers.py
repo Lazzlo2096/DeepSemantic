@@ -3,15 +3,14 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import case, func, select, text, true
+from sqlalchemy import func, select, text, true
 from sqlalchemy.orm import aliased
 
-from database import MAX_BIGINT, ArxivPaper, database_session
+from database import MAX_BIGINT, ArxivPaper, PaperStatus, database_session
 
 
 router = APIRouter(prefix="/papers", tags=["papers"])
 ArxivId = Annotated[str, Path(min_length=1, pattern=r"^[^\x00]+$")]
-PaperStatus = Literal["downloaded", "texted", "chunked", "embeddinged"]
 PaperSort = Literal["downloaded_desc", "submitted_desc", "submitted_asc", "status"]
 
 
@@ -42,12 +41,7 @@ def paper_order(paper, sort: PaperSort):
     if sort == "submitted_desc":
         return paper.submitted_at.desc(), paper.arxiv_id
     if sort == "status":
-        stage = case(
-            {"downloaded": 0, "texted": 1, "chunked": 2, "embeddinged": 3},
-            value=paper.status,
-            else_=4,
-        )
-        return stage, paper.submitted_at.desc(), paper.arxiv_id
+        return paper.status, paper.submitted_at.desc(), paper.arxiv_id
     return paper.downloaded_at.desc(), paper.arxiv_id
 
 
