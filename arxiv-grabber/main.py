@@ -212,8 +212,8 @@ def split_text(text: str) -> Iterator[str]:
 def store_paper_chunks(db, s3, arxiv_id: str, bucket: str, text_key: str) -> int:
     # Imports share an advisory lock, and each paper's complete chunk set is written atomically.
     existing = db.execute(
-        "SELECT 1 FROM paper_chunks WHERE arxiv_id = %s AND bucket = %s LIMIT 1",
-        (arxiv_id, bucket),
+        "SELECT 1 FROM paper_chunks WHERE arxiv_id = %s LIMIT 1",
+        (arxiv_id,),
     ).fetchone()
     if existing is not None:
         return 0
@@ -228,10 +228,10 @@ def store_paper_chunks(db, s3, arxiv_id: str, bucket: str, text_key: str) -> int
         cursor.executemany(
             """
             WITH new_chunk AS (INSERT INTO chunks (text) VALUES (%s) RETURNING id)
-            INSERT INTO paper_chunks (chunk_id, arxiv_id, bucket, chunk_index)
-            SELECT id, %s, %s, %s FROM new_chunk
+            INSERT INTO paper_chunks (chunk_id, arxiv_id, chunk_index)
+            SELECT id, %s, %s FROM new_chunk
             """,
-            ((text, arxiv_id, bucket, index) for index, text in enumerate(chunks)),
+            ((text, arxiv_id, index) for index, text in enumerate(chunks)),
         )
     return len(chunks)
 
@@ -281,27 +281,44 @@ def import_articles(date_from: date, date_to: date, bucket: str, query: str, *, 
                     logging.error("Could not extract text for %s: %s", article.arxiv_id, error)
                     text_failed += 1
 
-                db.execute(
+                catalog = db.execute(
                     """
                     INSERT INTO arxiv_downloads
                         (arxiv_id, bucket, object_key, title, authors, abstract,
                          submitted_at, downloaded_at, text_object_key)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (arxiv_id, bucket)
-                    DO UPDATE SET downloaded_at = EXCLUDED.downloaded_at,
+                    ON CONFLICT (arxiv_id)
+                    DO UPDATE SET bucket = EXCLUDED.bucket,
+                                  object_key = EXCLUDED.object_key,
+                                  title = EXCLUDED.title,
+                                  authors = EXCLUDED.authors,
+                                  abstract = EXCLUDED.abstract,
+                                  submitted_at = EXCLUDED.submitted_at,
+                                  downloaded_at = EXCLUDED.downloaded_at,
                                   text_object_key = EXCLUDED.text_object_key
+                    WHERE arxiv_downloads.bucket = EXCLUDED.bucket
+                       OR EXCLUDED.downloaded_at > arxiv_downloads.downloaded_at
+                       OR (EXCLUDED.downloaded_at = arxiv_downloads.downloaded_at
+                           AND EXCLUDED.bucket < arxiv_downloads.bucket)
+                    RETURNING bucket, text_object_key
                     """,
                     (article.arxiv_id, bucket, object_key, article.title, article.authors,
                      article.abstract, article.submitted_at, pdf["LastModified"], text_object_key),
-                )
+                ).fetchone()
                 succeeded += 1
                 logging.info("%s -> s3://%s/%s", article.arxiv_id, bucket, object_key)
 
-                if text_object_key is not None:
+                if catalog is None:
+                    catalog = db.execute(
+                        "SELECT bucket, text_object_key FROM arxiv_downloads WHERE arxiv_id = %s",
+                        (article.arxiv_id,),
+                    ).fetchone()
+                catalog_bucket, catalog_text_key = catalog
+                if catalog_text_key is not None:
                     try:
-                        count = store_paper_chunks(db, s3, article.arxiv_id, bucket, text_object_key)
+                        count = store_paper_chunks(db, s3, article.arxiv_id, catalog_bucket, catalog_text_key)
                         if count:
-                            logging.info("Saved %d chunks for %s in %s", count, article.arxiv_id, bucket)
+                            logging.info("Saved %d chunks for %s in %s", count, article.arxiv_id, catalog_bucket)
                     except (BotoCoreError, ClientError, OSError, psycopg.Error, ValueError) as error:
                         logging.error("Could not save chunks for %s: %s", article.arxiv_id, error)
                         chunks_failed += 1

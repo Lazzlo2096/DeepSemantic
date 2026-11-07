@@ -3,5 +3,6 @@
 !main.py
 !database.py
 !chunks.py
+!papers.py
 !embedding_schemas.py
 !requirements.txt

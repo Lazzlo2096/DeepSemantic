@@ -1,4 +1,3 @@
-from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Annotated
 from urllib.parse import quote
@@ -7,15 +6,13 @@ import httpx
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 from sqlalchemy import select, update
-from sqlalchemy.exc import OperationalError, TimeoutError as PoolTimeout
 
-from database import Chunk
+from database import MAX_BIGINT, Chunk, database_session
 from embedding_schemas import EmbeddingRequest
 
 
 router = APIRouter(prefix="/chunks", tags=["chunks"])
 QDRANT_COLLECTION = "documents_bge_m3"
-MAX_BIGINT = 2**63 - 1
 ChunkId = Annotated[int, Path(ge=1, le=MAX_BIGINT)]
 
 
@@ -43,25 +40,16 @@ class ChunkDetail(ChunkResponse):
     qdrant_point_id: int | None
 
 
-@asynccontextmanager
-async def chunk_session(request: Request):
-    try:
-        async with request.app.state.chunk_sessions.begin() as session:
-            yield session
-    except (OperationalError, PoolTimeout) as error:
-        raise HTTPException(503, "PostgreSQL is unavailable.") from error
-
-
 @router.post("", response_model=ChunkResponse, status_code=201)
 async def create_chunk(payload: ChunkRequest, request: Request):
-    async with chunk_session(request) as session:
+    async with database_session(request) as session:
         chunk = Chunk(text=payload.text)
         session.add(chunk)
     return chunk
 
 
 async def read_chunk(request: Request, chunk_id: int):
-    async with chunk_session(request) as session:
+    async with database_session(request) as session:
         chunk = await session.get(Chunk, chunk_id)
     if chunk is None:
         raise HTTPException(404, "Chunk not found.")
@@ -133,7 +121,7 @@ async def embed_chunk(request: Request, chunk_id: ChunkId):
         raise HTTPException(422, "Stored chunk text does not meet embedding input limits.") from error
     result = await request.app.state.rpc.embed(payload)
     await upsert_chunk_embedding(request.app.state.qdrant, chunk_id, result)
-    async with chunk_session(request) as session:
+    async with database_session(request) as session:
         updated_id = await session.scalar(
             update(Chunk)
             .where(Chunk.id == chunk_id)
@@ -151,7 +139,7 @@ async def get_chunks(
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0, le=MAX_BIGINT)] = 0,
 ):
-    async with chunk_session(request) as session:
+    async with database_session(request) as session:
         result = await session.scalars(
             select(Chunk).order_by(Chunk.id).limit(limit).offset(offset)
         )

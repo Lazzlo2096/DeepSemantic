@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from chunks import router as chunks_router
 from database import create_database_engine
 from embedding_schemas import EmbeddingRequest, EmbeddingResponse
+from papers import router as papers_router
 
 
 QUEUE = "embeddings.requests"
@@ -102,7 +103,7 @@ async def lifespan(app: FastAPI):
     async with AsyncExitStack() as stack:
         engine = create_database_engine()
         stack.push_async_callback(engine.dispose)
-        app.state.chunk_sessions = async_sessionmaker(engine, expire_on_commit=False)
+        app.state.db_sessions = async_sessionmaker(engine, expire_on_commit=False)
         app.state.qdrant = await stack.enter_async_context(
             httpx.AsyncClient(base_url=os.getenv("QDRANT_URL", "http://qdrant:6333"), timeout=5)
         )
@@ -123,6 +124,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="BGE-M3 Embedding Service", lifespan=lifespan)
 app.include_router(chunks_router)
+app.include_router(papers_router)
 
 
 @app.get("/health")
