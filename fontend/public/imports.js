@@ -52,9 +52,15 @@ function renderJob(job) {
   }
 
   const result = job.result;
-  row.querySelector(".import-result").textContent = result
-    ? `PDF доступно: ${result.pdf_available}. Ошибки: PDF — ${result.pdf_failures}, текст — ${result.text_failures}, чанки — ${result.chunk_failures}.`
-    : "—";
+  const resultText = row.querySelector(".import-result");
+  if (result) {
+    const summary = `PDF доступно: ${result.pdf_available}. Ошибки: PDF — ${result.pdf_failures}, текст — ${result.text_failures}, чанки — ${result.chunk_failures}.`;
+    resultText.textContent = result.articles_found == null
+      ? summary
+      : `Найдено: ${result.articles_found} · Уже было в бакете: ${result.pdf_reused}\n${summary}`;
+  } else {
+    resultText.textContent = job.status === "running" ? "Ожидаем результаты поиска…" : "—";
+  }
   const error = row.querySelector(".import-error");
   error.textContent = job.last_error ?? "";
   error.hidden = !job.last_error;

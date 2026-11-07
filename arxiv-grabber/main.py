@@ -4,7 +4,7 @@ import os
 import re
 import shutil
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -36,6 +36,7 @@ JOB_LEASE = timedelta(minutes=2)
 HEARTBEAT_SECONDS = 30
 MAX_JOB_ATTEMPTS = 3
 JOB_RETRY_DELAY = timedelta(minutes=1)
+PROGRESS_INTERVAL = 3
 
 
 @dataclass(frozen=True)
@@ -49,11 +50,18 @@ class Article:
 
 @dataclass
 class ImportResult:
+    articles_found: int = 0
+    pdf_reused: int = 0
     pdf_available: int = 0
     pdf_failures: int = 0
     text_failures: int = 0
     chunk_failures: int = 0
     last_error: str | None = None
+
+    def counters(self) -> dict[str, int]:
+        counters = asdict(self)
+        del counters["last_error"]
+        return counters
 
 
 @dataclass(frozen=True)
@@ -100,7 +108,9 @@ class ArxivClient:
 
         raise RuntimeError(f"No response from {url}")
 
-    def articles(self, date_from: date, date_to: date, query: str) -> Iterator[Article]:
+    def articles(
+        self, date_from: date, date_to: date, query: str, on_page: Callable[[int], None],
+    ) -> Iterator[Article]:
         # Request through the next midnight to cover the last minute of date_to.
         next_day = date_to + timedelta(days=1) if date_to < date.max else date_to
         lower = date_from.isoformat().replace("-", "") + "0000"
@@ -127,19 +137,22 @@ class ArxivClient:
                 if date_from == date_to or offset:
                     raise RuntimeError(f"arXiv result limit reached for {date_from} to {date_to}")
                 midpoint = date_from + (date_to - date_from) // 2
-                yield from self.articles(date_from, midpoint, query)
-                yield from self.articles(midpoint + timedelta(days=1), date_to, query)
+                yield from self.articles(date_from, midpoint, query, on_page)
+                yield from self.articles(midpoint + timedelta(days=1), date_to, query, on_page)
                 return
 
             entries = feed.findall("a:entry", NAMESPACES)
+            page = []
             for entry in entries:
                 article = parse_article(entry)
                 submitted = article.submitted_at.date()
                 if date_from <= submitted <= date_to:
-                    yield article
+                    page.append(article)
                 elif submitted != next_day:
                     raise RuntimeError(f"arXiv returned {article.arxiv_id} outside the requested dates")
 
+            on_page(len(page))
+            yield from page
             offset += len(entries)
             if offset >= total:
                 return
@@ -172,9 +185,9 @@ def ensure_bucket(s3, bucket: str) -> None:
         s3.create_bucket(Bucket=bucket)
 
 
-def store_pdf(arxiv: ArxivClient, s3, bucket: str, arxiv_id: str, object_key: str) -> dict:
+def store_pdf(arxiv: ArxivClient, s3, bucket: str, arxiv_id: str, object_key: str) -> tuple[dict, bool]:
     try:
-        return s3.head_object(Bucket=bucket, Key=object_key)
+        return s3.head_object(Bucket=bucket, Key=object_key), True
     except ClientError as error:
         if error.response["ResponseMetadata"]["HTTPStatusCode"] != 404:
             raise
@@ -188,7 +201,7 @@ def store_pdf(arxiv: ArxivClient, s3, bucket: str, arxiv_id: str, object_key: st
             raise ValueError(f"arXiv did not return a PDF for {arxiv_id}")
         pdf.seek(0)
         s3.upload_fileobj(pdf, bucket, object_key, ExtraArgs={"ContentType": "application/pdf"})
-    return s3.head_object(Bucket=bucket, Key=object_key)
+    return s3.head_object(Bucket=bucket, Key=object_key), False
 
 
 def store_extracted_text(s3, bucket: str, pdf_key: str, pdf_etag: str) -> str:
@@ -272,18 +285,39 @@ def connect_database():
 
 
 def import_articles(
-    date_from: date, date_to: date, bucket: str, query: str, *, wait_for_lock: bool = False,
+    date_from: date, date_to: date, bucket: str, query: str, *, job: ImportJob | None = None,
 ) -> ImportResult:
     result = ImportResult()
     try:
         with connect_database() as db, requests.Session() as session:
             # Serialize imports in this database to keep arXiv traffic single-connection.
-            if wait_for_lock:
+            if job is not None:
                 db.execute("SELECT pg_advisory_lock(hashtext('deepsemantic.arxiv-grabber'))")
             else:
                 locked, = db.execute("SELECT pg_try_advisory_lock(hashtext('deepsemantic.arxiv-grabber'))").fetchone()
                 if not locked:
                     raise RuntimeError("Another arxiv-grabber import is running")
+
+            next_progress = 0.0
+
+            def report_progress(*, force: bool = False) -> None:
+                nonlocal next_progress
+                if job is None or (not force and time.monotonic() < next_progress):
+                    return
+                updated = db.execute(
+                    """
+                    UPDATE arxiv_imports SET result = %s, last_error = %s
+                    WHERE id = %s AND attempts = %s AND status = 'running' AND lease_until > now()
+                    """,
+                    (Jsonb(result.counters()), result.last_error, job.id, job.attempts),
+                ).rowcount
+                if not updated:
+                    raise RuntimeError(f"Lost lease for arXiv import {job.id.hex} attempt {job.attempts}")
+                next_progress = time.monotonic() + PROGRESS_INTERVAL
+
+            def count_page(size: int) -> None:
+                result.articles_found += size
+                report_progress(force=True)
 
             s3 = boto3.client(
                 "s3",
@@ -295,16 +329,20 @@ def import_articles(
             )
             ensure_bucket(s3, bucket)
             arxiv = ArxivClient(session)
-            for article in arxiv.articles(date_from, date_to, query):
+            for article in arxiv.articles(date_from, date_to, query, count_page):
                 object_key = f"arxiv/{article.arxiv_id}.pdf"
                 try:
-                    pdf = store_pdf(arxiv, s3, bucket, article.arxiv_id, object_key)
+                    pdf, reused = store_pdf(arxiv, s3, bucket, article.arxiv_id, object_key)
                 except (requests.RequestException, BotoCoreError, ClientError, OSError, ValueError) as error:
                     result.last_error = f"Could not save PDF for {article.arxiv_id}: {error}"
                     logging.error("%s", result.last_error)
                     result.pdf_failures += 1
+                    report_progress()
                     continue
 
+                result.pdf_available += 1
+                result.pdf_reused += int(reused)
+                report_progress()
                 catalog = db.execute(
                     """
                     INSERT INTO arxiv_papers AS paper
@@ -338,7 +376,6 @@ def import_articles(
                     (article.arxiv_id, bucket, object_key, article.title, article.authors,
                      article.abstract, article.submitted_at, pdf["LastModified"]),
                 ).fetchone()
-                result.pdf_available += 1
                 logging.info("%s -> s3://%s/%s", article.arxiv_id, bucket, object_key)
 
                 text_object_key = None
@@ -372,6 +409,7 @@ def import_articles(
                         result.last_error = f"Could not save chunks for {article.arxiv_id}: {error}"
                         logging.error("%s", result.last_error)
                         result.chunk_failures += 1
+                report_progress()
 
             logging.info("Articles available in RustFS: %d. PDF failures: %d. Text failures: %d. Chunk failures: %d",
                          result.pdf_available, result.pdf_failures, result.text_failures, result.chunk_failures)
@@ -406,7 +444,8 @@ def claim_import(db) -> ImportJob | None:
             )
             UPDATE arxiv_imports AS job
             SET status = 'running', attempts = job.attempts + 1,
-                started_at = COALESCE(job.started_at, now()), lease_until = now() + %s
+                started_at = COALESCE(job.started_at, now()), lease_until = now() + %s,
+                result = NULL, last_error = NULL
             FROM candidate
             WHERE job.id = candidate.id
             RETURNING job.id, job.date_from, job.date_to, job.bucket, job.query, job.attempts
@@ -416,10 +455,8 @@ def claim_import(db) -> ImportJob | None:
 
 
 def finish_import(db, job: ImportJob, result: ImportResult) -> None:
-    counters = asdict(result)
-    last_error = counters.pop("last_error")
     status = "completed"
-    if last_error is not None:
+    if result.last_error is not None:
         status = "queued" if job.attempts < MAX_JOB_ATTEMPTS else "failed"
     updated = db.execute(
         """
@@ -430,8 +467,8 @@ def finish_import(db, job: ImportJob, result: ImportResult) -> None:
             result = %(result)s, last_error = %(error)s
         WHERE id = %(id)s AND attempts = %(attempts)s AND status = 'running' AND lease_until > now()
         """,
-        {"status": status, "delay": JOB_RETRY_DELAY, "result": Jsonb(counters),
-         "error": last_error, "id": job.id, "attempts": job.attempts},
+        {"status": status, "delay": JOB_RETRY_DELAY, "result": Jsonb(result.counters()),
+         "error": result.last_error, "id": job.id, "attempts": job.attempts},
     ).rowcount
     if updated:
         logging.info("arXiv import %s attempt %d: %s", job.id.hex, job.attempts, status)
@@ -443,7 +480,7 @@ def process_import(db, job: ImportJob) -> None:
     logging.info("Starting arXiv import %s attempt %d (%s to %s, bucket %s)",
                  job.id.hex, job.attempts, job.date_from, job.date_to, job.bucket)
     with ThreadPoolExecutor(max_workers=1) as executor:
-        work = executor.submit(import_articles, job.date_from, job.date_to, job.bucket, job.query, wait_for_lock=True)
+        work = executor.submit(import_articles, job.date_from, job.date_to, job.bucket, job.query, job=job)
         while not wait((work,), timeout=HEARTBEAT_SECONDS).done:
             updated = db.execute(
                 """
