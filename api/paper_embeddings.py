@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy import text
 
-from chunks import save_chunk_embedding_references, upsert_chunk_embeddings
+from chunks import log_paper_status_changes, save_chunk_embedding_references, upsert_chunk_embeddings
 from embedding_schemas import EmbeddingRequest
 from main import app, lifespan
 
@@ -48,7 +48,8 @@ async def index_batch(state, batch) -> tuple[int, int]:
 
     await upsert_chunk_embeddings(state.qdrant, chunk_ids, result)
     async with state.db_sessions.begin() as session:
-        await save_chunk_embedding_references(session, chunk_ids)
+        changes = await save_chunk_embedding_references(session, chunk_ids)
+    log_paper_status_changes(changes)
     return len(chunk_ids), 0
 
 

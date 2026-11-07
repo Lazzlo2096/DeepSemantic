@@ -170,6 +170,7 @@ async def enqueue_arxiv_import(payload: ArxivImportRequest, request: Request):
             """),
             parameters,
         )
+    print(json.dumps({"event": "arxiv.import_queued", "import_id": job_id.hex}), flush=True)
     return ArxivImportAccepted(id=job_id.hex)
 
 

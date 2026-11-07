@@ -1,4 +1,5 @@
 import argparse
+import json
 import logging
 import os
 import re
@@ -72,6 +73,21 @@ class ImportJob:
     bucket: str
     query: str
     attempts: int
+
+
+def log_import_event(event: str, job: ImportJob | None, **fields) -> None:
+    if job is not None:
+        fields["import_id"] = job.id.hex
+    print(json.dumps({"event": event, **fields}), flush=True)
+
+
+def log_status_change(arxiv_id: str, change: tuple[str | None, str] | None, job: ImportJob | None) -> None:
+    if change is None:
+        return
+    old_status, new_status = change
+    if old_status != new_status:
+        log_import_event("paper.status_changed", job, arxiv_id=arxiv_id,
+                         old_status=old_status, new_status=new_status)
 
 
 class ArxivClient:
@@ -245,7 +261,7 @@ def split_text(text: str) -> Iterator[str]:
             break
 
 
-def store_paper_chunks(db, s3, arxiv_id: str, bucket: str, text_key: str) -> int:
+def store_paper_chunks(db, s3, arxiv_id: str, bucket: str, text_key: str, job: ImportJob | None) -> int:
     # Imports share an advisory lock, and each paper's complete chunk set is written atomically.
     existing = db.execute(
         "SELECT 1 FROM paper_chunks WHERE arxiv_id = %s LIMIT 1",
@@ -269,7 +285,8 @@ def store_paper_chunks(db, s3, arxiv_id: str, bucket: str, text_key: str) -> int
             """,
             ((text, arxiv_id, index) for index, text in enumerate(chunks)),
         )
-        cursor.execute("SELECT refresh_arxiv_paper_status(%s)", (arxiv_id,))
+        change = cursor.execute("SELECT * FROM refresh_arxiv_paper_status_change(%s)", (arxiv_id,)).fetchone()
+    log_status_change(arxiv_id, change, job)
     return len(chunks)
 
 
@@ -282,6 +299,53 @@ def connect_database():
         connect_timeout=5,
         autocommit=True,
     )
+
+
+def save_paper(db, article: Article, bucket: str, object_key: str, downloaded_at: datetime,
+               job: ImportJob | None) -> tuple[str, str | None] | None:
+    with db.transaction():
+        previous = db.execute(
+            "SELECT status FROM arxiv_papers WHERE arxiv_id = %s FOR NO KEY UPDATE",
+            (article.arxiv_id,),
+        ).fetchone()
+        catalog = db.execute(
+            """
+            INSERT INTO arxiv_papers AS paper
+                (arxiv_id, bucket, object_key, title, authors, abstract,
+                 submitted_at, downloaded_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (arxiv_id)
+            DO UPDATE SET bucket = EXCLUDED.bucket,
+                          object_key = EXCLUDED.object_key,
+                          title = EXCLUDED.title,
+                          authors = EXCLUDED.authors,
+                          abstract = EXCLUDED.abstract,
+                          submitted_at = EXCLUDED.submitted_at,
+                          downloaded_at = EXCLUDED.downloaded_at,
+                          text_object_key = CASE
+                              WHEN (paper.bucket, paper.object_key, paper.downloaded_at) =
+                                   (EXCLUDED.bucket, EXCLUDED.object_key, EXCLUDED.downloaded_at)
+                              THEN paper.text_object_key
+                          END,
+                          status = CASE
+                              WHEN (paper.bucket, paper.object_key, paper.downloaded_at) =
+                                   (EXCLUDED.bucket, EXCLUDED.object_key, EXCLUDED.downloaded_at)
+                              THEN paper.status ELSE 'downloaded'
+                          END
+            WHERE paper.bucket = EXCLUDED.bucket
+               OR EXCLUDED.downloaded_at > paper.downloaded_at
+               OR (EXCLUDED.downloaded_at = paper.downloaded_at
+                   AND EXCLUDED.bucket < paper.bucket)
+            RETURNING bucket, text_object_key, status
+            """,
+            (article.arxiv_id, bucket, object_key, article.title, article.authors,
+             article.abstract, article.submitted_at, downloaded_at),
+        ).fetchone()
+    if catalog is None:
+        return None
+    catalog_bucket, text_object_key, status = catalog
+    log_status_change(article.arxiv_id, (previous[0] if previous else None, status), job)
+    return catalog_bucket, text_object_key
 
 
 def import_articles(
@@ -335,7 +399,8 @@ def import_articles(
                     pdf, reused = store_pdf(arxiv, s3, bucket, article.arxiv_id, object_key)
                 except (requests.RequestException, BotoCoreError, ClientError, OSError, ValueError) as error:
                     result.last_error = f"Could not save PDF for {article.arxiv_id}: {error}"
-                    logging.error("%s", result.last_error)
+                    log_import_event("arxiv.paper_failed", job, arxiv_id=article.arxiv_id,
+                                     level="error", stage="pdf", error=result.last_error)
                     result.pdf_failures += 1
                     report_progress()
                     continue
@@ -343,39 +408,7 @@ def import_articles(
                 result.pdf_available += 1
                 result.pdf_reused += int(reused)
                 report_progress()
-                catalog = db.execute(
-                    """
-                    INSERT INTO arxiv_papers AS paper
-                        (arxiv_id, bucket, object_key, title, authors, abstract,
-                         submitted_at, downloaded_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (arxiv_id)
-                    DO UPDATE SET bucket = EXCLUDED.bucket,
-                                  object_key = EXCLUDED.object_key,
-                                  title = EXCLUDED.title,
-                                  authors = EXCLUDED.authors,
-                                  abstract = EXCLUDED.abstract,
-                                  submitted_at = EXCLUDED.submitted_at,
-                                  downloaded_at = EXCLUDED.downloaded_at,
-                                  text_object_key = CASE
-                                      WHEN (paper.bucket, paper.object_key, paper.downloaded_at) =
-                                           (EXCLUDED.bucket, EXCLUDED.object_key, EXCLUDED.downloaded_at)
-                                      THEN paper.text_object_key
-                                  END,
-                                  status = CASE
-                                      WHEN (paper.bucket, paper.object_key, paper.downloaded_at) =
-                                           (EXCLUDED.bucket, EXCLUDED.object_key, EXCLUDED.downloaded_at)
-                                      THEN paper.status ELSE 'downloaded'
-                                  END
-                    WHERE paper.bucket = EXCLUDED.bucket
-                       OR EXCLUDED.downloaded_at > paper.downloaded_at
-                       OR (EXCLUDED.downloaded_at = paper.downloaded_at
-                           AND EXCLUDED.bucket < paper.bucket)
-                    RETURNING bucket, text_object_key
-                    """,
-                    (article.arxiv_id, bucket, object_key, article.title, article.authors,
-                     article.abstract, article.submitted_at, pdf["LastModified"]),
-                ).fetchone()
+                catalog = save_paper(db, article, bucket, object_key, pdf["LastModified"], job)
                 logging.info("%s -> s3://%s/%s", article.arxiv_id, bucket, object_key)
 
                 text_object_key = None
@@ -383,7 +416,8 @@ def import_articles(
                     text_object_key = store_extracted_text(s3, bucket, object_key, pdf["ETag"])
                 except (BotoCoreError, ClientError, OSError, PyPdfError, ValueError) as error:
                     result.last_error = f"Could not extract text for {article.arxiv_id}: {error}"
-                    logging.error("%s", result.last_error)
+                    log_import_event("arxiv.paper_failed", job, arxiv_id=article.arxiv_id,
+                                     level="error", stage="text", error=result.last_error)
                     result.text_failures += 1
 
                 if catalog is not None:
@@ -392,7 +426,10 @@ def import_articles(
                             "UPDATE arxiv_papers SET text_object_key = %s WHERE arxiv_id = %s",
                             (text_object_key, article.arxiv_id),
                         )
-                        db.execute("SELECT refresh_arxiv_paper_status(%s)", (article.arxiv_id,))
+                        change = db.execute(
+                            "SELECT * FROM refresh_arxiv_paper_status_change(%s)", (article.arxiv_id,),
+                        ).fetchone()
+                    log_status_change(article.arxiv_id, change, job)
                     catalog = bucket, text_object_key
                 else:
                     catalog = db.execute(
@@ -402,12 +439,13 @@ def import_articles(
                 catalog_bucket, catalog_text_key = catalog
                 if catalog_text_key is not None:
                     try:
-                        count = store_paper_chunks(db, s3, article.arxiv_id, catalog_bucket, catalog_text_key)
+                        count = store_paper_chunks(db, s3, article.arxiv_id, catalog_bucket, catalog_text_key, job)
                         if count:
                             logging.info("Saved %d chunks for %s in %s", count, article.arxiv_id, catalog_bucket)
                     except (BotoCoreError, ClientError, OSError, psycopg.Error, ValueError) as error:
                         result.last_error = f"Could not save chunks for {article.arxiv_id}: {error}"
-                        logging.error("%s", result.last_error)
+                        log_import_event("arxiv.paper_failed", job, arxiv_id=article.arxiv_id,
+                                         level="error", stage="chunks", error=result.last_error)
                         result.chunk_failures += 1
                 report_progress()
 
@@ -471,14 +509,15 @@ def finish_import(db, job: ImportJob, result: ImportResult) -> None:
          "error": result.last_error, "id": job.id, "attempts": job.attempts},
     ).rowcount
     if updated:
-        logging.info("arXiv import %s attempt %d: %s", job.id.hex, job.attempts, status)
+        log_import_event("arxiv.import_attempt_finished", job, attempt=job.attempts,
+                         status=status, error=result.last_error, **result.counters())
     else:
         logging.warning("Lost lease before saving arXiv import %s attempt %d", job.id.hex, job.attempts)
 
 
 def process_import(db, job: ImportJob) -> None:
-    logging.info("Starting arXiv import %s attempt %d (%s to %s, bucket %s)",
-                 job.id.hex, job.attempts, job.date_from, job.date_to, job.bucket)
+    log_import_event("arxiv.import_started", job, attempt=job.attempts, bucket=job.bucket,
+                     date_from=job.date_from.isoformat(), date_to=job.date_to.isoformat())
     with ThreadPoolExecutor(max_workers=1) as executor:
         work = executor.submit(import_articles, job.date_from, job.date_to, job.bucket, job.query, job=job)
         while not wait((work,), timeout=HEARTBEAT_SECONDS).done:

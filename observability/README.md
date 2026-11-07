@@ -12,4 +12,23 @@ Alloy читает логи `arxiv-grabber`, `paper-indexer`, `api` и `embeding
 {service_name=~"arxiv-grabber|paper-indexer|api|embeding-service"}
 ```
 
-К запросу можно добавить `|= "2611.07970v1"`, чтобы найти строки, содержащие ID статьи.
+Переходы статуса статьи можно найти по полям JSON:
+
+```logql
+{service_name=~"arxiv-grabber|paper-indexer|api"}
+| json
+| event="paper.status_changed"
+| arxiv_id="2611.07970v1"
+```
+
+Добавь `| new_status="embeddinged"`, чтобы увидеть завершение индексации. Переходы записываются после коммита в PostgreSQL. У первой записи `old_status` равен `null`.
+
+Для задания импорта используй его ID из ответа `POST /arxiv/imports`:
+
+```logql
+{service_name=~"arxiv-grabber|api"}
+| json
+| import_id="4411913797a7461a864a0581086d4765"
+```
+
+По этому фильтру видны постановка в очередь, попытки, ошибки обработки отдельных статей и их переходы статуса. `paper-indexer` индексирует статьи отдельно и связывает свои события со статьёй через `arxiv_id`.

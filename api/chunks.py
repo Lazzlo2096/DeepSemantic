@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from typing import Annotated
 from urllib.parse import quote
@@ -7,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from sqlalchemy import select, text, update
 
-from database import MAX_BIGINT, Chunk, database_session
+from database import MAX_BIGINT, Chunk, PaperStatus, database_session
 from embedding_schemas import EmbeddingRequest, Text
 
 
@@ -159,7 +160,9 @@ async def upsert_chunk_embeddings(qdrant: httpx.AsyncClient, chunk_ids: list[int
         raise HTTPException(503, "Qdrant did not confirm the embedding write.")
 
 
-async def save_chunk_embedding_references(session, chunk_ids: list[int]) -> None:
+async def save_chunk_embedding_references(
+    session, chunk_ids: list[int],
+) -> list[tuple[str, PaperStatus, PaperStatus]]:
     updated = await session.scalars(
         update(Chunk)
         .where(Chunk.id.in_(chunk_ids))
@@ -173,8 +176,23 @@ async def save_chunk_embedding_references(session, chunk_ids: list[int]) -> None
         text("SELECT DISTINCT arxiv_id FROM paper_chunks WHERE chunk_id = ANY(:chunk_ids) ORDER BY arxiv_id"),
         {"chunk_ids": chunk_ids},
     )
+    changes = []
     for arxiv_id in papers:
-        await session.execute(text("SELECT refresh_arxiv_paper_status(:arxiv_id)"), {"arxiv_id": arxiv_id})
+        change = (await session.execute(
+            text("SELECT old_status, new_status FROM refresh_arxiv_paper_status_change(:arxiv_id)"),
+            {"arxiv_id": arxiv_id},
+        )).one_or_none()
+        if change is not None:
+            changes.append((arxiv_id, change.old_status, change.new_status))
+    return changes
+
+
+def log_paper_status_changes(changes: list[tuple[str, PaperStatus, PaperStatus]]) -> None:
+    for arxiv_id, old_status, new_status in changes:
+        print(json.dumps({
+            "event": "paper.status_changed", "arxiv_id": arxiv_id,
+            "old_status": old_status, "new_status": new_status,
+        }), flush=True)
 
 
 @router.get("/{chunk_id}/embedding", response_model=list[float])
@@ -210,7 +228,8 @@ async def embed_chunk(request: Request, chunk_id: ChunkId):
     result = await request.app.state.rpc.embed(payload)
     await upsert_chunk_embeddings(request.app.state.qdrant, [chunk_id], result)
     async with database_session(request) as session:
-        await save_chunk_embedding_references(session, [chunk_id])
+        changes = await save_chunk_embedding_references(session, [chunk_id])
+    log_paper_status_changes(changes)
     return result["embeddings"][0]
 
 
