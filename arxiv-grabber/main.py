@@ -20,7 +20,6 @@ from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from pypdf import PdfReader
 from pypdf.errors import PyPdfError
-from psycopg.rows import class_row
 from psycopg.types.json import Jsonb
 
 
@@ -79,6 +78,17 @@ def log_import_event(event: str, job: ImportJob | None, **fields) -> None:
     if job is not None:
         fields["import_id"] = job.id.hex
     print(json.dumps({"event": event, **fields}), flush=True)
+
+
+def log_import_update(job_id: UUID, previous: dict, current: dict) -> None:
+    changes = {
+        column: {"old": previous[column], "new": value}
+        for column, value in current.items()
+        if previous[column] != value
+    }
+    if changes:
+        log_import_event("arxiv.import_updated", None, table="arxiv_imports", operation="update",
+                         import_id=job_id.hex, changes=changes)
 
 
 def log_status_change(arxiv_id: str, change: tuple[str | None, str] | None, job: ImportJob | None) -> None:
@@ -301,6 +311,27 @@ def connect_database():
     )
 
 
+def update_running_import(db, job: ImportJob, assignments: str, **values) -> bool:
+    # Lock the old row before reading it. The autocommit statement commits before logging.
+    update = db.execute(
+        f"""
+        WITH previous AS (
+            SELECT * FROM arxiv_imports
+            WHERE id = %(id)s AND attempts = %(attempts)s AND status = 'running' AND lease_until > now()
+            FOR NO KEY UPDATE
+        )
+        UPDATE arxiv_imports AS job SET {assignments}
+        FROM previous WHERE job.id = previous.id
+        RETURNING to_jsonb(previous), to_jsonb(job)
+        """,
+        {"id": job.id, "attempts": job.attempts, **values},
+    ).fetchone()
+    if update is None:
+        return False
+    log_import_update(job.id, *update)
+    return True
+
+
 def save_paper(db, article: Article, bucket: str, object_key: str, downloaded_at: datetime,
                job: ImportJob | None) -> tuple[str, str | None] | None:
     with db.transaction():
@@ -368,13 +399,10 @@ def import_articles(
                 nonlocal next_progress
                 if job is None or (not force and time.monotonic() < next_progress):
                     return
-                updated = db.execute(
-                    """
-                    UPDATE arxiv_imports SET result = %s, last_error = %s
-                    WHERE id = %s AND attempts = %s AND status = 'running' AND lease_until > now()
-                    """,
-                    (Jsonb(result.counters()), result.last_error, job.id, job.attempts),
-                ).rowcount
+                updated = update_running_import(
+                    db, job, "result = %(result)s, last_error = %(error)s",
+                    result=Jsonb(result.counters()), error=result.last_error,
+                )
                 if not updated:
                     raise RuntimeError(f"Lost lease for arXiv import {job.id.hex} attempt {job.attempts}")
                 next_progress = time.monotonic() + PROGRESS_INTERVAL
@@ -459,55 +487,67 @@ def import_articles(
 
 
 def claim_import(db) -> ImportJob | None:
-    db.execute(
+    expired = db.execute(
         """
-        UPDATE arxiv_imports
+        WITH previous AS (
+            SELECT * FROM arxiv_imports
+            WHERE status = 'running' AND lease_until <= now() AND attempts >= %s
+            FOR NO KEY UPDATE
+        )
+        UPDATE arxiv_imports AS job
         SET status = 'failed', finished_at = now(), lease_until = NULL,
             last_error = 'Worker lease expired on the final attempt.'
-        WHERE status = 'running' AND lease_until <= now() AND attempts >= %s
+        FROM previous WHERE job.id = previous.id
+        RETURNING job.id, to_jsonb(previous), to_jsonb(job)
         """,
         (MAX_JOB_ATTEMPTS,),
-    )
-    with db.cursor(row_factory=class_row(ImportJob)) as cursor:
-        return cursor.execute(
-            """
-            WITH candidate AS (
-                SELECT id FROM arxiv_imports
-                WHERE attempts < %s AND (
-                    (status = 'queued' AND available_at <= now()) OR
-                    (status = 'running' AND lease_until <= now())
-                )
-                ORDER BY available_at, created_at, id
-                LIMIT 1 FOR UPDATE SKIP LOCKED
+    ).fetchall()
+    for job_id, previous, current in expired:
+        log_import_update(job_id, previous, current)
+
+    claimed = db.execute(
+        """
+        WITH candidate AS (
+            SELECT * FROM arxiv_imports
+            WHERE attempts < %s AND (
+                (status = 'queued' AND available_at <= now()) OR
+                (status = 'running' AND lease_until <= now())
             )
-            UPDATE arxiv_imports AS job
-            SET status = 'running', attempts = job.attempts + 1,
-                started_at = COALESCE(job.started_at, now()), lease_until = now() + %s,
-                result = NULL, last_error = NULL
-            FROM candidate
-            WHERE job.id = candidate.id
-            RETURNING job.id, job.date_from, job.date_to, job.bucket, job.query, job.attempts
-            """,
-            (MAX_JOB_ATTEMPTS, JOB_LEASE),
-        ).fetchone()
+            ORDER BY available_at, created_at, id
+            LIMIT 1 FOR UPDATE SKIP LOCKED
+        )
+        UPDATE arxiv_imports AS job
+        SET status = 'running', attempts = candidate.attempts + 1,
+            started_at = COALESCE(candidate.started_at, now()), lease_until = now() + %s,
+            result = NULL, last_error = NULL
+        FROM candidate
+        WHERE job.id = candidate.id
+        RETURNING job.id, job.date_from, job.date_to, job.bucket, job.query, job.attempts,
+                  to_jsonb(candidate), to_jsonb(job)
+        """,
+        (MAX_JOB_ATTEMPTS, JOB_LEASE),
+    ).fetchone()
+    if claimed is None:
+        return None
+    job_id, date_from, date_to, bucket, query, attempts, previous, current = claimed
+    log_import_update(job_id, previous, current)
+    return ImportJob(job_id, date_from, date_to, bucket, query, attempts)
 
 
 def finish_import(db, job: ImportJob, result: ImportResult) -> None:
     status = "completed"
     if result.last_error is not None:
         status = "queued" if job.attempts < MAX_JOB_ATTEMPTS else "failed"
-    updated = db.execute(
+    updated = update_running_import(
+        db, job,
         """
-        UPDATE arxiv_imports
-        SET status = %(status)s, lease_until = NULL,
-            available_at = CASE WHEN %(status)s = 'queued' THEN now() + %(delay)s ELSE available_at END,
-            finished_at = CASE WHEN %(status)s <> 'queued' THEN now() END,
-            result = %(result)s, last_error = %(error)s
-        WHERE id = %(id)s AND attempts = %(attempts)s AND status = 'running' AND lease_until > now()
+        status = %(status)s, lease_until = NULL,
+        available_at = CASE WHEN %(status)s = 'queued' THEN now() + %(delay)s ELSE previous.available_at END,
+        finished_at = CASE WHEN %(status)s <> 'queued' THEN now() END,
+        result = %(result)s, last_error = %(error)s
         """,
-        {"status": status, "delay": JOB_RETRY_DELAY, "result": Jsonb(result.counters()),
-         "error": result.last_error, "id": job.id, "attempts": job.attempts},
-    ).rowcount
+        status=status, delay=JOB_RETRY_DELAY, result=Jsonb(result.counters()), error=result.last_error,
+    )
     if updated:
         log_import_event("arxiv.import_attempt_finished", job, attempt=job.attempts,
                          status=status, error=result.last_error, **result.counters())
@@ -521,13 +561,7 @@ def process_import(db, job: ImportJob) -> None:
     with ThreadPoolExecutor(max_workers=1) as executor:
         work = executor.submit(import_articles, job.date_from, job.date_to, job.bucket, job.query, job=job)
         while not wait((work,), timeout=HEARTBEAT_SECONDS).done:
-            updated = db.execute(
-                """
-                UPDATE arxiv_imports SET lease_until = now() + %s
-                WHERE id = %s AND attempts = %s AND status = 'running' AND lease_until > now()
-                """,
-                (JOB_LEASE, job.id, job.attempts),
-            ).rowcount
+            updated = update_running_import(db, job, "lease_until = now() + %(lease)s", lease=JOB_LEASE)
             if not updated:
                 logging.warning("Lost lease for arXiv import %s attempt %d", job.id.hex, job.attempts)
                 return

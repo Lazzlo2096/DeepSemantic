@@ -164,15 +164,21 @@ async def enqueue_arxiv_import(payload: ArxivImportRequest, request: Request):
     if payload.bucket is None:
         parameters["bucket"] = os.getenv("RUSTFS_BUCKET", "arxiv-papers")
     async with database_session(request) as session:
-        job_id = await session.scalar(
+        job_id, row = (await session.execute(
             text("""
-                INSERT INTO arxiv_imports (date_from, date_to, bucket, query)
+                INSERT INTO arxiv_imports AS job (date_from, date_to, bucket, query)
                 VALUES (:date_from, :date_to, :bucket, :query)
-                RETURNING id
+                RETURNING id, to_jsonb(job)
             """),
             parameters,
-        )
-    print(json.dumps({"event": "arxiv.import_queued", "import_id": job_id.hex}), flush=True)
+        )).one()
+    print(json.dumps({
+        "event": "arxiv.import_queued",
+        "table": "arxiv_imports",
+        "operation": "insert",
+        "import_id": job_id.hex,
+        "row": row,
+    }), flush=True)
     return ArxivImportAccepted(id=job_id.hex)
 
 

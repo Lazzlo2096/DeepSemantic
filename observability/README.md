@@ -23,7 +23,18 @@ Alloy читает логи `arxiv-grabber`, `paper-indexer`, `api` и `embeding
 
 Добавь `| new_status="embeddinged"`, чтобы увидеть завершение индексации. Переходы записываются после коммита в PostgreSQL. У первой записи `old_status` равен `null`.
 
-Для задания импорта используй его ID из ответа `POST /arxiv/imports`:
+Чтобы увидеть вставки и обновления `arxiv_imports`, в **Explore → Loki** переключи редактор на **Code**, выбери диапазон времени и нажми **Run query** после ввода запроса.
+
+```logql
+{service_name=~"arxiv-grabber|api"}
+|= `"arxiv_imports"`
+| json
+| table="arxiv_imports"
+```
+
+У вставки `operation="insert"`, а в `row` находится сохранённая строка. У обновления `operation="update"`, а в `changes` перечислены только изменившиеся колонки с полями `old` и `new`. API и воркер пишут эти события после коммита, в том числе при обновлении прогресса и продлении аренды. Например, `| operation="update" | changes_status_new="failed"` отберёт переходы в `failed`.
+
+Для задания импорта используй его ID из ответа `POST /arxiv/imports`. Чтобы отфильтровать запрос выше, добавь `| import_id="…"`. Чтобы увидеть и другие события задания, выполни такой запрос:
 
 ```logql
 {service_name=~"arxiv-grabber|api"}
