@@ -574,7 +574,7 @@ def finish_import(db, job: ImportJob, result: ImportResult) -> None:
 
 
 def process_import(db, job: ImportJob) -> None:
-    log_import_event("arxiv_import.started", job, attempt=job.attempts, bucket=job.bucket,
+    log_import_event("arxiv_import.attempt_started", job, attempt=job.attempts, bucket=job.bucket,
                      date_from=job.date_from.isoformat(), date_to=job.date_to.isoformat())
     with ThreadPoolExecutor(max_workers=1) as executor:
         work = executor.submit(import_articles, job.date_from, job.date_to, job.bucket, job.query, job=job)
