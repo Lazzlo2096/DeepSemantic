@@ -6,6 +6,10 @@ x-postgres-environment: &postgres-environment
   POSTGRES_USER: "${POSTGRES_USER:-deepsemantic}"
   POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-deepsemantic}"
 
+x-rustfs-environment: &rustfs-environment
+  RUSTFS_ACCESS_KEY: "${RUSTFS_ACCESS_KEY:-deepsemantic}"
+  RUSTFS_SECRET_KEY: "${RUSTFS_SECRET_KEY:-deepsemantic-local}"
+
 services:
   api:
     build: ./api
@@ -100,9 +104,40 @@ services:
       - pgadmin-data:/var/lib/pgadmin
       - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
 
+  rustfs:
+    image: rustfs/rustfs:1.0.4
+    command: ["/data"]
+    environment:
+      <<: *rustfs-environment
+      RUSTFS_CONSOLE_ENABLE: "true"
+    ports:
+      - "127.0.0.1:${RUSTFS_API_PORT:-9000}:9000"
+      - "127.0.0.1:${RUSTFS_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - rustfs-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/health/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  arxiv-grabber:
+    build: ./arxiv-grabber
+    profiles: ["arxiv"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rustfs:
+        condition: service_healthy
+    environment:
+      <<: [*postgres-environment, *rustfs-environment]
+      RUSTFS_ENDPOINT: http://rustfs:9000
+      RUSTFS_BUCKET: "${RUSTFS_BUCKET:-arxiv-papers}"
+
 volumes:
   embedding-model-cache:
   rabbitmq-data:
   qdrant-data:
   postgres-data:
   pgadmin-data:
+  rustfs-data:
