@@ -58,10 +58,18 @@ async def list_papers(
     status: PaperStatus | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
+    has_summary: bool | None = None,
 ):
     if date_from is not None and date_to is not None and date_from > date_to:
         raise HTTPException(422, "date_from must be on or before date_to.")
 
+    summaries = table("paper_summaries", column("arxiv_id"), column("status"))
+    summary_ready = (
+        select(summaries.c.arxiv_id)
+        .where(summaries.c.arxiv_id == ArxivPaper.arxiv_id, summaries.c.status == "completed")
+        .correlate(ArxivPaper)
+        .exists()
+    )
     filters = []
     if status is not None:
         filters.append(ArxivPaper.status == status)
@@ -69,9 +77,11 @@ async def list_papers(
         filters.append(ArxivPaper.submitted_at >= datetime.combine(date_from, time.min, UTC))
     if date_to is not None:
         filters.append(ArxivPaper.submitted_at <= datetime.combine(date_to, time.max, UTC))
+    if has_summary is not None:
+        filters.append(summary_ready if has_summary else ~summary_ready)
 
     page = (
-        select(ArxivPaper)
+        select(ArxivPaper, summary_ready.label("has_summary"))
         .where(*filters)
         .order_by(*paper_order(ArxivPaper, sort))
         .limit(limit)
@@ -79,16 +89,9 @@ async def list_papers(
         .subquery()
     )
     total = select(func.count().label("total_count")).select_from(ArxivPaper).where(*filters).subquery()
-    summaries = table("paper_summaries", column("arxiv_id"), column("status"))
-    has_summary = (
-        select(summaries.c.arxiv_id)
-        .where(summaries.c.arxiv_id == page.c.arxiv_id, summaries.c.status == "completed")
-        .correlate(page)
-        .exists()
-    )
     # Keep the count on empty pages and read it from the same snapshot as the page.
     statement = (
-        select(*page.c, total.c.total_count, has_summary.label("has_summary"))
+        select(*page.c, total.c.total_count)
         .select_from(total.outerjoin(page, true()))
         .order_by(*paper_order(page.c, sort))
     )
