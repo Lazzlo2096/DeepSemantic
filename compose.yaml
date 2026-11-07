@@ -165,6 +165,44 @@ services:
       RUSTFS_ENDPOINT: http://rustfs:9000
       RUSTFS_BUCKET: "${RUSTFS_BUCKET:-arxiv-papers}"
 
+  loki:
+    image: grafana/loki:3.7.0
+    command: ["-config.file=/etc/loki/config.yaml"]
+    restart: unless-stopped
+    volumes:
+      - ./observability/loki.yaml:/etc/loki/config.yaml:ro
+      - loki-data:/loki
+
+  alloy:
+    image: grafana/alloy:v1.21.3
+    command: ["run", "--storage.path=/var/lib/alloy/data", "/etc/alloy/config.alloy"]
+    restart: unless-stopped
+    depends_on:
+      loki:
+        condition: service_started
+    environment:
+      DEEPSEMANTIC_COMPOSE_PROJECT: "${COMPOSE_PROJECT_NAME}"
+    volumes:
+      - ./observability/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy-data:/var/lib/alloy/data
+
+  grafana:
+    image: grafana/grafana:13.3.0
+    restart: unless-stopped
+    depends_on:
+      loki:
+        condition: service_started
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-deepsemantic}"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./observability/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/loki.yaml:ro
+      - grafana-data:/var/lib/grafana
+
 volumes:
   embedding-model-cache:
   rabbitmq-data:
@@ -172,3 +210,6 @@ volumes:
   postgres-data:
   pgadmin-data:
   rustfs-data:
+  loki-data:
+  alloy-data:
+  grafana-data:
