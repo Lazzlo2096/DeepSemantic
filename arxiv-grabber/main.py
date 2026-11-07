@@ -126,8 +126,8 @@ class ArxivClient:
 
 def parse_article(entry: ElementTree.Element) -> Article:
     arxiv_id = entry.findtext("a:id", default="", namespaces=NAMESPACES).partition("/abs/")[2]
+    summary = entry.findtext("a:summary", default="", namespaces=NAMESPACES)
     if not ARXIV_ID.fullmatch(arxiv_id):
-        summary = entry.findtext("a:summary", default="", namespaces=NAMESPACES)
         raise ValueError(f"Invalid arXiv entry: {arxiv_id or summary}")
 
     published = entry.findtext("a:published", default="", namespaces=NAMESPACES)
@@ -135,7 +135,7 @@ def parse_article(entry: ElementTree.Element) -> Article:
         arxiv_id=arxiv_id,
         title=" ".join(entry.findtext("a:title", default="", namespaces=NAMESPACES).split()),
         authors=[" ".join(node.text.split()) for node in entry.findall("a:author/a:name", NAMESPACES) if node.text],
-        abstract=" ".join(entry.findtext("a:summary", default="", namespaces=NAMESPACES).split()),
+        abstract=summary.strip(),
         submitted_at=datetime.fromisoformat(published).astimezone(timezone.utc),
     )
 
