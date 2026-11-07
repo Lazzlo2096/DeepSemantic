@@ -1,12 +1,10 @@
 # Логи DeepSemantic
 
-`just up` запускает Grafana Alloy, Loki, Grafana и qryn-view. Для уже запущенного стека можно отдельно выполнить `docker compose up -d --build loki alloy grafana qryn-view`.
+`just up` запускает Grafana Alloy, Loki и Grafana. Для уже запущенного стека можно отдельно выполнить `docker compose up -d loki alloy grafana`.
 
 Alloy читает логи `arxiv-grabber`, `paper-indexer`, `api` и `embeding-service` из текущего проекта Docker Compose. Loki хранит их семь дней в томе `loki-data`. Alloy сохраняет позиции чтения в томе `alloy-data`, а настройки Grafana хранятся в томе `grafana-data`.
 
 Открой Grafana, войди с логином `admin` и паролем `deepsemantic`, затем выбери **Explore → Loki**. Порт и начальные учётные данные можно задать через `GRAFANA_PORT`, `GRAFANA_ADMIN_USER` и `GRAFANA_ADMIN_PASSWORD`. [Grafana Explore](http://127.0.0.1:3000/explore)
-
-qryn-view подключается к Loki автоматически. В панели **Logs** введи LogQL-запрос, выбери период кнопкой с часами и нажми **Show Results**. Порт можно задать через `QRYN_VIEW_PORT`. [qryn-view](http://127.0.0.1:3101/)
 
 Запрос LogQL для общего потока:
 
@@ -20,10 +18,11 @@ qryn-view подключается к Loki автоматически. В пан
 {service_name=~"arxiv-grabber|paper-indexer|api"}
 | json
 | event="paper.status_changed"
+| table="arxiv_papers"
 | arxiv_id="2611.07970v1"
 ```
 
-Добавь `| new_status="embeddinged"`, чтобы увидеть завершение индексации. Переходы записываются после коммита в PostgreSQL. У первой записи `old_status` равен `null`.
+Добавь `| changes_status_new="embeddinged"`, чтобы увидеть завершение индексации. Событие содержит `operation="update"` и переход в `changes.status`. Переходы записываются после коммита в PostgreSQL. У первой записи `changes.status.old` равен `null`.
 
 Чтобы увидеть вставки и обновления `arxiv_imports`, в **Explore → Loki** переключи редактор на **Code**, выбери диапазон времени и нажми **Run query** после ввода запроса.
 

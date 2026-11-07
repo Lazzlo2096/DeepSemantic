@@ -234,14 +234,14 @@ services:
       - ./observability/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/loki.yaml:ro
       - grafana-data:/var/lib/grafana
 
-  qryn-view:
-    build: ./observability/qryn-view
-    restart: unless-stopped
-    depends_on:
-      loki:
-        condition: service_started
-    ports:
-      - "127.0.0.1:${QRYN_VIEW_PORT:-3101}:80"
+  # qryn-view:
+  #   build: ./observability/qryn-view
+  #   restart: unless-stopped
+  #   depends_on:
+  #     loki:
+  #       condition: service_started
+  #   ports:
+  #     - "127.0.0.1:${QRYN_VIEW_PORT:-3101}:80"
 
 volumes:
   embedding-model-cache:

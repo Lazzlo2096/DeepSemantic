@@ -96,8 +96,10 @@ def log_status_change(arxiv_id: str, change: tuple[str | None, str] | None, job:
         return
     old_status, new_status = change
     if old_status != new_status:
-        log_import_event("paper.status_changed", job, arxiv_id=arxiv_id,
-                         old_status=old_status, new_status=new_status)
+        log_import_event(
+            "paper.status_changed", job, table="arxiv_papers", operation="update",
+            arxiv_id=arxiv_id, changes={"status": {"old": old_status, "new": new_status}},
+        )
 
 
 class ArxivClient:
