@@ -283,7 +283,7 @@ def import_articles(date_from: date, date_to: date, bucket: str, query: str, *, 
 
                 catalog = db.execute(
                     """
-                    INSERT INTO arxiv_downloads
+                    INSERT INTO arxiv_papers AS paper
                         (arxiv_id, bucket, object_key, title, authors, abstract,
                          submitted_at, downloaded_at, text_object_key)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -296,10 +296,10 @@ def import_articles(date_from: date, date_to: date, bucket: str, query: str, *, 
                                   submitted_at = EXCLUDED.submitted_at,
                                   downloaded_at = EXCLUDED.downloaded_at,
                                   text_object_key = EXCLUDED.text_object_key
-                    WHERE arxiv_downloads.bucket = EXCLUDED.bucket
-                       OR EXCLUDED.downloaded_at > arxiv_downloads.downloaded_at
-                       OR (EXCLUDED.downloaded_at = arxiv_downloads.downloaded_at
-                           AND EXCLUDED.bucket < arxiv_downloads.bucket)
+                    WHERE paper.bucket = EXCLUDED.bucket
+                       OR EXCLUDED.downloaded_at > paper.downloaded_at
+                       OR (EXCLUDED.downloaded_at = paper.downloaded_at
+                           AND EXCLUDED.bucket < paper.bucket)
                     RETURNING bucket, text_object_key
                     """,
                     (article.arxiv_id, bucket, object_key, article.title, article.authors,
@@ -310,7 +310,7 @@ def import_articles(date_from: date, date_to: date, bucket: str, query: str, *, 
 
                 if catalog is None:
                     catalog = db.execute(
-                        "SELECT bucket, text_object_key FROM arxiv_downloads WHERE arxiv_id = %s",
+                        "SELECT bucket, text_object_key FROM arxiv_papers WHERE arxiv_id = %s",
                         (article.arxiv_id,),
                     ).fetchone()
                 catalog_bucket, catalog_text_key = catalog

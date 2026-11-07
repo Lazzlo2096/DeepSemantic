@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 
-from database import MAX_BIGINT, ArxivDownload, database_session
+from database import MAX_BIGINT, ArxivPaper, database_session
 
 
 router = APIRouter(prefix="/papers", tags=["papers"])
@@ -34,8 +34,8 @@ async def list_papers(
 ):
     async with database_session(request) as session:
         papers = await session.scalars(
-            select(ArxivDownload)
-            .order_by(ArxivDownload.downloaded_at.desc(), ArxivDownload.arxiv_id)
+            select(ArxivPaper)
+            .order_by(ArxivPaper.downloaded_at.desc(), ArxivPaper.arxiv_id)
             .limit(limit)
             .offset(offset)
         )
@@ -45,7 +45,7 @@ async def list_papers(
 @router.get("/{arxiv_id:path}", response_model=PaperResponse)
 async def get_paper(request: Request, arxiv_id: ArxivId):
     async with database_session(request) as session:
-        paper = await session.get(ArxivDownload, arxiv_id)
+        paper = await session.get(ArxivPaper, arxiv_id)
     if paper is None:
         raise HTTPException(404, "Paper not found.")
     return paper

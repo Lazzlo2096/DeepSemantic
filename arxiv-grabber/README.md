@@ -40,11 +40,11 @@ PDF сохраняются под ключом `arxiv/<arxiv_id>.pdf`, где `a
 
 Каталог также доступен через API. `GET /papers?limit=20&offset=0` возвращает последние загрузки, `limit` принимает значения от 1 до 100. `GET /papers/{arxiv_id}` возвращает запись указанной версии статьи. Например, `GET /papers/2611.07253v1`. [Swagger UI](http://127.0.0.1:8000/docs#/papers)
 
-В [pgAdmin](http://127.0.0.1:5050) откройте **DeepSemantic PostgreSQL → Databases → deepsemantic → Schemas → public → Tables → arxiv_downloads**. В запущенном pgAdmin обновите узел **Tables**, чтобы увидеть новую таблицу.
+Откройте **DeepSemantic PostgreSQL → Databases → deepsemantic → Schemas → public → Tables → arxiv_papers**. Если pgAdmin уже открыт, обновите узел **Tables**. [pgAdmin](http://127.0.0.1:5050)
 
 ```sql
 SELECT arxiv_id, title, submitted_at, bucket, object_key, text_object_key, downloaded_at
-FROM public.arxiv_downloads
+FROM public.arxiv_papers
 ORDER BY downloaded_at DESC, arxiv_id;
 ```
 

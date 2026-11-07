@@ -28,8 +28,8 @@ class Chunk(Base):
     qdrant_point_id: Mapped[int | None] = mapped_column(BigInteger)
 
 
-class ArxivDownload(Base):
-    __tablename__ = "arxiv_downloads"
+class ArxivPaper(Base):
+    __tablename__ = "arxiv_papers"
 
     arxiv_id: Mapped[str] = mapped_column(Text, primary_key=True)
     bucket: Mapped[str] = mapped_column(Text)
