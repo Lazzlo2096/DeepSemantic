@@ -54,7 +54,7 @@ function renderJob(job) {
   const result = job.result;
   const resultText = row.querySelector(".import-result");
   if (result) {
-    const summary = `PDF доступно: ${result.pdf_available}. Не готово: PDF — ${result.pdf_failures}, текст — ${result.text_failures}, чанки — ${result.chunk_failures}.`;
+    const summary = `Исходников доступно: ${result.pdf_available}. Не готово: исходник — ${result.pdf_failures}, текст — ${result.text_failures}, чанки — ${result.chunk_failures}.`;
     resultText.textContent = result.articles_found == null
       ? summary
       : `Найдено: ${result.articles_found} · Уже было в бакете: ${result.pdf_reused}\n${summary}`;

@@ -7,6 +7,7 @@ import shutil
 import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor, wait
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, timezone
 from tempfile import TemporaryFile
@@ -20,6 +21,8 @@ from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from pypdf import PdfReader
 from pypdf.errors import PyPdfError
+
+from html_text import article_body, extract_markdown, split_markdown
 
 
 ARXIV_API = "https://export.arxiv.org/api/query"
@@ -213,28 +216,35 @@ def ensure_bucket(s3, bucket: str) -> None:
         s3.create_bucket(Bucket=bucket)
 
 
-def store_pdf(arxiv: ArxivClient, s3, bucket: str, arxiv_id: str, object_key: str) -> tuple[dict, bool]:
+def store_source(arxiv: ArxivClient, s3, bucket: str, arxiv_id: str,
+                 object_key: str, source_format: str) -> tuple[dict, bool]:
     try:
         return s3.head_object(Bucket=bucket, Key=object_key), True
     except ClientError as error:
         if error.response["ResponseMetadata"]["HTTPStatusCode"] != 404:
             raise
 
-    with TemporaryFile() as pdf:
-        with arxiv.get(f"https://arxiv.org/pdf/{arxiv_id}", stream=True) as response:
+    with TemporaryFile() as source:
+        with arxiv.get(f"https://arxiv.org/{source_format}/{arxiv_id}", stream=True) as response:
             for chunk in response.iter_content(chunk_size=1024 * 1024):
-                pdf.write(chunk)
-        pdf.seek(0)
-        if pdf.read(5) != b"%PDF-":
-            raise ValueError(f"arXiv did not return a PDF for {arxiv_id}")
-        pdf.seek(0)
-        s3.upload_fileobj(pdf, bucket, object_key, ExtraArgs={"ContentType": "application/pdf"})
+                source.write(chunk)
+        source.seek(0)
+        if source_format == "pdf":
+            if source.read(5) != b"%PDF-":
+                raise ValueError(f"arXiv did not return a PDF for {arxiv_id}")
+            content_type = "application/pdf"
+        else:
+            article_body(source)
+            content_type = "text/html; charset=utf-8"
+        source.seek(0)
+        s3.upload_fileobj(source, bucket, object_key, ExtraArgs={"ContentType": content_type})
     return s3.head_object(Bucket=bucket, Key=object_key), False
 
 
-def store_extracted_text(s3, bucket: str, pdf_key: str, pdf_etag: str) -> str:
-    text_key = pdf_key.removesuffix(".pdf") + ".txt"
-    source_etag = pdf_etag.strip('"')
+def store_extracted_text(s3, bucket: str, object_key: str, etag: str, arxiv_id: str) -> str:
+    is_html = object_key.endswith(".html")
+    text_key = object_key.rsplit(".", 1)[0] + (".md" if is_html else ".txt")
+    source_etag = etag.strip('"')
     try:
         existing = s3.head_object(Bucket=bucket, Key=text_key)
         if existing["ContentLength"] > 0 and existing["Metadata"].get("source-etag") == source_etag:
@@ -243,21 +253,24 @@ def store_extracted_text(s3, bucket: str, pdf_key: str, pdf_etag: str) -> str:
         if error.response["ResponseMetadata"]["HTTPStatusCode"] != 404:
             raise
 
-    with TemporaryFile() as pdf, TemporaryFile() as text:
-        response = s3.get_object(Bucket=bucket, Key=pdf_key, IfMatch=pdf_etag)
+    with TemporaryFile() as source, TemporaryFile() as text:
+        response = s3.get_object(Bucket=bucket, Key=object_key, IfMatch=etag)
         with response["Body"] as body:
-            shutil.copyfileobj(body, pdf, length=1024 * 1024)
-        pdf.seek(0)
-        for page in PdfReader(pdf).pages:
-            page_text = page.extract_text().strip()
-            if page_text:
-                try:
-                    encoded_page = page_text.encode("utf-8")
-                except UnicodeEncodeError:
-                    # Recover valid surrogate pairs and replace isolated surrogates with U+FFFD.
-                    page_text = page_text.encode("utf-16-le", "surrogatepass").decode("utf-16-le", "replace")
-                    encoded_page = page_text.encode("utf-8")
-                text.write(encoded_page + b"\n\n")
+            shutil.copyfileobj(body, source, length=1024 * 1024)
+        source.seek(0)
+        if is_html:
+            text.write(extract_markdown(source, f"https://arxiv.org/html/{arxiv_id}").encode("utf-8"))
+        else:
+            for page in PdfReader(source).pages:
+                page_text = page.extract_text().strip()
+                if page_text:
+                    try:
+                        encoded_page = page_text.encode("utf-8")
+                    except UnicodeEncodeError:
+                        # Recover valid surrogate pairs and replace isolated surrogates with U+FFFD.
+                        page_text = page_text.encode("utf-16-le", "surrogatepass").decode("utf-16-le", "replace")
+                        encoded_page = page_text.encode("utf-8")
+                    text.write(encoded_page + b"\n\n")
         if not text.tell():
             raise ValueError("PDF has no extractable text")
         text.seek(0)
@@ -265,7 +278,10 @@ def store_extracted_text(s3, bucket: str, pdf_key: str, pdf_etag: str) -> str:
             text,
             bucket,
             text_key,
-            ExtraArgs={"ContentType": "text/plain; charset=utf-8", "Metadata": {"source-etag": source_etag}},
+            ExtraArgs={
+                "ContentType": "text/markdown; charset=utf-8" if is_html else "text/plain; charset=utf-8",
+                "Metadata": {"source-etag": source_etag},
+            },
         )
     return text_key
 
@@ -290,7 +306,8 @@ def store_paper_chunks(db, s3, arxiv_id: str, bucket: str, text_key: str, job: I
 
     response = s3.get_object(Bucket=bucket, Key=text_key)
     with response["Body"] as body:
-        chunks = list(split_text(body.read().decode("utf-8")))
+        text = body.read().decode("utf-8")
+    chunks = list(split_markdown(text, CHUNK_SIZE) if text_key.endswith(".md") else split_text(text))
     if not chunks:
         raise ValueError("Extracted text has no chunk content")
 
@@ -341,7 +358,7 @@ def update_running_import(db, job: ImportJob, assignments: str, **values) -> boo
 
 
 def save_paper(db, article: Article, bucket: str, object_key: str, downloaded_at: datetime,
-               job: ImportJob | None) -> tuple[str, str | None] | None:
+               text_object_key: str | None, job: ImportJob | None) -> tuple[str, str | None] | None:
     with db.transaction():
         previous = db.execute(
             "SELECT status FROM arxiv_papers WHERE arxiv_id = %s FOR NO KEY UPDATE",
@@ -351,8 +368,8 @@ def save_paper(db, article: Article, bucket: str, object_key: str, downloaded_at
             """
             INSERT INTO arxiv_papers AS paper
                 (arxiv_id, bucket, object_key, title, authors, abstract,
-                 submitted_at, downloaded_at, arxiv_import_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 submitted_at, downloaded_at, arxiv_import_id, text_object_key)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (arxiv_id)
             DO UPDATE SET bucket = EXCLUDED.bucket,
                           object_key = EXCLUDED.object_key,
@@ -366,11 +383,11 @@ def save_paper(db, article: Article, bucket: str, object_key: str, downloaded_at
                                    (EXCLUDED.bucket, EXCLUDED.object_key, EXCLUDED.downloaded_at)
                               THEN paper.arxiv_import_id ELSE EXCLUDED.arxiv_import_id
                           END,
-                          text_object_key = CASE
+                          text_object_key = COALESCE(EXCLUDED.text_object_key, CASE
                               WHEN (paper.bucket, paper.object_key, paper.downloaded_at) =
                                    (EXCLUDED.bucket, EXCLUDED.object_key, EXCLUDED.downloaded_at)
                               THEN paper.text_object_key
-                          END,
+                          END),
                           status = CASE
                               WHEN (paper.bucket, paper.object_key, paper.downloaded_at) =
                                    (EXCLUDED.bucket, EXCLUDED.object_key, EXCLUDED.downloaded_at)
@@ -383,17 +400,73 @@ def save_paper(db, article: Article, bucket: str, object_key: str, downloaded_at
             RETURNING bucket, text_object_key, status
             """,
             (article.arxiv_id, bucket, object_key, article.title, article.authors,
-             article.abstract, article.submitted_at, downloaded_at, job.id if job is not None else None),
+             article.abstract, article.submitted_at, downloaded_at,
+             job.id if job is not None else None, text_object_key),
         ).fetchone()
+        change = None
+        if catalog is not None:
+            change = db.execute(
+                "SELECT new_status FROM refresh_arxiv_paper_status_change(%s)", (article.arxiv_id,),
+            ).fetchone()
     if catalog is None:
         return None
     catalog_bucket, text_object_key, status = catalog
-    log_status_change(article.arxiv_id, (previous[0] if previous else None, status), job)
+    log_status_change(article.arxiv_id, (previous[0] if previous else None, change[0] if change else status), job)
     return catalog_bucket, text_object_key
 
 
+def publish_source(db, s3, article: Article, bucket: str, object_key: str, downloaded_at: datetime,
+                   text_object_key: str | None, job: ImportJob | None) -> int:
+    previous = db.execute(
+        "SELECT object_key FROM arxiv_papers WHERE arxiv_id = %s", (article.arxiv_id,),
+    ).fetchone()
+    replacing = previous is not None and previous[0].rsplit(".", 1)[-1] != object_key.rsplit(".", 1)[-1]
+    if replacing and text_object_key is None:
+        return 0
+
+    retired = []
+    with db.transaction() if replacing else nullcontext():
+        if replacing:
+            db.execute("SELECT pg_advisory_xact_lock(hashtext('deepsemantic.paper-embeddings'))")
+        catalog = save_paper(db, article, bucket, object_key, downloaded_at, text_object_key, job)
+        if catalog is None:
+            catalog = db.execute(
+                "SELECT bucket, text_object_key FROM arxiv_papers WHERE arxiv_id = %s", (article.arxiv_id,),
+            ).fetchone()
+        elif replacing:
+            retired = db.execute("""
+                WITH unlinked AS (
+                    DELETE FROM paper_chunks WHERE arxiv_id = %s RETURNING chunk_id
+                )
+                DELETE FROM chunks USING unlinked WHERE chunks.id = unlinked.chunk_id
+                RETURNING qdrant_collection, qdrant_point_id
+            """, (article.arxiv_id,)).fetchall()
+        catalog_bucket, catalog_text_key = catalog
+        count = 0
+        if catalog_text_key is not None:
+            count = store_paper_chunks(db, s3, article.arxiv_id, catalog_bucket, catalog_text_key, job)
+
+    points_by_collection = {}
+    for collection, point in retired:
+        if collection is not None and point is not None:
+            points_by_collection.setdefault(collection, []).append(point)
+    qdrant_url = os.getenv("QDRANT_URL", "http://qdrant:6333").rstrip("/")
+    for collection, points in points_by_collection.items():
+        try:
+            with requests.post(
+                f"{qdrant_url}/collections/{collection}/points/delete",
+                params={"wait": "true"}, json={"points": points}, timeout=10,
+            ) as response:
+                if response.status_code != 404:
+                    response.raise_for_status()
+        except requests.RequestException as error:
+            logging.warning("Could not delete retired embeddings for %s: %s", article.arxiv_id, error)
+    return count
+
+
 def import_articles(
-    date_from: date, date_to: date, bucket: str, query: str, *, job: ImportJob | None = None,
+    date_from: date, date_to: date, bucket: str, query: str, source_format: str,
+    *, job: ImportJob | None = None,
 ) -> ImportResult:
     result = ImportResult()
     try:
@@ -445,13 +518,13 @@ def import_articles(
             )
             ensure_bucket(s3, bucket)
             for article in articles:
-                object_key = f"arxiv/{article.arxiv_id}.pdf"
+                object_key = f"arxiv/{article.arxiv_id}.{source_format}"
                 try:
-                    pdf, reused = store_pdf(arxiv, s3, bucket, article.arxiv_id, object_key)
+                    source, reused = store_source(arxiv, s3, bucket, article.arxiv_id, object_key, source_format)
                 except (requests.RequestException, BotoCoreError, ClientError, OSError, ValueError) as error:
-                    result.last_error = f"Could not save PDF for {article.arxiv_id}: {error}"
+                    result.last_error = f"Could not save {source_format.upper()} for {article.arxiv_id}: {error}"
                     log_import_event("arxiv.paper_failed", job, arxiv_id=article.arxiv_id,
-                                     level="error", stage="pdf", error=result.last_error)
+                                     level="error", stage=source_format, error=result.last_error)
                     result.pdf_failures += 1
                     report_progress()
                     continue
@@ -459,49 +532,32 @@ def import_articles(
                 result.pdf_available += 1
                 result.pdf_reused += int(reused)
                 report_progress()
-                catalog = save_paper(db, article, bucket, object_key, pdf["LastModified"], job)
                 logging.info("%s -> s3://%s/%s", article.arxiv_id, bucket, object_key)
 
                 text_object_key = None
                 try:
-                    text_object_key = store_extracted_text(s3, bucket, object_key, pdf["ETag"])
+                    text_object_key = store_extracted_text(s3, bucket, object_key, source["ETag"], article.arxiv_id)
                 except (BotoCoreError, ClientError, OSError, PyPdfError, ValueError) as error:
                     result.last_error = f"Could not extract text for {article.arxiv_id}: {error}"
                     log_import_event("arxiv.paper_failed", job, arxiv_id=article.arxiv_id,
                                      level="error", stage="text", error=result.last_error)
                     result.text_failures += 1
 
-                if catalog is not None:
-                    with db.transaction():
-                        db.execute(
-                            "UPDATE arxiv_papers SET text_object_key = %s WHERE arxiv_id = %s",
-                            (text_object_key, article.arxiv_id),
-                        )
-                        change = db.execute(
-                            "SELECT * FROM refresh_arxiv_paper_status_change(%s)", (article.arxiv_id,),
-                        ).fetchone()
-                    log_status_change(article.arxiv_id, change, job)
-                    catalog = bucket, text_object_key
-                else:
-                    catalog = db.execute(
-                        "SELECT bucket, text_object_key FROM arxiv_papers WHERE arxiv_id = %s",
-                        (article.arxiv_id,),
-                    ).fetchone()
-                catalog_bucket, catalog_text_key = catalog
-                if catalog_text_key is not None:
-                    try:
-                        count = store_paper_chunks(db, s3, article.arxiv_id, catalog_bucket, catalog_text_key, job)
-                        if count:
-                            logging.info("Saved %d chunks for %s in %s", count, article.arxiv_id, catalog_bucket)
-                    except (BotoCoreError, ClientError, OSError, psycopg.Error, ValueError) as error:
-                        result.last_error = f"Could not save chunks for {article.arxiv_id}: {error}"
-                        log_import_event("arxiv.paper_failed", job, arxiv_id=article.arxiv_id,
-                                         level="error", stage="chunks", error=result.last_error)
-                        result.chunk_failures += 1
+                try:
+                    count = publish_source(db, s3, article, bucket, object_key, source["LastModified"],
+                                           text_object_key, job)
+                    if count:
+                        logging.info("Saved %d chunks for %s in %s", count, article.arxiv_id, bucket)
+                except (BotoCoreError, ClientError, OSError, psycopg.Error, ValueError) as error:
+                    result.last_error = f"Could not save chunks for {article.arxiv_id}: {error}"
+                    log_import_event("arxiv.paper_failed", job, arxiv_id=article.arxiv_id,
+                                     level="error", stage="chunks", error=result.last_error)
+                    result.chunk_failures += 1
                 report_progress()
 
-            logging.info("Articles available in RustFS: %d. PDF failures: %d. Text failures: %d. Chunk failures: %d",
-                         result.pdf_available, result.pdf_failures, result.text_failures, result.chunk_failures)
+            logging.info("Articles available in RustFS: %d. %s failures: %d. Text failures: %d. Chunk failures: %d",
+                         result.pdf_available, source_format.upper(), result.pdf_failures,
+                         result.text_failures, result.chunk_failures)
     except (psycopg.Error, requests.RequestException, BotoCoreError, ClientError,
             ElementTree.ParseError, KeyError, RuntimeError, ValueError) as error:
         result.last_error = str(error)
@@ -578,11 +634,12 @@ def finish_import(db, job: ImportJob, result: ImportResult) -> None:
         logging.warning("Lost lease before saving arXiv import %s attempt %d", job.id.hex, job.attempts)
 
 
-def process_import(db, job: ImportJob) -> None:
+def process_import(db, job: ImportJob, source_format: str) -> None:
     log_import_event("arxiv_import.attempt_started", job, attempt=job.attempts, bucket=job.bucket,
-                     date_from=job.date_from.isoformat(), date_to=job.date_to.isoformat())
+                     date_from=job.date_from.isoformat(), date_to=job.date_to.isoformat(), source_format=source_format)
     with ThreadPoolExecutor(max_workers=1) as executor:
-        work = executor.submit(import_articles, job.date_from, job.date_to, job.bucket, job.query, job=job)
+        work = executor.submit(import_articles, job.date_from, job.date_to, job.bucket, job.query,
+                               source_format, job=job)
         while not wait((work,), timeout=HEARTBEAT_SECONDS).done:
             updated = update_running_import(db, job, "lease_until = now() + %(lease)s", lease=JOB_LEASE)
             if not updated:
@@ -596,8 +653,8 @@ def process_import(db, job: ImportJob) -> None:
         finish_import(db, job, result)
 
 
-def run_worker() -> None:
-    logging.info("Polling PostgreSQL for arXiv imports")
+def run_worker(source_format: str) -> None:
+    logging.info("Polling PostgreSQL for arXiv imports (%s)", source_format)
     while True:
         try:
             with connect_database() as db:
@@ -606,14 +663,14 @@ def run_worker() -> None:
                     if job is None:
                         time.sleep(QUEUE_POLL_SECONDS)
                     else:
-                        process_import(db, job)
+                        process_import(db, job, source_format)
         except psycopg.OperationalError as error:
             logging.warning("arXiv queue database connection failed: %s", error)
             time.sleep(QUEUE_POLL_SECONDS)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Download arXiv PDFs by submission date (UTC).")
+    parser = argparse.ArgumentParser(description="Download arXiv papers by submission date (UTC).")
     parser.add_argument("--worker", action="store_true", help="Consume arXiv import jobs from PostgreSQL")
     parser.add_argument("--from", dest="date_from", type=date.fromisoformat)
     parser.add_argument("--to", dest="date_to", type=date.fromisoformat)
@@ -622,11 +679,14 @@ def main() -> int:
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    source_format = os.getenv("ARXIV_SOURCE_FORMAT", "pdf").strip().lower()
+    if source_format not in {"pdf", "html"}:
+        parser.error("ARXIV_SOURCE_FORMAT must be pdf or html")
     default_bucket = os.getenv("RUSTFS_BUCKET", "arxiv-papers")
     if args.worker:
         if any(value is not None for value in (args.date_from, args.date_to, args.bucket, args.query)):
             parser.error("--worker cannot be combined with import options")
-        run_worker()
+        run_worker(source_format)
         return 0
 
     if args.date_from is None or args.date_to is None:
@@ -634,7 +694,7 @@ def main() -> int:
     if args.date_from > args.date_to:
         parser.error("--from must be on or before --to")
     bucket = args.bucket if args.bucket is not None else default_bucket
-    result = import_articles(args.date_from, args.date_to, bucket, args.query or "")
+    result = import_articles(args.date_from, args.date_to, bucket, args.query or "", source_format)
     return int(result.last_error is not None)
 
 

@@ -210,6 +210,8 @@ services:
       <<: [*postgres-environment, *rustfs-environment]
       RUSTFS_ENDPOINT: http://rustfs:9000
       RUSTFS_BUCKET: "${RUSTFS_BUCKET:-arxiv-papers}"
+      ARXIV_SOURCE_FORMAT: "${ARXIV_SOURCE_FORMAT:-pdf}"
+      QDRANT_URL: "${QDRANT_URL:-http://qdrant:6333}"
 
   loki:
     image: grafana/loki:3.7.0

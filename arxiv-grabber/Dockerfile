@@ -8,6 +8,6 @@ COPY requirements.txt .
 RUN python -m pip install --no-cache-dir -r requirements.txt \
     && useradd --create-home --uid 10001 app
 
-COPY main.py .
+COPY main.py html_text.py .
 USER app
 ENTRYPOINT ["python", "main.py"]
