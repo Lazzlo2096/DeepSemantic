@@ -21,11 +21,24 @@ services:
     depends_on:
       api:
         condition: service_started
+      worker-control:
+        condition: service_started
+    networks: [default, worker-control]
     ports:
       - "127.0.0.1:${FONTEND_PORT:-8080}:80"
     volumes:
       - ./fontend/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./fontend/public:/srv:ro
+
+  worker-control:
+    build:
+      context: ./api
+      target: worker-control
+    environment:
+      DEEPSEMANTIC_COMPOSE_PROJECT: "${COMPOSE_PROJECT_NAME}"
+    networks: [worker-control]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
   api:
     build: ./api
@@ -245,6 +258,10 @@ services:
   #       condition: service_started
   #   ports:
   #     - "127.0.0.1:${QRYN_VIEW_PORT:-3101}:80"
+
+networks:
+  worker-control:
+    internal: true
 
 volumes:
   embedding-model-cache:

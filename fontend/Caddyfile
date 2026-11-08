@@ -1,4 +1,10 @@
 :80 {
+	@workers path /api/workers /api/workers/*
+	handle @workers {
+		uri strip_prefix /api
+		reverse_proxy worker-control:8000
+	}
+
 	@api path /api/papers /api/papers/* /api/chunks/search /api/arxiv/imports
 	handle @api {
 		uri strip_prefix /api

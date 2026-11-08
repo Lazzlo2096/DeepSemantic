@@ -1,6 +1,10 @@
 x-host-ollama: &host-ollama "http://host.docker.internal:11434"
 
 services:
+  worker-control:
+    environment:
+      EMBEDDING_WORKER_EXTERNAL: "true"
+
   ollama:
     profiles: [container-inference]
 

@@ -15,7 +15,8 @@ body { margin: 0; }
 .shell { width: min(920px, calc(100% - 40px)); margin-inline: auto; }
 .topbar { border-bottom: 1px solid var(--border); background: #fff; }
 .brand { display: flex; align-items: center; gap: 12px; min-height: 64px; font-weight: 700; }
-.topbar-link { margin-inline-start: auto; color: var(--accent); font-size: 0.9rem; }
+.topbar-nav { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 16px; margin-inline-start: auto; }
+.topbar-link { color: var(--accent); font-size: 0.9rem; }
 .brand-mark {
   display: grid;
   place-items: center;
@@ -137,6 +138,10 @@ button:disabled { color: var(--muted); background: #eef1f6; cursor: default; }
 .paper-stage[data-stage="running"] { background: #e4edff; color: #23458d; }
 .paper-stage[data-stage="completed"] { background: #e2f2e8; color: #21603c; }
 .paper-stage[data-stage="failed"] { background: #fbe8eb; color: #962e37; }
+
+.worker-name { margin: 0; }
+.worker-id { color: var(--muted); font-size: 0.85rem; }
+.worker-feedback { align-self: center; margin: 0; color: #962e37; overflow-wrap: anywhere; }
 
 @media (max-width: 480px) {
   .shell { width: calc(100% - 28px); }

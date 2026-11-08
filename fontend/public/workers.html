@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Воркеры · DeepSemantic</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script type="module" src="/workers.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="shell brand">
+        <span class="brand-mark" aria-hidden="true">DS</span>
+        <span>DeepSemantic</span>
+        <nav class="topbar-nav" aria-label="Разделы">
+          <a class="topbar-link" href="/">Каталог статей</a>
+          <a class="topbar-link" href="/imports.html">Импорт arXiv</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow">Фоновые задачи</p>
+        <h1 id="page-title">Воркеры</h1>
+        <p>Запускай и останавливай контейнеры обработки. Остановка может прервать текущее задание.</p>
+      </section>
+
+      <section aria-labelledby="workers-title">
+        <div class="results-bar">
+          <h2 id="workers-title">Состояние контейнеров</h2>
+          <button id="refresh-workers" type="button">Обновить</button>
+        </div>
+        <p id="workers-status" role="status">Проверяем состояние…</p>
+        <div id="workers-list" class="paper-list"></div>
+      </section>
+      <noscript><p>Для управления воркерами включи JavaScript.</p></noscript>
+    </main>
+
+    <template id="worker-template">
+      <article class="paper">
+        <div class="results-bar">
+          <div>
+            <h3 class="worker-name"></h3>
+            <code class="worker-id"></code>
+          </div>
+          <span class="paper-stage" role="status">Проверяем состояние…</span>
+        </div>
+        <div class="filter-actions">
+          <button type="button" data-action="start" disabled>Старт</button>
+          <button type="button" data-action="stop" disabled>Стоп</button>
+          <p class="worker-feedback" role="status"></p>
+        </div>
+      </article>
+    </template>
+  </body>
+</html>

@@ -17,6 +17,10 @@ COPY paper_summarizer.py .
 USER app
 CMD ["python", "-m", "paper_summarizer"]
 
+FROM base AS worker-control
+COPY worker_control.py .
+CMD ["python", "-m", "uvicorn", "worker_control:app", "--host", "0.0.0.0", "--port", "8000"]
+
 FROM base AS api
 USER app
 EXPOSE 8000
