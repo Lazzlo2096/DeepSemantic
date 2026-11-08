@@ -31,6 +31,11 @@ const searchStatus = document.querySelector("#search-status");
 const searchChunks = document.querySelector("#search-chunks");
 const searchTemplate = document.querySelector("#search-result-template");
 const backToCatalog = document.querySelector("#back-to-catalog");
+const ragSubmit = document.querySelector("#rag-submit");
+const ragStatus = document.querySelector("#rag-status");
+const ragResult = document.querySelector("#rag-result");
+const ragPoints = document.querySelector("#rag-points");
+const ragSources = document.querySelector("#rag-sources");
 const scoreFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 
 let currentPage = 0;
@@ -39,13 +44,18 @@ let pageCount = 0;
 let appliedFilters = new URLSearchParams();
 let catalogRequest;
 let searchRequest;
+let ragRequest;
 
 for (const [value, label] of stageLabels) {
   statusFilter.add(new Option(label, value));
 }
 
+function paperUrl(arxivId) {
+  return `/paper.html?${new URLSearchParams({ id: arxivId })}`;
+}
+
 function linkPaper(card, arxivId) {
-  card.querySelector(".paper-title").href = `/paper.html?${new URLSearchParams({ id: arxivId })}`;
+  card.querySelector(".paper-title").href = paperUrl(arxivId);
   const original = card.querySelector(".paper-arxiv");
   original.href = arxivUrl(arxivId);
   original.hidden = false;
@@ -183,6 +193,11 @@ function showLocation(moveFocus = false) {
   const query = searchQuery.value.trim();
   catalog.hidden = Boolean(query);
   searchResults.hidden = !query;
+  ragRequest?.abort();
+  ragRequest = undefined;
+  ragSubmit.disabled = true;
+  ragStatus.textContent = "";
+  ragResult.hidden = true;
 
   if (query) {
     catalogRequest?.abort();
@@ -256,6 +271,7 @@ async function loadSearch(query, moveFocus) {
     const matches = await response.json();
     if (request.signal.aborted) return;
     searchChunks.replaceChildren(...matches.map(renderSearchResult));
+    ragSubmit.disabled = !matches.some((chunk) => chunk.arxiv_id);
     searchStatus.textContent = matches.length
       ? `Найдено фрагментов: ${matches.length}`
       : "Похожие фрагменты не найдены. Поиск работает по индексированным чанкам.";
@@ -272,6 +288,83 @@ async function loadSearch(query, moveFocus) {
     }
   }
 }
+
+function renderRagAnswer(answer) {
+  const links = new Map();
+  ragSources.replaceChildren(...answer.sources.map((source) => {
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    const article = document.createElement("a");
+    const excerpt = document.createElement("p");
+    const chunkNumber = source.chunk_index + 1;
+    article.href = `${paperUrl(source.arxiv_id)}#chunk-${chunkNumber}`;
+    article.textContent = `Открыть чанк №${chunkNumber} в статье`;
+    article.className = "paper-title";
+    summary.textContent = `[${source.id}] ${source.paper_title || source.arxiv_id}`;
+    excerpt.className = "chunk-text";
+    excerpt.textContent = source.text;
+    details.append(summary, excerpt, article);
+    links.set(source.id, article.href);
+    return details;
+  }));
+  ragPoints.replaceChildren(...answer.points.map((point) => {
+    const item = document.createElement("li");
+    item.textContent = point.text;
+    for (const id of new Set(point.source_ids)) {
+      const reference = document.createElement("a");
+      reference.href = links.get(id);
+      reference.textContent = `[${id}]`;
+      reference.setAttribute("aria-label", `Открыть источник ${id}`);
+      item.append(" ", reference);
+    }
+    return item;
+  }));
+  ragResult.hidden = false;
+}
+
+ragSubmit.addEventListener("click", async () => {
+  const query = new URLSearchParams(location.search).get("query");
+  const request = new AbortController();
+  ragRequest = request;
+  ragSubmit.disabled = true;
+  ragResult.hidden = true;
+  ragStatus.textContent = "Готовим ответ по статьям…";
+
+  try {
+    const response = await fetch("/api/rag/answer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+      signal: request.signal,
+    });
+    if (request.signal.aborted) return;
+    if (response.status === 503) {
+      ragStatus.textContent = "Поиск или Ollama пока недоступны. Попробуй ещё раз.";
+      return;
+    }
+    if (response.status === 504) {
+      ragStatus.textContent = "Сервис не успел ответить. Попробуй ещё раз.";
+      return;
+    }
+    if (!response.ok) throw new Error(`RAG request returned ${response.status}`);
+
+    const answer = await response.json();
+    if (request.signal.aborted) return;
+    if (answer.status === "insufficient_evidence") {
+      ragStatus.textContent = "В найденных фрагментах недостаточно данных для ответа.";
+      return;
+    }
+    renderRagAnswer(answer);
+    ragStatus.textContent = "Ответ готов.";
+  } catch {
+    if (!request.signal.aborted) ragStatus.textContent = "Не удалось получить ответ по статьям.";
+  } finally {
+    if (!request.signal.aborted) {
+      ragRequest = undefined;
+      ragSubmit.disabled = false;
+    }
+  }
+});
 
 searchForm.addEventListener("submit", (event) => {
   event.preventDefault();

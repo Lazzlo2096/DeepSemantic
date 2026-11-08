@@ -57,13 +57,17 @@ class ChunkSearchResult(BaseModel):
 
 @router.post("/search", response_model=list[ChunkSearchResult])
 async def search_chunks(payload: ChunkSearchRequest, request: Request):
-    embedding = await request.app.state.rpc.embed(EmbeddingRequest(texts=[payload.query]))
+    return await find_chunks(request, payload.query, payload.limit)
+
+
+async def find_chunks(request: Request, query: str, limit: int) -> list[ChunkSearchResult]:
+    embedding = await request.app.state.rpc.embed(EmbeddingRequest(texts=[query]))
     try:
         response = await request.app.state.qdrant.post(
             f"/collections/{QDRANT_COLLECTION}/points/query",
             json={
                 "query": embedding["embeddings"][0],
-                "limit": payload.limit,
+                "limit": limit,
                 "filter": {"must": [
                     {"key": "model", "match": {"value": embedding["model"]}},
                     {"key": "model_revision", "match": {"value": embedding["revision"]}},

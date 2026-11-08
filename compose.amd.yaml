@@ -13,6 +13,10 @@ services:
     environment:
       OLLAMA_HOST: *host-ollama
 
+  api:
+    environment:
+      OLLAMA_URL: *host-ollama
+
   summary-worker:
     environment:
       OLLAMA_URL: *host-ollama

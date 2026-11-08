@@ -14,7 +14,9 @@ if (document.referrer) {
 
 function renderChunk(chunk) {
   const card = template.content.cloneNode(true);
-  card.querySelector(".chunk-heading").textContent = `Чанк №${chunk.chunk_index + 1}`;
+  const chunkNumber = chunk.chunk_index + 1;
+  card.querySelector("article").id = `chunk-${chunkNumber}`;
+  card.querySelector(".chunk-heading").textContent = `Чанк №${chunkNumber}`;
   card.querySelector(".chunk-text").textContent = chunk.text;
   return card;
 }
@@ -116,6 +118,9 @@ async function loadPaper(id) {
 
     loadSummary(`${url}/summary`, Boolean(paper.text_object_key));
     list.replaceChildren(...chunks.map(renderChunk));
+    if (location.hash.startsWith("#chunk-")) {
+      document.getElementById(location.hash.slice(1))?.scrollIntoView();
+    }
     status.textContent = chunks.length ? `Всего чанков: ${chunks.length}` : "У этой статьи пока нет чанков.";
   } catch {
     status.textContent = "Не удалось загрузить статью. Попробуй обновить страницу.";

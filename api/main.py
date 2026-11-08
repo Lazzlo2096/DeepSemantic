@@ -19,6 +19,7 @@ from database import MAX_BIGINT, create_database_engine, database_session
 from embedding_schemas import EmbeddingRequest, EmbeddingResponse
 from paper_summaries import router as paper_summaries_router
 from papers import router as papers_router
+from rag import router as rag_router
 
 
 QUEUE = "embeddings.requests"
@@ -129,6 +130,12 @@ async def lifespan(app: FastAPI):
         app.state.qdrant = await stack.enter_async_context(
             httpx.AsyncClient(base_url=os.getenv("QDRANT_URL", "http://qdrant:6333"), timeout=5)
         )
+        app.state.ollama = await stack.enter_async_context(httpx.AsyncClient(
+            base_url=os.getenv("OLLAMA_URL", "http://ollama:11434"),
+            timeout=httpx.Timeout(180, connect=5),
+        ))
+        app.state.ollama_model = os.getenv("OLLAMA_MODEL", "gemma3:4b")
+        app.state.rag_num_gpu = int(os.getenv("RAG_OLLAMA_NUM_GPU", "-1"))
         connection = await stack.enter_async_context(
             await aio_pika.connect_robust(os.environ["AMQP_URL"], timeout=5)
         )
@@ -145,6 +152,7 @@ app = FastAPI(title="BGE-M3 Embedding Service", lifespan=lifespan)
 app.include_router(chunks_router)
 app.include_router(paper_summaries_router)
 app.include_router(papers_router)
+app.include_router(rag_router)
 
 
 @app.get("/health")

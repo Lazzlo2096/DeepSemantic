@@ -8,5 +8,6 @@
 !paper_embeddings.py
 !paper_summaries.py
 !summary_schema.py
+!rag.py
 !worker_control.py
 !requirements.txt
