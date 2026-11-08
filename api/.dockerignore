@@ -7,6 +7,6 @@
 !embedding_schemas.py
 !paper_embeddings.py
 !paper_summaries.py
-!paper_summarizer.py
+!summary_schema.py
 !worker_control.py
 !requirements.txt

@@ -1,3 +1,3 @@
 # TODO
 
-- [ ] Сделать отдельный `summary-worker` по образцу `embeding-worker`.
+- [x] Сделать отдельный `summary-worker` по образцу `embeding-worker`.

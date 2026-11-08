@@ -1,0 +1,4 @@
+*
+!summary-worker/main.py
+!summary-worker/requirements.txt
+!api/summary_schema.py

@@ -13,7 +13,7 @@ services:
     environment:
       OLLAMA_HOST: *host-ollama
 
-  paper-summarizer:
+  summary-worker:
     environment:
       OLLAMA_URL: *host-ollama
 

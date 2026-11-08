@@ -1,29 +1,17 @@
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel
 from sqlalchemy import text
 
 from database import ArxivPaper, database_session
 from papers import ArxivId
+from summary_schema import PaperSummary
 
 
 router = APIRouter(prefix="/papers", tags=["papers"])
-
-NonEmptyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
-
-
-class PaperSummary(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    overview: NonEmptyText
-    objective: NonEmptyText
-    method: NonEmptyText
-    results: list[NonEmptyText]
-    limitations: list[NonEmptyText]
-
 
 class SummaryJob(BaseModel):
     id: UUID

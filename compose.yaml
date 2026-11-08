@@ -76,10 +76,10 @@ services:
         condition: service_started
     environment: *embedding-client-environment
 
-  paper-summarizer:
+  summary-worker:
     build:
-      context: ./api
-      target: summarizer
+      context: .
+      dockerfile: summary-worker/Dockerfile
     restart: unless-stopped
     depends_on:
       migrate:

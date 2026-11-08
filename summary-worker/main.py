@@ -16,7 +16,7 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict
 from tokenizers import Tokenizer
 
-from paper_summaries import NonEmptyText, PaperSummary
+from summary_schema import NonEmptyText, PaperSummary
 
 
 MAX_ATTEMPTS = 3
