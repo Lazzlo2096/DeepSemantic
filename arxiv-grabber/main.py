@@ -15,7 +15,6 @@ from xml.etree import ElementTree
 import psycopg
 import requests
 from botocore.exceptions import BotoCoreError, ClientError
-from psycopg.types.json import Jsonb
 
 from html_text import article_body, html_unavailable
 from storage import connect_database, connect_rustfs
@@ -67,8 +66,7 @@ class ImportJob:
     query: str
     attempts: int
     claim_id: UUID
-    candidate_articles: dict | None
-    checkpoint: dict
+    source_format: str
 
 
 class PauseRequested(Exception):
@@ -248,7 +246,7 @@ def store_source(arxiv: ArxivClient, s3, bucket: str, arxiv_id: str,
     return s3.head_object(Bucket=bucket, Key=object_key), False
 
 
-def update_running_import(db, job: ImportJob, assignments: str, **values) -> dict | None:
+def update_running_import(db, job: ImportJob, assignments: str, *, finish: bool = False, **values) -> dict | None:
     # Lock the old row before reading it. The autocommit statement commits before logging.
     update = db.execute(
         f"""
@@ -257,13 +255,19 @@ def update_running_import(db, job: ImportJob, assignments: str, **values) -> dic
             WHERE id = %(id)s AND claim_id = %(claim_id)s
               AND status IN ('running', 'pausing') AND lease_until > now()
             FOR NO KEY UPDATE
+        ), updated AS (
+            UPDATE arxiv_imports AS job SET {assignments}
+            FROM previous WHERE job.id = previous.id
+            RETURNING job.id, job.attempts, job.status,
+                      to_jsonb(previous) - 'claim_id' AS previous_row, to_jsonb(job) - 'claim_id' AS current_row
+        ), closed_attempt AS (
+            UPDATE arxiv_import_attempts AS attempt SET finished_at = now()
+            FROM updated WHERE %(finish)s AND updated.status <> 'paused'
+              AND attempt.import_id = updated.id AND attempt.attempt = updated.attempts
         )
-        UPDATE arxiv_imports AS job SET {assignments}
-        FROM previous WHERE job.id = previous.id
-        RETURNING to_jsonb(previous) - ARRAY['claim_id', 'candidate_articles', 'checkpoint'],
-                  to_jsonb(job) - ARRAY['claim_id', 'candidate_articles', 'checkpoint']
+        SELECT previous_row, current_row FROM updated
         """,
-        {"id": job.id, "claim_id": job.claim_id, **values},
+        {"id": job.id, "claim_id": job.claim_id, "finish": finish, **values},
     ).fetchone()
     if update is None:
         return None
@@ -271,15 +275,22 @@ def update_running_import(db, job: ImportJob, assignments: str, **values) -> dic
     return update[1]
 
 
-def save_checkpoint(db, job: ImportJob, next_index: int, result: ImportResult) -> None:
-    counters = result.counters()
-    checkpoint = {"next_index": next_index, "counters": counters, "had_error": result.last_error is not None}
+def save_import_progress(db, job: ImportJob, processed: int, result: ImportResult) -> None:
     updated = db.execute(
         """
-        UPDATE arxiv_imports SET checkpoint = %s, result = %s
-        WHERE id = %s AND claim_id = %s AND status IN ('running', 'pausing') AND lease_until > now()
+        WITH claimed AS (
+            SELECT id, attempts FROM arxiv_imports
+            WHERE id = %(id)s AND claim_id = %(claim_id)s
+              AND status IN ('running', 'pausing') AND lease_until > now()
+            FOR NO KEY UPDATE
+        )
+        UPDATE arxiv_import_attempts AS attempt
+        SET processed_articles = %(processed)s, articles_found = %(articles_found)s,
+            pdf_available = %(pdf_available)s, pdf_reused = %(pdf_reused)s,
+            pdf_failures = %(pdf_failures)s, html_unavailable = %(html_unavailable)s
+        FROM claimed WHERE attempt.import_id = claimed.id AND attempt.attempt = claimed.attempts
         """,
-        (Jsonb(checkpoint), Jsonb(counters), job.id, job.claim_id),
+        {"id": job.id, "claim_id": job.claim_id, "processed": processed, **result.counters()},
     )
     if not updated.rowcount:
         raise RuntimeError(f"Lost lease for arXiv import {job.id.hex} attempt {job.attempts}")
@@ -353,11 +364,7 @@ def import_articles(
     date_from: date, date_to: date, bucket: str, query: str, source_format: str,
     *, job: ImportJob | None = None,
 ) -> ImportResult:
-    checkpoint = job.checkpoint if job is not None else {}
-    counters = checkpoint.get("counters", {})
-    result = ImportResult(**{name: counters[name] for name in ImportResult().counters() if name in counters})
-    if checkpoint.get("had_error"):
-        result.last_error = "An article failed before the checkpoint. See arxiv.paper_failed logs."
+    result = ImportResult()
     try:
         with connect_database() as db, requests.Session() as session:
             def check_lease(*, allow_pause: bool = True) -> None:
@@ -390,42 +397,21 @@ def import_articles(
                 result.articles_found += size
 
             arxiv = ArxivClient(session)
-            next_index = checkpoint.get("next_index", 0)
-            if job is not None and job.candidate_articles is not None:
-                saved_articles = job.candidate_articles["articles"]
-                result.articles_found = len(saved_articles)
-                if next_index == result.articles_found:
-                    return result
-                articles = (
-                    Article(**(article | {"submitted_at": datetime.fromisoformat(article["submitted_at"])}))
-                    for article in saved_articles[next_index:]
-                )
-            else:
-                articles = arxiv.articles(date_from, date_to, query, count_page)
-                if job is not None:
-                    candidates = list(articles)
-                    snapshot = {
-                        "source_format": source_format,
-                        "articles": [asdict(article) | {"submitted_at": article.submitted_at.isoformat()}
-                                     for article in candidates],
-                    }
-                    updated = update_running_import(
-                        db, job, "candidate_articles = %(snapshot)s, result = %(result)s",
-                        snapshot=Jsonb(snapshot), result=Jsonb(result.counters()),
-                    )
-                    if not updated:
-                        raise RuntimeError(f"Lost lease for arXiv import {job.id.hex} attempt {job.attempts}")
-                    articles = iter(candidates)
+            articles = arxiv.articles(date_from, date_to, query, count_page)
+            if job is not None:
+                # A fresh search can return different versions or ordering after a pause.
+                articles = list(articles)
+                save_import_progress(db, job, 0, result)
 
             check_lease()
             s3 = connect_rustfs()
             ensure_bucket(s3, bucket)
-            for index, article in enumerate(articles, start=next_index):
+            for processed, article in enumerate(articles, start=1):
                 check_lease()
                 process_article(db, arxiv, s3, article, bucket, source_format, result, job,
                                 lambda: check_lease(allow_pause=False))
                 if job is not None:
-                    save_checkpoint(db, job, index + 1, result)
+                    save_import_progress(db, job, processed, result)
 
             logging.info("Sources available in RustFS: %d. %s failures: %d. HTML unavailable: %d",
                          result.pdf_available, source_format.upper(), result.pdf_failures, result.html_unavailable)
@@ -438,7 +424,7 @@ def import_articles(
     return result
 
 
-def claim_import(db) -> ImportJob | None:
+def claim_import(db, source_format: str) -> ImportJob | None:
     expired = db.execute(
         """
         WITH previous AS (
@@ -446,15 +432,20 @@ def claim_import(db) -> ImportJob | None:
             WHERE lease_until <= now()
               AND (status = 'pausing' OR (status = 'running' AND attempts >= %s))
             FOR NO KEY UPDATE
+        ), updated AS (
+            UPDATE arxiv_imports AS job
+            SET status = (CASE WHEN previous.status = 'pausing' THEN 'paused' ELSE 'failed' END)::arxiv_import_status,
+                finished_at = CASE WHEN previous.status = 'running' THEN now() END,
+                lease_until = NULL, claim_id = NULL
+            FROM previous WHERE job.id = previous.id
+            RETURNING job.id, job.attempts, job.status,
+                      to_jsonb(previous) - 'claim_id' AS previous_row, to_jsonb(job) - 'claim_id' AS current_row
+        ), closed_attempt AS (
+            UPDATE arxiv_import_attempts AS attempt SET finished_at = now()
+            FROM updated WHERE updated.status = 'failed'
+              AND attempt.import_id = updated.id AND attempt.attempt = updated.attempts
         )
-        UPDATE arxiv_imports AS job
-        SET status = (CASE WHEN previous.status = 'pausing' THEN 'paused' ELSE 'failed' END)::arxiv_import_status,
-            finished_at = CASE WHEN previous.status = 'running' THEN now() END,
-            candidate_articles = CASE WHEN previous.status = 'pausing' THEN previous.candidate_articles END,
-            lease_until = NULL, claim_id = NULL
-        FROM previous WHERE job.id = previous.id
-        RETURNING job.id, to_jsonb(previous) - ARRAY['claim_id', 'candidate_articles', 'checkpoint'],
-                  to_jsonb(job) - ARRAY['claim_id', 'candidate_articles', 'checkpoint']
+        SELECT id, previous_row, current_row FROM updated
         """,
         (MAX_JOB_ATTEMPTS,),
     ).fetchall()
@@ -468,26 +459,42 @@ def claim_import(db) -> ImportJob | None:
     claimed = db.execute(
         """
         WITH candidate AS (
-            SELECT * FROM arxiv_imports
-            WHERE (status = 'queued' AND available_at <= now() AND (attempts < %s OR checkpoint IS NOT NULL))
-               OR (status = 'running' AND lease_until <= now() AND attempts < %s)
-            ORDER BY available_at, created_at, id
-            LIMIT 1 FOR UPDATE SKIP LOCKED
+            SELECT job.*, attempt.import_id IS NOT NULL AS can_resume, attempt.source_format AS previous_format
+            FROM arxiv_imports AS job
+            LEFT JOIN arxiv_import_attempts AS attempt
+              ON attempt.import_id = job.id AND attempt.attempt = job.attempts AND attempt.finished_at IS NULL
+            WHERE (job.status = 'queued' AND job.available_at <= now()
+                   AND (job.attempts < %(max_attempts)s OR attempt.import_id IS NOT NULL))
+               OR (job.status = 'running' AND job.lease_until <= now() AND job.attempts < %(max_attempts)s)
+            ORDER BY job.available_at, job.created_at, job.id
+            LIMIT 1 FOR UPDATE OF job SKIP LOCKED
+        ), claimed AS (
+            UPDATE arxiv_imports AS job
+            SET status = 'running', claim_id = gen_random_uuid(),
+                attempts = CASE WHEN candidate.status = 'queued' AND candidate.can_resume
+                                THEN candidate.attempts ELSE candidate.attempts + 1 END,
+                started_at = COALESCE(candidate.started_at, now()), lease_until = now() + %(lease)s
+            FROM candidate WHERE job.id = candidate.id
+            RETURNING job.id, job.date_from, job.date_to, job.bucket, job.query, job.attempts, job.claim_id,
+                      candidate.attempts AS previous_attempt, candidate.status AS previous_status,
+                      COALESCE(candidate.previous_format, %(source_format)s) AS source_format,
+                      to_jsonb(candidate) - ARRAY['claim_id', 'can_resume', 'previous_format'] AS previous_row,
+                      to_jsonb(job) - 'claim_id' AS current_row
+        ), expired_attempt AS (
+            UPDATE arxiv_import_attempts AS attempt SET finished_at = now()
+            FROM claimed WHERE claimed.previous_status = 'running'
+              AND attempt.import_id = claimed.id AND attempt.attempt = claimed.previous_attempt
+        ), active_attempt AS (
+            INSERT INTO arxiv_import_attempts (import_id, attempt, source_format)
+            SELECT id, attempts, source_format FROM claimed
+            ON CONFLICT (import_id, attempt) DO UPDATE SET source_format = EXCLUDED.source_format
+            RETURNING source_format
         )
-        UPDATE arxiv_imports AS job
-        SET status = 'running', claim_id = gen_random_uuid(),
-            attempts = CASE WHEN candidate.status = 'queued' AND candidate.checkpoint IS NOT NULL
-                            THEN candidate.attempts ELSE candidate.attempts + 1 END,
-            checkpoint = COALESCE(candidate.checkpoint, '{}'::jsonb),
-            started_at = COALESCE(candidate.started_at, now()), lease_until = now() + %s
-        FROM candidate
-        WHERE job.id = candidate.id
-        RETURNING job.id, job.date_from, job.date_to, job.bucket, job.query, job.attempts,
-                  job.claim_id, job.candidate_articles, job.checkpoint,
-                  to_jsonb(candidate) - ARRAY['claim_id', 'candidate_articles', 'checkpoint'],
-                  to_jsonb(job) - ARRAY['claim_id', 'candidate_articles', 'checkpoint']
+        SELECT id, date_from, date_to, bucket, query, attempts, claim_id, active_attempt.source_format,
+               previous_row, current_row
+        FROM claimed CROSS JOIN active_attempt
         """,
-        (MAX_JOB_ATTEMPTS, MAX_JOB_ATTEMPTS, JOB_LEASE),
+        {"max_attempts": MAX_JOB_ATTEMPTS, "lease": JOB_LEASE, "source_format": source_format},
     ).fetchone()
     if claimed is None:
         return None
@@ -508,11 +515,9 @@ def finish_import(db, job: ImportJob, result: ImportResult) -> None:
         lease_until = NULL, claim_id = NULL,
         available_at = CASE WHEN previous.status = 'running' AND %(status)s = 'queued'
                             THEN now() + %(delay)s ELSE previous.available_at END,
-        finished_at = CASE WHEN previous.status = 'running' AND %(status)s <> 'queued' THEN now() END,
-        candidate_articles = CASE WHEN previous.status = 'pausing' THEN previous.candidate_articles END,
-        checkpoint = CASE WHEN previous.status = 'pausing' OR %(status)s <> 'queued' THEN previous.checkpoint END
+        finished_at = CASE WHEN previous.status = 'running' AND %(status)s <> 'queued' THEN now() END
         """,
-        status=status, delay=JOB_RETRY_DELAY,
+        status=status, delay=JOB_RETRY_DELAY, finish=True,
     )
     if updated:
         log_import_event("arxiv_import.attempt_finished", job, attempt=job.attempts,
@@ -521,14 +526,12 @@ def finish_import(db, job: ImportJob, result: ImportResult) -> None:
         logging.warning("Lost lease before saving arXiv import %s attempt %d", job.id.hex, job.attempts)
 
 
-def process_import(db, job: ImportJob, source_format: str) -> None:
-    if job.candidate_articles is not None:
-        source_format = job.candidate_articles["source_format"]
+def process_import(db, job: ImportJob) -> None:
     log_import_event("arxiv_import.attempt_started", job, attempt=job.attempts, bucket=job.bucket,
-                     date_from=job.date_from.isoformat(), date_to=job.date_to.isoformat(), source_format=source_format)
+                     date_from=job.date_from.isoformat(), date_to=job.date_to.isoformat(), source_format=job.source_format)
     with ThreadPoolExecutor(max_workers=1) as executor:
         work = executor.submit(import_articles, job.date_from, job.date_to, job.bucket, job.query,
-                               source_format, job=job)
+                               job.source_format, job=job)
         while not wait((work,), timeout=HEARTBEAT_SECONDS).done:
             updated = update_running_import(db, job, "lease_until = now() + %(lease)s", lease=JOB_LEASE)
             if not updated:
@@ -548,11 +551,11 @@ def run_worker(source_format: str) -> None:
         try:
             with connect_database() as db:
                 while True:
-                    job = claim_import(db)
+                    job = claim_import(db, source_format)
                     if job is None:
                         time.sleep(QUEUE_POLL_SECONDS)
                     else:
-                        process_import(db, job, source_format)
+                        process_import(db, job)
         except psycopg.OperationalError as error:
             logging.warning("arXiv queue database connection failed: %s", error)
             time.sleep(QUEUE_POLL_SECONDS)

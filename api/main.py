@@ -202,9 +202,7 @@ async def control_arxiv_import(job_id: UUID, action: Literal["pause", "resume"],
             UPDATE arxiv_imports
             SET status = (CASE WHEN lease_until > now() THEN 'pausing' ELSE 'paused' END)::arxiv_import_status,
                 lease_until = CASE WHEN lease_until > now() THEN lease_until END,
-                claim_id = CASE WHEN lease_until > now() THEN claim_id END,
-                checkpoint = CASE WHEN status IN ('running', 'pausing') THEN COALESCE(checkpoint, '{}'::jsonb)
-                                  ELSE checkpoint END
+                claim_id = CASE WHEN lease_until > now() THEN claim_id END
             WHERE id = :id AND status IN ('queued', 'running', 'pausing', 'paused')
             RETURNING status
         """
@@ -237,12 +235,14 @@ async def list_arxiv_imports(
     async with database_session(request) as session:
         rows = await session.execute(
             text("""
-                SELECT id, date_from, date_to, bucket, query, status, attempts, created_at,
-                       available_at, started_at, finished_at,
-                       (checkpoint->>'next_index')::integer AS processed_articles, result
-                FROM arxiv_imports
-                ORDER BY created_at DESC, id DESC
-                LIMIT :limit OFFSET :offset
+                SELECT job.id, job.date_from, job.date_to, job.bucket, job.query, job.status, job.attempts,
+                       job.created_at, job.available_at, job.started_at, job.finished_at, stats.processed_articles,
+                       jsonb_strip_nulls(to_jsonb(stats) - 'processed_articles') AS result
+                FROM (
+                    SELECT * FROM arxiv_imports ORDER BY created_at DESC, id DESC LIMIT :limit OFFSET :offset
+                ) AS job
+                LEFT JOIN LATERAL arxiv_import_result(job.id) AS stats ON true
+                ORDER BY job.created_at DESC, job.id DESC
             """),
             {"limit": limit, "offset": offset},
         )
