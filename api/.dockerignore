@@ -9,5 +9,6 @@
 !paper_summaries.py
 !summary_schema.py
 !rag.py
+!llm_chat.py
 !worker_control.py
 !requirements.txt

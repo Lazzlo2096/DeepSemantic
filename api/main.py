@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from chunks import router as chunks_router
 from database import MAX_BIGINT, create_database_engine, database_session
 from embedding_schemas import EmbeddingRequest, EmbeddingResponse
+from llm_chat import ChatSettings
 from paper_summaries import router as paper_summaries_router
 from papers import router as papers_router
 from rag import router as rag_router
@@ -130,12 +131,14 @@ async def lifespan(app: FastAPI):
         app.state.qdrant = await stack.enter_async_context(
             httpx.AsyncClient(base_url=os.getenv("QDRANT_URL", "http://qdrant:6333"), timeout=5)
         )
-        app.state.ollama = await stack.enter_async_context(httpx.AsyncClient(
-            base_url=os.getenv("OLLAMA_URL", "http://ollama:11434"),
+        app.state.chat_settings = chat_settings = ChatSettings.from_env()
+        app.state.chat_client = await stack.enter_async_context(httpx.AsyncClient(
+            base_url=chat_settings.base_url,
             timeout=httpx.Timeout(180, connect=5),
         ))
-        app.state.ollama_model = os.getenv("OLLAMA_MODEL", "gemma3:4b")
-        app.state.rag_gpu_layers = int(os.getenv("RAG_OLLAMA_GPU_LAYERS", "-1"))
+        app.state.rag_ollama_options = (
+            {"num_gpu": int(os.getenv("RAG_OLLAMA_GPU_LAYERS", "-1"))} if chat_settings.provider == "ollama" else {}
+        )
         connection = await stack.enter_async_context(
             await aio_pika.connect_robust(os.environ["AMQP_URL"], timeout=5)
         )

@@ -21,6 +21,9 @@ services:
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
+        if [ "$${LLM_PROVIDER:-ollama}" != ollama ]; then
+          exit 0
+        fi
         if ! ollama show "$$OLLAMA_MODEL" >/dev/null 2>&1; then
           exec ollama pull "$$OLLAMA_MODEL"
         fi

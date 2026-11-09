@@ -59,6 +59,11 @@ class RagAnswer(GeneratedAnswer):
 
 @router.post("/answer", response_model=RagAnswer)
 async def answer_question(payload: RagQuestion, request: Request):
+    state = request.app.state
+    chat = state.chat_settings
+    if not chat.configured:
+        raise HTTPException(503, "OPENROUTER_API_KEY is required.")
+
     candidates = await find_chunks(request, payload.query, limit=10)
     sources = []
     context = {"question": payload.query, "sources": []}
@@ -72,7 +77,7 @@ async def answer_question(payload: RagQuestion, request: Request):
         )
         context["sources"].append(source.model_dump(include={"id", "arxiv_id", "text"}))
         candidate = QUESTION_PREFIX + json.dumps(context, ensure_ascii=False)
-        # A byte budget is conservative and works across configured Ollama models.
+        # A conservative byte budget also works with local Ollama models.
         if len((INSTRUCTIONS + candidate).encode()) > PROMPT_BUDGET:
             context["sources"].pop()
             continue
@@ -84,46 +89,28 @@ async def answer_question(payload: RagQuestion, request: Request):
     if not sources:
         return RagAnswer(status="insufficient_evidence", points=[], sources=[])
 
-    state = request.app.state
     try:
-        response = await state.ollama.post("/api/chat", json={
-            "model": state.ollama_model,
-            "messages": [
-                {"role": "system", "content": INSTRUCTIONS},
-                {"role": "user", "content": material},
-            ],
-            "format": GeneratedAnswer.model_json_schema(),
-            "stream": False,
-            "truncate": False,
-            "shift": False,
-            "options": {
-                "num_ctx": CONTEXT_TOKENS,
-                "num_predict": OUTPUT_TOKENS,
-                "num_gpu": state.rag_gpu_layers,
-                "temperature": 0.1,
-            },
-        })
-        response.raise_for_status()
-    except httpx.TimeoutException as error:
-        raise HTTPException(504, "Ollama response timed out.") from error
-    except httpx.HTTPStatusError as error:
-        status = error.response.status_code
-        logger.warning("Ollama returned HTTP %d for RAG", status)
-        raise HTTPException(503 if status in (404, 503) else 502, "Ollama could not answer.") from error
-    except httpx.RequestError as error:
-        raise HTTPException(503, "Ollama is unavailable.") from error
-
-    try:
-        data = response.json()
-        if data["done"] is not True or data.get("done_reason") == "length":
-            raise ValueError("Incomplete generation")
-        generated = GeneratedAnswer.model_validate_json(data["message"]["content"])
+        content = await chat.complete(
+            state.chat_client,
+            [{"role": "system", "content": INSTRUCTIONS}, {"role": "user", "content": material}],
+            max_tokens=OUTPUT_TOKENS, ollama_options={"num_ctx": CONTEXT_TOKENS, **state.rag_ollama_options},
+            schema=GeneratedAnswer.model_json_schema(),
+        )
+        generated = GeneratedAnswer.model_validate_json(content)
         cited_ids = {source_id for point in generated.points for source_id in point.source_ids}
         sources_by_id = {source.id: source for source in sources}
         if cited_ids - sources_by_id.keys():
             raise ValueError("Unknown source ID")
-    except (KeyError, TypeError, ValueError) as error:
-        raise HTTPException(502, "Ollama returned an incomplete answer or invalid citations.") from error
+    except httpx.TimeoutException as error:
+        raise HTTPException(504, f"{chat.provider} response timed out.") from error
+    except httpx.HTTPStatusError as error:
+        status = error.response.status_code
+        logger.warning("%s returned HTTP %d for RAG", chat.provider, status)
+        raise HTTPException(503 if status in (404, 503) else 502, f"{chat.provider} could not answer.") from error
+    except httpx.RequestError as error:
+        raise HTTPException(503, f"{chat.provider} is unavailable.") from error
+    except ValueError as error:
+        raise HTTPException(502, f"{chat.provider} returned an incomplete answer or invalid citations.") from error
 
     if not generated.points:
         return RagAnswer(status="insufficient_evidence", points=[], sources=[])

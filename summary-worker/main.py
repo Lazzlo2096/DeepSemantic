@@ -13,6 +13,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from psycopg.rows import dict_row
 from tokenizers import Tokenizer
 
+from llm_chat import ChatSettings
 from summary_schema import MARKDOWN_REQUIRED
 
 
@@ -23,6 +24,7 @@ RETRY_DELAY = timedelta(minutes=1)
 POLL_SECONDS = 3
 PROMPT_VERSION = "4"
 MIN_CONTEXT_TOKENS = 2048
+DEFAULT_CONTEXT_TOKENS = 49152
 MAX_CONTEXT_TOKENS = 131072
 CHAT_TEMPLATE_RESERVE = 64
 FINAL_OUTPUT_TOKENS = 768
@@ -54,49 +56,43 @@ class LeaseLost(Exception):
 
 
 class Summarizer:
-    def __init__(self, client: httpx.AsyncClient, tokenizer: Tokenizer, model: str, context_tokens: int):
+    def __init__(self, client: httpx.AsyncClient, chat: ChatSettings):
         self.client = client
-        self.tokenizer = tokenizer
-        self.model = model
-        self.context_tokens = context_tokens
+        self.chat = chat
+        self.tokenizer = None
+        if chat.provider == "ollama":
+            self.context_tokens = int(os.getenv("SUMMARY_CONTEXT_TOKENS", str(DEFAULT_CONTEXT_TOKENS)))
+            if not MIN_CONTEXT_TOKENS <= self.context_tokens <= MAX_CONTEXT_TOKENS:
+                raise ValueError(f"SUMMARY_CONTEXT_TOKENS must be between {MIN_CONTEXT_TOKENS} and {MAX_CONTEXT_TOKENS}")
+            self.tokenizer = Tokenizer.from_file("/app/gemma-tokenizer.json")
 
     async def summarize(self, source: str, progress: Callable[[int, int], Awaitable[None]]) -> str:
         prompt = FINAL_INSTRUCTIONS + source
-        tokens = self.tokenizer.encode(prompt, add_special_tokens=False)
-        required = len(tokens.ids) + CHAT_TEMPLATE_RESERVE + FINAL_OUTPUT_TOKENS
-        if required > self.context_tokens:
-            raise SummaryInputError(
-                f"Полный текст с промптом и резервом для ответа требует {required} токенов "
-                f"при лимите {self.context_tokens}."
-            )
-        # Round up to avoid allocating the maximum context for every article.
-        rounded = ((required + MIN_CONTEXT_TOKENS - 1) // MIN_CONTEXT_TOKENS) * MIN_CONTEXT_TOKENS
-        num_ctx = min(self.context_tokens, rounded)
+        ollama_options = {}
+        if self.tokenizer is not None:
+            tokens = self.tokenizer.encode(prompt, add_special_tokens=False)
+            required = len(tokens.ids) + CHAT_TEMPLATE_RESERVE + FINAL_OUTPUT_TOKENS
+            if required > self.context_tokens:
+                raise SummaryInputError(
+                    f"Полный текст с промптом и резервом для ответа требует {required} токенов "
+                    f"при лимите {self.context_tokens}."
+                )
+            ollama_options["num_ctx"] = self.context_tokens
         await progress(0, 1)
-        response = await self.client.post("/api/chat", json={
-            "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-            "truncate": False,
-            "shift": False,
-            "options": {"num_ctx": num_ctx, "num_predict": FINAL_OUTPUT_TOKENS, "temperature": 0.1},
-        })
-        if response.is_error:
-            message = response.text.lower()
-            if "context" in message and any(word in message for word in ("exceed", "too long", "too large", "overflow")):
-                raise SummaryInputError("Полный запрос превышает рабочий контекст Ollama.")
-            response.raise_for_status()
         try:
-            data = response.json()
-            if not data["done"] or data.get("done_reason") == "length":
-                raise SummaryError("Ollama прервал генерацию по лимиту.")
-            summary = data["message"]["content"]
-        except (KeyError, TypeError, ValueError) as error:
-            raise SummaryError("Ollama вернул ответ, который не соответствует формату суммаризации.") from error
-        if not isinstance(summary, str) or not summary.strip():
-            raise SummaryError("Ollama вернул пустое саммари.")
+            summary = await self.chat.complete(
+                self.client, [{"role": "user", "content": prompt}],
+                max_tokens=FINAL_OUTPUT_TOKENS, ollama_options=ollama_options,
+            )
+        except httpx.HTTPStatusError as error:
+            message = error.response.text.lower()
+            if "context" in message and any(word in message for word in ("exceed", "too long", "too large", "overflow")):
+                raise SummaryInputError(f"Полный запрос превышает рабочий контекст {self.chat.provider}.") from error
+            raise
+        except ValueError as error:
+            raise SummaryError(f"{self.chat.provider} вернул неполное или пустое саммари.") from error
         await progress(1, 1)
-        return summary.strip()
+        return summary
 
 
 ACTIVE_LEASE = "id = %(id)s AND attempts = %(attempts)s AND status = 'running' AND lease_until > now()"
@@ -194,8 +190,9 @@ async def process_job(db, s3, summarizer: Summarizer, job) -> None:
     except (BotoCoreError, ClientError):
         error = "Не удалось прочитать текст статьи из RustFS."
     except httpx.HTTPError as failure:
-        logging.warning("Ollama request failed for job %s (%s)", job["id"], type(failure).__name__)
-        error = "Ollama не смог обработать запрос."
+        detail = failure.response.status_code if isinstance(failure, httpx.HTTPStatusError) else type(failure).__name__
+        logging.warning("%s request failed for job %s (%s)", summarizer.chat.provider, job["id"], detail)
+        error = f"{summarizer.chat.provider} не смог обработать запрос."
     finally:
         if not work.done():
             work.cancel()
@@ -224,21 +221,18 @@ async def process_job(db, s3, summarizer: Summarizer, job) -> None:
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    context_tokens = int(os.getenv("SUMMARY_CONTEXT_TOKENS", str(MAX_CONTEXT_TOKENS)))
-    if not MIN_CONTEXT_TOKENS <= context_tokens <= MAX_CONTEXT_TOKENS:
-        raise ValueError(f"SUMMARY_CONTEXT_TOKENS must be between {MIN_CONTEXT_TOKENS} and {MAX_CONTEXT_TOKENS}")
-    model = os.getenv("OLLAMA_MODEL", "gemma3:4b")
-    tokenizer = Tokenizer.from_file("/app/gemma-tokenizer.json")
+    chat = ChatSettings.from_env()
+    if not chat.configured:
+        raise SystemExit("OPENROUTER_API_KEY is required when LLM_PROVIDER=openrouter")
     s3 = boto3.client(
         "s3", endpoint_url=os.environ["RUSTFS_ENDPOINT"],
         aws_access_key_id=os.environ["RUSTFS_ACCESS_KEY"], aws_secret_access_key=os.environ["RUSTFS_SECRET_KEY"],
         region_name="us-east-1",
         config=Config(signature_version="s3v4", s3={"addressing_style": "path"}, connect_timeout=5, read_timeout=30),
     )
-    ollama_url = os.getenv("OLLAMA_URL", "http://ollama:11434")
-    async with httpx.AsyncClient(base_url=ollama_url, timeout=httpx.Timeout(300, connect=5, read=1800)) as client:
-        summarizer = Summarizer(client, tokenizer, model, context_tokens)
-        logging.info("Polling PostgreSQL for paper summaries (%s, up to %s context tokens)", model, context_tokens)
+    async with httpx.AsyncClient(base_url=chat.base_url, timeout=httpx.Timeout(300, connect=5, read=1800)) as client:
+        summarizer = Summarizer(client, chat)
+        logging.info("Polling PostgreSQL for paper summaries (%s, %s)", chat.provider, chat.model)
         while True:
             try:
                 async with await psycopg.AsyncConnection.connect(
@@ -247,7 +241,7 @@ async def main() -> None:
                     connect_timeout=5, autocommit=True, row_factory=dict_row,
                 ) as db:
                     while True:
-                        job = await claim_job(db, model)
+                        job = await claim_job(db, chat.model)
                         if job is None:
                             await asyncio.sleep(POLL_SECONDS)
                         else:

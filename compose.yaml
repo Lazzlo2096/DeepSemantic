@@ -10,6 +10,12 @@ x-rustfs-environment: &rustfs-environment
   RUSTFS_ACCESS_KEY: "${RUSTFS_ACCESS_KEY:-deepsemantic}"
   RUSTFS_SECRET_KEY: "${RUSTFS_SECRET_KEY:-deepsemantic-local}"
 
+x-llm-environment: &llm-environment
+  LLM_PROVIDER: "${LLM_PROVIDER:-openrouter}"
+  OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+  OPENROUTER_MODEL: "${OPENROUTER_MODEL:-deepseek/deepseek-v4.1-flash-1017}"
+  OLLAMA_MODEL: "${OLLAMA_MODEL:-gemma3:4b}"
+
 x-embedding-client-environment: &embedding-client-environment
   <<: [*amqp-environment, *postgres-environment]
   EMBEDDING_RPC_TIMEOUT: "${EMBEDDING_RPC_TIMEOUT:-60}"
@@ -52,9 +58,8 @@ services:
     ports:
       - "127.0.0.1:${EMBEDDING_PORT:-8000}:8000"
     environment:
-      <<: *embedding-client-environment
+      <<: [*embedding-client-environment, *llm-environment]
       RUSTFS_BUCKET: "${RUSTFS_BUCKET:-arxiv-papers}"
-      OLLAMA_MODEL: "${OLLAMA_MODEL:-gemma3:4b}"
       RAG_OLLAMA_GPU_LAYERS: "${RAG_OLLAMA_GPU_LAYERS:--1}"
     healthcheck:
       test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health/live', timeout=4).close()"]
@@ -93,10 +98,9 @@ services:
       rustfs:
         condition: service_healthy
     environment:
-      <<: [*postgres-environment, *rustfs-environment]
+      <<: [*postgres-environment, *rustfs-environment, *llm-environment]
       RUSTFS_ENDPOINT: http://rustfs:9000
-      OLLAMA_MODEL: "${OLLAMA_MODEL:-gemma3:4b}"
-      SUMMARY_CONTEXT_TOKENS: "${SUMMARY_CONTEXT_TOKENS:-131072}"
+      SUMMARY_CONTEXT_TOKENS: "${SUMMARY_CONTEXT_TOKENS:-49152}"
 
   embeding-service:
     profiles: [workers]
@@ -121,6 +125,8 @@ services:
     extends:
       file: ./ollama/compose.yaml
       service: ollama-init
+    environment:
+      LLM_PROVIDER: "${LLM_PROVIDER:-openrouter}"
     depends_on:
       ollama:
         condition: service_healthy
