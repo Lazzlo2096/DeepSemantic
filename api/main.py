@@ -135,7 +135,7 @@ async def lifespan(app: FastAPI):
             timeout=httpx.Timeout(180, connect=5),
         ))
         app.state.ollama_model = os.getenv("OLLAMA_MODEL", "gemma3:4b")
-        app.state.rag_num_gpu = int(os.getenv("RAG_OLLAMA_NUM_GPU", "-1"))
+        app.state.rag_gpu_layers = int(os.getenv("RAG_OLLAMA_GPU_LAYERS", "-1"))
         connection = await stack.enter_async_context(
             await aio_pika.connect_robust(os.environ["AMQP_URL"], timeout=5)
         )

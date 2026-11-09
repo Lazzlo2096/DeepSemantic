@@ -99,7 +99,7 @@ async def answer_question(payload: RagQuestion, request: Request):
             "options": {
                 "num_ctx": CONTEXT_TOKENS,
                 "num_predict": OUTPUT_TOKENS,
-                "num_gpu": state.rag_num_gpu,
+                "num_gpu": state.rag_gpu_layers,
                 "temperature": 0.1,
             },
         })

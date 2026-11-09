@@ -55,7 +55,7 @@ services:
       <<: *embedding-client-environment
       RUSTFS_BUCKET: "${RUSTFS_BUCKET:-arxiv-papers}"
       OLLAMA_MODEL: "${OLLAMA_MODEL:-gemma3:4b}"
-      RAG_OLLAMA_NUM_GPU: "${RAG_OLLAMA_NUM_GPU:--1}"
+      RAG_OLLAMA_GPU_LAYERS: "${RAG_OLLAMA_GPU_LAYERS:--1}"
     healthcheck:
       test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=4).close()"]
       interval: 10s
