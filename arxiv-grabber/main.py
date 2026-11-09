@@ -17,7 +17,7 @@ import requests
 from botocore.exceptions import BotoCoreError, ClientError
 from psycopg.types.json import Jsonb
 
-from html_text import article_body
+from html_text import article_body, html_unavailable
 from storage import connect_database, connect_rustfs
 
 
@@ -49,6 +49,7 @@ class ImportResult:
     pdf_reused: int = 0
     pdf_available: int = 0
     pdf_failures: int = 0
+    html_unavailable: int = 0
     last_error: str | None = None
 
     def counters(self) -> dict[str, int]:
@@ -109,7 +110,7 @@ class ArxivClient:
         self.session.headers["User-Agent"] = "DeepSemantic/arxiv-grabber"
         self.next_request = time.monotonic() + REQUEST_INTERVAL
 
-    def get(self, url: str, **kwargs) -> requests.Response:
+    def get(self, url: str, *, allow_not_found: bool = False, **kwargs) -> requests.Response:
         for attempt in range(3):
             time.sleep(max(0, self.next_request - time.monotonic()))
             self.next_request = time.monotonic() + REQUEST_INTERVAL
@@ -127,6 +128,9 @@ class ArxivClient:
                 self.next_request = max(self.next_request, time.monotonic() + delay)
                 response.close()
                 continue
+
+            if status == 404 and allow_not_found:
+                return response
 
             try:
                 response.raise_for_status()
@@ -215,7 +219,7 @@ def ensure_bucket(s3, bucket: str) -> None:
 
 
 def store_source(arxiv: ArxivClient, s3, bucket: str, arxiv_id: str,
-                 object_key: str, source_format: str) -> tuple[dict, bool]:
+                 object_key: str, source_format: str) -> tuple[dict, bool] | None:
     try:
         return s3.head_object(Bucket=bucket, Key=object_key), True
     except ClientError as error:
@@ -223,7 +227,12 @@ def store_source(arxiv: ArxivClient, s3, bucket: str, arxiv_id: str,
             raise
 
     with TemporaryFile() as source:
-        with arxiv.get(f"https://arxiv.org/{source_format}/{arxiv_id}", stream=True) as response:
+        with arxiv.get(f"https://arxiv.org/{source_format}/{arxiv_id}",
+                       stream=True, allow_not_found=source_format == "html") as response:
+            if response.status_code == 404:
+                if html_unavailable(response.content, arxiv_id):
+                    return None
+                response.raise_for_status()
             for chunk in response.iter_content(chunk_size=1024 * 1024):
                 source.write(chunk)
         source.seek(0)
@@ -319,7 +328,7 @@ def process_article(db, arxiv, s3, article: Article, bucket: str, source_format:
                     result: ImportResult, job: ImportJob | None, check_lease: Callable[[], None]) -> None:
     object_key = f"arxiv/{article.arxiv_id}.{source_format}"
     try:
-        source, reused = store_source(arxiv, s3, bucket, article.arxiv_id, object_key, source_format)
+        stored = store_source(arxiv, s3, bucket, article.arxiv_id, object_key, source_format)
     except (requests.RequestException, BotoCoreError, ClientError, OSError, ValueError) as error:
         result.last_error = f"Could not save {source_format.upper()} for {article.arxiv_id}: {error}"
         log_import_event("arxiv.paper_failed", job, arxiv_id=article.arxiv_id,
@@ -327,6 +336,12 @@ def process_article(db, arxiv, s3, article: Article, bucket: str, source_format:
         result.pdf_failures += 1
         return
 
+    if stored is None:
+        result.html_unavailable += 1
+        log_import_event("arxiv.paper_skipped", job, arxiv_id=article.arxiv_id, reason="html_unavailable")
+        return
+
+    source, reused = stored
     check_lease()
     save_paper(db, article, bucket, object_key, source["LastModified"], job)
     result.pdf_available += 1
@@ -412,8 +427,8 @@ def import_articles(
                 if job is not None:
                     save_checkpoint(db, job, index + 1, result)
 
-            logging.info("Sources available in RustFS: %d. %s failures: %d",
-                         result.pdf_available, source_format.upper(), result.pdf_failures)
+            logging.info("Sources available in RustFS: %d. %s failures: %d. HTML unavailable: %d",
+                         result.pdf_available, source_format.upper(), result.pdf_failures, result.html_unavailable)
     except PauseRequested:
         return result
     except (psycopg.Error, requests.RequestException, BotoCoreError, ClientError,

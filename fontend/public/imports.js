@@ -66,7 +66,11 @@ function renderJob(job) {
   const result = job.result;
   const resultText = row.querySelector(".import-result");
   if (result) {
-    const summary = `Исходников доступно: ${result.pdf_available}. Исходников недоступно: ${result.pdf_failures}.`;
+    const unavailable = result.pdf_failures + (result.html_unavailable ?? 0);
+    let summary = `Исходников доступно: ${result.pdf_available}. Исходников недоступно: ${unavailable}.`;
+    if (result.html_unavailable > 0) {
+      summary += ` Без HTML-версии: ${result.html_unavailable}.`;
+    }
     resultText.textContent = result.articles_found == null
       ? summary
       : `Найдено: ${result.articles_found} · Уже было в бакете: ${result.pdf_reused}\n${summary}`;

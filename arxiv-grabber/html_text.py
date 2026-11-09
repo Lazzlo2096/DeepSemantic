@@ -7,9 +7,14 @@ from markdownify import MarkdownConverter
 
 def article_body(source):
     article = BeautifulSoup(source, "html.parser").find("article", class_="ltx_document")
-    if article is None or article.find("h1") is None:
+    if article is None:
         raise ValueError("HTML has no arXiv article body")
     return article
+
+
+def html_unavailable(source, arxiv_id: str) -> bool:
+    headings = BeautifulSoup(source, "html.parser").find_all("h1")
+    return any(heading.get_text(strip=True) == f"No HTML for '{arxiv_id}'" for heading in headings)
 
 
 class ArticleConverter(MarkdownConverter):
