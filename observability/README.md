@@ -26,6 +26,8 @@ Alloy читает логи `arxiv-grabber`, `arxiv-text-worker`, `paper-indexer
 
 При первой записи статьи воркер пишет `arxiv_papers.insert` с `operation="insert"` и `null` в `changes.status.old`. При смене статуса пишется `arxiv_papers.update` с `operation="update"` и значениями `old` и `new` в `changes.status`. Оба события записываются после коммита в PostgreSQL. Добавь `| changes_status_new="texted"`, чтобы увидеть завершение извлечения текста.
 
+Панель **«Статусы статей arXiv»** на дашборде **«Импорт статей arXiv»** показывает эти события для всех статей за выбранный период. В строке видны ID статьи, прежний и новый статусы. Полный JSON доступен при раскрытии строки.
+
 Чтобы увидеть вставки и обновления `arxiv_imports`, в **Explore → Loki** переключи редактор на **Code**, выбери диапазон времени и нажми **Run query** после ввода запроса.
 
 ```logql
