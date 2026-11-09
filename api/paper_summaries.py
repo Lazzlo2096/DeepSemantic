@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from database import ArxivPaper, database_session
 from papers import ArxivId
-from summary_schema import PaperSummary
+from summary_schema import MARKDOWN_REQUIRED, PaperSummary
 
 
 router = APIRouter(prefix="/papers", tags=["papers"])
@@ -47,10 +47,14 @@ async def create_paper_summary(request: Request, response: Response, arxiv_id: A
         paper = await session.get(ArxivPaper, arxiv_id)
         if paper is None:
             raise HTTPException(404, "Paper not found.")
-        if not paper.text_object_key:
-            raise HTTPException(409, "Paper text is unavailable.")
-
         params = {"arxiv_id": arxiv_id}
+        if not paper.text_object_key or not paper.text_object_key.lower().endswith(".md"):
+            job = (await session.execute(SELECT_JOB, params)).mappings().one_or_none()
+            if job is not None and job["status"] == "completed":
+                response.status_code = 200
+                return job
+            raise HTTPException(409, MARKDOWN_REQUIRED)
+
         job = (await session.execute(text(f"""
             INSERT INTO paper_summaries (arxiv_id) VALUES (:arxiv_id)
             ON CONFLICT (arxiv_id) DO UPDATE

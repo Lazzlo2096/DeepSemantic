@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, StringConstraints
 
 
 NonEmptyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+MARKDOWN_REQUIRED = "Для суммаризации нужен полный текст в Markdown. Импортируйте статью в режиме HTML."
 
 
 class PaperSummary(BaseModel):

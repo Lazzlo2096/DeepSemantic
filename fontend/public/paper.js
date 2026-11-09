@@ -53,6 +53,8 @@ function loadSummary(url, hasText) {
     } else if (job?.status === "running") {
       if (!job.parts_total) {
         feedback.textContent = "Читаем текст статьи…";
+      } else if (job.parts_total === 1) {
+        feedback.textContent = "Суммаризируем полный текст статьи…";
       } else if (job.parts_completed === job.parts_total) {
         feedback.textContent = "Готовим итоговую суммаризацию…";
       } else {
@@ -69,6 +71,12 @@ function loadSummary(url, hasText) {
   async function refresh(method = "GET", polling = false) {
     try {
       const response = await fetch(url, { method, cache: "no-store" });
+      if (method === "POST" && response.status === 409) {
+        const { detail } = await response.json();
+        feedback.textContent = detail;
+        button.disabled = !hasText;
+        return;
+      }
       if (!response.ok) throw new Error("Could not load the summary");
       if (render(await response.json())) {
         setTimeout(() => refresh("GET", true), 3000);
