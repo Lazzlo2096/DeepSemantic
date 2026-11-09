@@ -4,6 +4,8 @@ const refreshInterval = 5000;
 const statusLabels = new Map([
   ["queued", "В очереди"],
   ["running", "В работе"],
+  ["pausing", "Приостанавливается"],
+  ["paused", "На паузе"],
   ["completed", "Завершено"],
   ["failed", "Ошибка"],
 ]);
@@ -13,6 +15,7 @@ const dateTo = form.elements.namedItem("date_to");
 const submit = document.querySelector("#import-submit");
 const feedback = document.querySelector("#import-feedback");
 const listStatus = document.querySelector("#imports-status");
+const controlFeedback = document.querySelector("#import-control-feedback");
 const table = document.querySelector("#imports-table-wrap");
 const list = document.querySelector("#imports-list");
 const template = document.querySelector("#import-row-template");
@@ -23,6 +26,7 @@ const pageNumber = document.querySelector("#imports-page");
 
 let currentPage = 0;
 let listRequest;
+const pendingActions = new Set();
 
 function formatTime(timestamp) {
   return dateTimeFormat.format(new Date(timestamp));
@@ -41,11 +45,19 @@ function renderJob(job) {
   const stage = row.querySelector(".paper-stage");
   stage.dataset.stage = job.status;
   stage.textContent = statusLabels.get(job.status);
+  const button = row.querySelector(".import-action");
+  if (["queued", "running", "paused"].includes(job.status)) {
+    const action = job.status === "paused" ? "resume" : "pause";
+    button.hidden = false;
+    button.disabled = pendingActions.has(job.id);
+    button.textContent = action === "pause" ? "Приостановить" : "Продолжить";
+    button.addEventListener("click", () => changeImport(job.id, action, button));
+  }
   row.querySelector(".import-attempts").textContent = `Попыток: ${job.attempts}`;
   const timing = row.querySelector(".import-timing");
   if (job.finished_at) {
     timing.textContent = `Завершение ${formatTime(job.finished_at)}`;
-  } else if (job.status === "queued" && job.attempts > 0) {
+  } else if (job.status === "queued" && job.attempts > 0 && job.processed_articles == null) {
     timing.textContent = `Повтор с ${formatTime(job.available_at)}`;
   } else if (job.started_at) {
     timing.textContent = `Старт ${formatTime(job.started_at)}`;
@@ -54,14 +66,35 @@ function renderJob(job) {
   const result = job.result;
   const resultText = row.querySelector(".import-result");
   if (result) {
-    const summary = `Исходников доступно: ${result.pdf_available}. Не готово: исходник — ${result.pdf_failures}, текст — ${result.text_failures}, чанки — ${result.chunk_failures}.`;
+    const summary = `Исходников доступно: ${result.pdf_available}. Исходников недоступно: ${result.pdf_failures}.`;
     resultText.textContent = result.articles_found == null
       ? summary
       : `Найдено: ${result.articles_found} · Уже было в бакете: ${result.pdf_reused}\n${summary}`;
+    if (job.processed_articles != null && result.articles_found != null) {
+      resultText.textContent += `\nОбработано: ${job.processed_articles} из ${result.articles_found}`;
+    }
   } else {
     resultText.textContent = job.status === "running" ? "Ожидаем результаты поиска…" : "—";
   }
   return row;
+}
+
+async function changeImport(id, action, button) {
+  if (pendingActions.has(id)) return;
+  pendingActions.add(id);
+  button.disabled = true;
+  controlFeedback.hidden = true;
+  try {
+    const response = await fetch(`${endpoint}/${id}/${action}`, { method: "POST" });
+    if (!response.ok) throw new Error();
+  } catch {
+    controlFeedback.textContent = "Не удалось выполнить команду. Проверь текущий статус задания.";
+    controlFeedback.hidden = false;
+  } finally {
+    pendingActions.delete(id);
+    button.disabled = false;
+    await loadImports();
+  }
 }
 
 async function loadImports(page = currentPage) {

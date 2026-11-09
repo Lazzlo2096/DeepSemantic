@@ -13,7 +13,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 MAX_BIGINT = 2**63 - 1
-PaperStatus = Literal["downloaded", "texted", "chunked", "embeddinged"]
+PaperStatus = Literal["downloaded", "texting", "texted"]
 
 
 class Base(DeclarativeBase):

@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 
-WORKERS = ("arxiv-grabber", "paper-indexer", "summary-worker", "embeding-service")
+WORKERS = ("arxiv-grabber", "arxiv-text-worker", "paper-indexer", "summary-worker", "embeding-service")
 STARTABLE = {"created", "exited"}
 STOPPABLE = {"running", "restarting", "paused"}
 DOCKER_STATES = STARTABLE | STOPPABLE | {"dead", "removing"}

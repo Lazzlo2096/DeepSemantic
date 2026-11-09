@@ -110,15 +110,26 @@ async def claim_job(db, model: str):
         SET status = 'failed', lease_until = NULL, finished_at = now(), last_error = 'Истекла аренда задания.'
         WHERE status = 'running' AND lease_until <= now() AND attempts >= %(max_attempts)s
     """, {"max_attempts": MAX_ATTEMPTS})
+    await db.execute("""
+        INSERT INTO paper_summaries (arxiv_id)
+        SELECT paper.arxiv_id FROM arxiv_papers AS paper
+        WHERE paper.status = 'texted' AND lower(right(paper.text_object_key, 3)) = '.md'
+          AND NOT EXISTS (SELECT 1 FROM paper_summaries WHERE arxiv_id = paper.arxiv_id)
+        ORDER BY paper.downloaded_at, paper.arxiv_id
+        LIMIT 1 FOR NO KEY UPDATE OF paper SKIP LOCKED
+        ON CONFLICT (arxiv_id) DO NOTHING
+    """)
     cursor = await db.execute("""
         WITH candidate AS (
-            SELECT arxiv_id FROM paper_summaries
-            WHERE attempts < %(max_attempts)s AND (
-                (status = 'queued' AND available_at <= now()) OR
-                (status = 'running' AND lease_until <= now())
+            SELECT job.arxiv_id
+            FROM paper_summaries AS job JOIN arxiv_papers AS paper USING (arxiv_id)
+            WHERE paper.status = 'texted' AND lower(right(paper.text_object_key, 3)) = '.md'
+              AND job.attempts < %(max_attempts)s AND (
+                (job.status = 'queued' AND job.available_at <= now()) OR
+                (job.status = 'running' AND job.lease_until <= now())
             )
-            ORDER BY available_at, created_at, arxiv_id
-            LIMIT 1 FOR UPDATE SKIP LOCKED
+            ORDER BY job.available_at, job.created_at, job.arxiv_id
+            LIMIT 1 FOR UPDATE OF job SKIP LOCKED
         )
         UPDATE paper_summaries AS job
         SET status = 'running', attempts = job.attempts + 1, lease_until = now() + %(lease)s,

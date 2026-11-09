@@ -2,10 +2,9 @@ import { arxivUrl } from "./arxiv.js";
 
 const PAGE_SIZE = 12;
 const stageLabels = new Map([
-  ["downloaded", "PDF скачан"],
+  ["downloaded", "Исходник скачан"],
+  ["texting", "Извлекается текст"],
   ["texted", "Текст извлечён"],
-  ["chunked", "Чанки готовы"],
-  ["embeddinged", "Эмбеддинги готовы"],
 ]);
 const dateFormat = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeZone: "UTC" });
 const list = document.querySelector("#papers");

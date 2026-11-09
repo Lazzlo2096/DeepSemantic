@@ -3,26 +3,22 @@ import json
 import logging
 import os
 import re
-import shutil
 import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor, wait
-from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, timezone
 from tempfile import TemporaryFile
 from uuid import UUID
 from xml.etree import ElementTree
 
-import boto3
 import psycopg
 import requests
-from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
-from pypdf import PdfReader
-from pypdf.errors import PyPdfError
+from psycopg.types.json import Jsonb
 
-from html_text import article_body, extract_markdown, split_markdown
+from html_text import article_body
+from storage import connect_database, connect_rustfs
 
 
 ARXIV_API = "https://export.arxiv.org/api/query"
@@ -31,14 +27,11 @@ NAMESPACES = {"a": "http://www.w3.org/2005/Atom", "os": "http://a9.com/-/spec/op
 PAGE_SIZE = 100
 MAX_RESULTS = 10_000
 REQUEST_INTERVAL = 3
-CHUNK_SIZE = 1_000
-CHUNK_OVERLAP = CHUNK_SIZE * 15 // 100
 QUEUE_POLL_SECONDS = 3
 JOB_LEASE = timedelta(minutes=2)
 HEARTBEAT_SECONDS = 30
 MAX_JOB_ATTEMPTS = 3
 JOB_RETRY_DELAY = timedelta(minutes=1)
-LEASE_CHECK_INTERVAL = 3
 
 
 @dataclass(frozen=True)
@@ -56,8 +49,6 @@ class ImportResult:
     pdf_reused: int = 0
     pdf_available: int = 0
     pdf_failures: int = 0
-    text_failures: int = 0
-    chunk_failures: int = 0
     last_error: str | None = None
 
     def counters(self) -> dict[str, int]:
@@ -74,6 +65,13 @@ class ImportJob:
     bucket: str
     query: str
     attempts: int
+    claim_id: UUID
+    candidate_articles: dict | None
+    checkpoint: dict
+
+
+class PauseRequested(Exception):
+    pass
 
 
 def log_import_event(event: str, job: ImportJob | None, **fields) -> None:
@@ -241,135 +239,55 @@ def store_source(arxiv: ArxivClient, s3, bucket: str, arxiv_id: str,
     return s3.head_object(Bucket=bucket, Key=object_key), False
 
 
-def store_extracted_text(s3, bucket: str, object_key: str, etag: str, arxiv_id: str) -> str:
-    is_html = object_key.endswith(".html")
-    text_key = object_key.rsplit(".", 1)[0] + (".md" if is_html else ".txt")
-    source_etag = etag.strip('"')
-    try:
-        existing = s3.head_object(Bucket=bucket, Key=text_key)
-        if existing["ContentLength"] > 0 and existing["Metadata"].get("source-etag") == source_etag:
-            return text_key
-    except ClientError as error:
-        if error.response["ResponseMetadata"]["HTTPStatusCode"] != 404:
-            raise
-
-    with TemporaryFile() as source, TemporaryFile() as text:
-        response = s3.get_object(Bucket=bucket, Key=object_key, IfMatch=etag)
-        with response["Body"] as body:
-            shutil.copyfileobj(body, source, length=1024 * 1024)
-        source.seek(0)
-        if is_html:
-            text.write(extract_markdown(source, f"https://arxiv.org/html/{arxiv_id}").encode("utf-8"))
-        else:
-            for page in PdfReader(source).pages:
-                page_text = page.extract_text().strip()
-                if page_text:
-                    try:
-                        encoded_page = page_text.encode("utf-8")
-                    except UnicodeEncodeError:
-                        # Recover valid surrogate pairs and replace isolated surrogates with U+FFFD.
-                        page_text = page_text.encode("utf-16-le", "surrogatepass").decode("utf-16-le", "replace")
-                        encoded_page = page_text.encode("utf-8")
-                    text.write(encoded_page + b"\n\n")
-        if not text.tell():
-            raise ValueError("PDF has no extractable text")
-        text.seek(0)
-        s3.upload_fileobj(
-            text,
-            bucket,
-            text_key,
-            ExtraArgs={
-                "ContentType": "text/markdown; charset=utf-8" if is_html else "text/plain; charset=utf-8",
-                "Metadata": {"source-etag": source_etag},
-            },
-        )
-    return text_key
-
-
-def split_text(text: str) -> Iterator[str]:
-    text = " ".join(text.replace("\x00", "").split())
-    for start in range(0, len(text), CHUNK_SIZE - CHUNK_OVERLAP):
-        end = start + CHUNK_SIZE
-        yield text[start:end]
-        if end >= len(text):
-            break
-
-
-def store_paper_chunks(db, s3, arxiv_id: str, bucket: str, text_key: str, job: ImportJob | None) -> int:
-    # Imports share an advisory lock, and each paper's complete chunk set is written atomically.
-    existing = db.execute(
-        "SELECT 1 FROM paper_chunks WHERE arxiv_id = %s LIMIT 1",
-        (arxiv_id,),
-    ).fetchone()
-    if existing is not None:
-        return 0
-
-    response = s3.get_object(Bucket=bucket, Key=text_key)
-    with response["Body"] as body:
-        text = body.read().decode("utf-8")
-    chunks = list(split_markdown(text, CHUNK_SIZE) if text_key.endswith(".md") else split_text(text))
-    if not chunks:
-        raise ValueError("Extracted text has no chunk content")
-
-    with db.transaction(), db.cursor() as cursor:
-        cursor.executemany(
-            """
-            WITH new_chunk AS (INSERT INTO chunks (text) VALUES (%s) RETURNING id)
-            INSERT INTO paper_chunks (chunk_id, arxiv_id, chunk_index)
-            SELECT id, %s, %s FROM new_chunk
-            """,
-            ((text, arxiv_id, index) for index, text in enumerate(chunks)),
-        )
-        change = cursor.execute("SELECT * FROM refresh_arxiv_paper_status_change(%s)", (arxiv_id,)).fetchone()
-    log_status_change(arxiv_id, change, job)
-    return len(chunks)
-
-
-def connect_database():
-    return psycopg.connect(
-        host=os.getenv("POSTGRES_HOST", "postgres"),
-        dbname=os.environ["POSTGRES_DB"],
-        user=os.environ["POSTGRES_USER"],
-        password=os.environ["POSTGRES_PASSWORD"],
-        connect_timeout=5,
-        autocommit=True,
-    )
-
-
-def update_running_import(db, job: ImportJob, assignments: str, **values) -> bool:
+def update_running_import(db, job: ImportJob, assignments: str, **values) -> dict | None:
     # Lock the old row before reading it. The autocommit statement commits before logging.
     update = db.execute(
         f"""
         WITH previous AS (
             SELECT * FROM arxiv_imports
-            WHERE id = %(id)s AND attempts = %(attempts)s AND status = 'running' AND lease_until > now()
+            WHERE id = %(id)s AND claim_id = %(claim_id)s
+              AND status IN ('running', 'pausing') AND lease_until > now()
             FOR NO KEY UPDATE
         )
         UPDATE arxiv_imports AS job SET {assignments}
         FROM previous WHERE job.id = previous.id
-        RETURNING to_jsonb(previous), to_jsonb(job)
+        RETURNING to_jsonb(previous) - ARRAY['claim_id', 'candidate_articles', 'checkpoint'],
+                  to_jsonb(job) - ARRAY['claim_id', 'candidate_articles', 'checkpoint']
         """,
-        {"id": job.id, "attempts": job.attempts, **values},
+        {"id": job.id, "claim_id": job.claim_id, **values},
     ).fetchone()
     if update is None:
-        return False
+        return None
     log_import_update(job.id, *update)
-    return True
+    return update[1]
+
+
+def save_checkpoint(db, job: ImportJob, next_index: int, result: ImportResult) -> None:
+    checkpoint = {"next_index": next_index, "counters": result.counters(), "had_error": result.last_error is not None}
+    updated = db.execute(
+        """
+        UPDATE arxiv_imports SET checkpoint = %s
+        WHERE id = %s AND claim_id = %s AND status IN ('running', 'pausing') AND lease_until > now()
+        """,
+        (Jsonb(checkpoint), job.id, job.claim_id),
+    )
+    if not updated.rowcount:
+        raise RuntimeError(f"Lost lease for arXiv import {job.id.hex} attempt {job.attempts}")
 
 
 def save_paper(db, article: Article, bucket: str, object_key: str, downloaded_at: datetime,
-               text_object_key: str | None, job: ImportJob | None) -> tuple[str, str | None] | None:
+               job: ImportJob | None) -> None:
     with db.transaction():
         previous = db.execute(
             "SELECT status FROM arxiv_papers WHERE arxiv_id = %s FOR NO KEY UPDATE",
             (article.arxiv_id,),
         ).fetchone()
-        catalog = db.execute(
+        paper = db.execute(
             """
             INSERT INTO arxiv_papers AS paper
                 (arxiv_id, bucket, object_key, title, authors, abstract,
-                 submitted_at, downloaded_at, arxiv_import_id, text_object_key)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 submitted_at, downloaded_at, arxiv_import_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (arxiv_id)
             DO UPDATE SET bucket = EXCLUDED.bucket,
                           object_key = EXCLUDED.object_key,
@@ -378,190 +296,125 @@ def save_paper(db, article: Article, bucket: str, object_key: str, downloaded_at
                           abstract = EXCLUDED.abstract,
                           submitted_at = EXCLUDED.submitted_at,
                           downloaded_at = EXCLUDED.downloaded_at,
-                          arxiv_import_id = CASE
-                              WHEN (paper.bucket, paper.object_key, paper.downloaded_at) =
-                                   (EXCLUDED.bucket, EXCLUDED.object_key, EXCLUDED.downloaded_at)
-                              THEN paper.arxiv_import_id ELSE EXCLUDED.arxiv_import_id
-                          END,
-                          text_object_key = COALESCE(EXCLUDED.text_object_key, CASE
-                              WHEN (paper.bucket, paper.object_key, paper.downloaded_at) =
-                                   (EXCLUDED.bucket, EXCLUDED.object_key, EXCLUDED.downloaded_at)
-                              THEN paper.text_object_key
-                          END),
-                          status = CASE
-                              WHEN (paper.bucket, paper.object_key, paper.downloaded_at) =
-                                   (EXCLUDED.bucket, EXCLUDED.object_key, EXCLUDED.downloaded_at)
-                              THEN paper.status ELSE 'downloaded'
-                          END
-            WHERE paper.bucket = EXCLUDED.bucket
-               OR EXCLUDED.downloaded_at > paper.downloaded_at
-               OR (EXCLUDED.downloaded_at = paper.downloaded_at
-                   AND EXCLUDED.bucket < paper.bucket)
-            RETURNING bucket, text_object_key, status
+                          arxiv_import_id = EXCLUDED.arxiv_import_id,
+                          text_object_key = NULL,
+                          text_available_at = now(),
+                          status = 'downloaded'
+            WHERE (paper.bucket, paper.object_key, paper.downloaded_at) IS DISTINCT FROM
+                  (EXCLUDED.bucket, EXCLUDED.object_key, EXCLUDED.downloaded_at)
+              AND (paper.bucket = EXCLUDED.bucket
+                   OR EXCLUDED.downloaded_at > paper.downloaded_at
+                   OR (EXCLUDED.downloaded_at = paper.downloaded_at AND EXCLUDED.bucket < paper.bucket))
+            RETURNING status
             """,
             (article.arxiv_id, bucket, object_key, article.title, article.authors,
-             article.abstract, article.submitted_at, downloaded_at,
-             job.id if job is not None else None, text_object_key),
+             article.abstract, article.submitted_at, downloaded_at, job.id if job else None),
         ).fetchone()
-        change = None
-        if catalog is not None:
-            change = db.execute(
-                "SELECT new_status FROM refresh_arxiv_paper_status_change(%s)", (article.arxiv_id,),
-            ).fetchone()
-    if catalog is None:
-        return None
-    catalog_bucket, text_object_key, status = catalog
-    log_status_change(article.arxiv_id, (previous[0] if previous else None, change[0] if change else status), job)
-    return catalog_bucket, text_object_key
+    if paper is not None:
+        log_status_change(article.arxiv_id, (previous[0] if previous else None, paper[0]), job)
 
 
-def publish_source(db, s3, article: Article, bucket: str, object_key: str, downloaded_at: datetime,
-                   text_object_key: str | None, job: ImportJob | None) -> int:
-    previous = db.execute(
-        "SELECT object_key FROM arxiv_papers WHERE arxiv_id = %s", (article.arxiv_id,),
-    ).fetchone()
-    replacing = previous is not None and previous[0].rsplit(".", 1)[-1] != object_key.rsplit(".", 1)[-1]
-    if replacing and text_object_key is None:
-        return 0
+def process_article(db, arxiv, s3, article: Article, bucket: str, source_format: str,
+                    result: ImportResult, job: ImportJob | None, check_lease: Callable[[], None]) -> None:
+    object_key = f"arxiv/{article.arxiv_id}.{source_format}"
+    try:
+        source, reused = store_source(arxiv, s3, bucket, article.arxiv_id, object_key, source_format)
+    except (requests.RequestException, BotoCoreError, ClientError, OSError, ValueError) as error:
+        result.last_error = f"Could not save {source_format.upper()} for {article.arxiv_id}: {error}"
+        log_import_event("arxiv.paper_failed", job, arxiv_id=article.arxiv_id,
+                         level="error", stage=source_format, error=result.last_error)
+        result.pdf_failures += 1
+        return
 
-    retired = []
-    with db.transaction() if replacing else nullcontext():
-        if replacing:
-            db.execute("SELECT pg_advisory_xact_lock(hashtext('deepsemantic.paper-embeddings'))")
-        catalog = save_paper(db, article, bucket, object_key, downloaded_at, text_object_key, job)
-        if catalog is None:
-            catalog = db.execute(
-                "SELECT bucket, text_object_key FROM arxiv_papers WHERE arxiv_id = %s", (article.arxiv_id,),
-            ).fetchone()
-        elif replacing:
-            retired = db.execute("""
-                WITH unlinked AS (
-                    DELETE FROM paper_chunks WHERE arxiv_id = %s RETURNING chunk_id
-                )
-                DELETE FROM chunks USING unlinked WHERE chunks.id = unlinked.chunk_id
-                RETURNING qdrant_collection, qdrant_point_id
-            """, (article.arxiv_id,)).fetchall()
-        catalog_bucket, catalog_text_key = catalog
-        count = 0
-        if catalog_text_key is not None:
-            count = store_paper_chunks(db, s3, article.arxiv_id, catalog_bucket, catalog_text_key, job)
-
-    points_by_collection = {}
-    for collection, point in retired:
-        if collection is not None and point is not None:
-            points_by_collection.setdefault(collection, []).append(point)
-    qdrant_url = os.getenv("QDRANT_URL", "http://qdrant:6333").rstrip("/")
-    for collection, points in points_by_collection.items():
-        try:
-            with requests.post(
-                f"{qdrant_url}/collections/{collection}/points/delete",
-                params={"wait": "true"}, json={"points": points}, timeout=10,
-            ) as response:
-                if response.status_code != 404:
-                    response.raise_for_status()
-        except requests.RequestException as error:
-            logging.warning("Could not delete retired embeddings for %s: %s", article.arxiv_id, error)
-    return count
+    check_lease()
+    save_paper(db, article, bucket, object_key, source["LastModified"], job)
+    result.pdf_available += 1
+    result.pdf_reused += int(reused)
+    logging.info("%s -> s3://%s/%s", article.arxiv_id, bucket, object_key)
 
 
 def import_articles(
     date_from: date, date_to: date, bucket: str, query: str, source_format: str,
     *, job: ImportJob | None = None,
 ) -> ImportResult:
-    result = ImportResult()
+    checkpoint = job.checkpoint if job is not None else {}
+    counters = checkpoint.get("counters", {})
+    result = ImportResult(**{name: counters[name] for name in ImportResult().counters() if name in counters})
+    if checkpoint.get("had_error"):
+        result.last_error = "An article failed before the checkpoint. See arxiv.paper_failed logs."
     try:
         with connect_database() as db, requests.Session() as session:
-            # Serialize imports in this database to keep arXiv traffic single-connection.
-            if job is not None:
-                db.execute("SELECT pg_advisory_lock(hashtext('deepsemantic.arxiv-grabber'))")
-            else:
-                locked, = db.execute("SELECT pg_try_advisory_lock(hashtext('deepsemantic.arxiv-grabber'))").fetchone()
-                if not locked:
-                    raise RuntimeError("Another arxiv-grabber import is running")
-
-            next_lease_check = 0.0
-
-            def check_lease(*, force: bool = False) -> None:
-                nonlocal next_lease_check
-                if job is None or (not force and time.monotonic() < next_lease_check):
+            def check_lease(*, allow_pause: bool = True) -> None:
+                if job is None:
                     return
-                active = db.execute(
+                row = db.execute(
                     """
-                    SELECT 1 FROM arxiv_imports
-                    WHERE id = %s AND attempts = %s AND status = 'running' AND lease_until > now()
+                    SELECT status FROM arxiv_imports
+                    WHERE id = %s AND claim_id = %s AND status IN ('running', 'pausing') AND lease_until > now()
                     """,
-                    (job.id, job.attempts),
+                    (job.id, job.claim_id),
                 ).fetchone()
-                if active is None:
+                if row is None:
                     raise RuntimeError(f"Lost lease for arXiv import {job.id.hex} attempt {job.attempts}")
-                next_lease_check = time.monotonic() + LEASE_CHECK_INTERVAL
+                if allow_pause and row[0] == "pausing":
+                    raise PauseRequested
+
+            # Serialize arXiv traffic. Check for pause requests while waiting for the lock.
+            while True:
+                check_lease()
+                locked, = db.execute("SELECT pg_try_advisory_lock(hashtext('deepsemantic.arxiv-grabber'))").fetchone()
+                if locked:
+                    break
+                if job is None:
+                    raise RuntimeError("Another arxiv-grabber import is running")
+                time.sleep(QUEUE_POLL_SECONDS)
 
             def count_page(size: int) -> None:
+                check_lease()
                 result.articles_found += size
-                check_lease(force=True)
 
             arxiv = ArxivClient(session)
-            articles = arxiv.articles(date_from, date_to, query, count_page)
-            if job is not None:
-                candidates = list(articles)
-                updated = update_running_import(
-                    db, job, "candidate_arxiv_ids = %(ids)s::text[]",
-                    ids=[article.arxiv_id for article in candidates],
+            next_index = checkpoint.get("next_index", 0)
+            if job is not None and job.candidate_articles is not None:
+                saved_articles = job.candidate_articles["articles"]
+                result.articles_found = len(saved_articles)
+                if next_index == result.articles_found:
+                    return result
+                articles = (
+                    Article(**(article | {"submitted_at": datetime.fromisoformat(article["submitted_at"])}))
+                    for article in saved_articles[next_index:]
                 )
-                if not updated:
-                    raise RuntimeError(f"Lost lease for arXiv import {job.id.hex} attempt {job.attempts}")
-                articles = iter(candidates)
+            else:
+                articles = arxiv.articles(date_from, date_to, query, count_page)
+                if job is not None:
+                    candidates = list(articles)
+                    snapshot = {
+                        "source_format": source_format,
+                        "articles": [asdict(article) | {"submitted_at": article.submitted_at.isoformat()}
+                                     for article in candidates],
+                    }
+                    updated = update_running_import(
+                        db, job, "candidate_arxiv_ids = %(ids)s::text[], candidate_articles = %(snapshot)s",
+                        ids=[article.arxiv_id for article in candidates], snapshot=Jsonb(snapshot),
+                    )
+                    if not updated:
+                        raise RuntimeError(f"Lost lease for arXiv import {job.id.hex} attempt {job.attempts}")
+                    articles = iter(candidates)
 
-            s3 = boto3.client(
-                "s3",
-                endpoint_url=os.environ["RUSTFS_ENDPOINT"],
-                aws_access_key_id=os.environ["RUSTFS_ACCESS_KEY"],
-                aws_secret_access_key=os.environ["RUSTFS_SECRET_KEY"],
-                region_name="us-east-1",
-                config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
-            )
+            check_lease()
+            s3 = connect_rustfs()
             ensure_bucket(s3, bucket)
-            for article in articles:
-                object_key = f"arxiv/{article.arxiv_id}.{source_format}"
-                try:
-                    source, reused = store_source(arxiv, s3, bucket, article.arxiv_id, object_key, source_format)
-                except (requests.RequestException, BotoCoreError, ClientError, OSError, ValueError) as error:
-                    result.last_error = f"Could not save {source_format.upper()} for {article.arxiv_id}: {error}"
-                    log_import_event("arxiv.paper_failed", job, arxiv_id=article.arxiv_id,
-                                     level="error", stage=source_format, error=result.last_error)
-                    result.pdf_failures += 1
-                    check_lease()
-                    continue
-
-                result.pdf_available += 1
-                result.pdf_reused += int(reused)
+            for index, article in enumerate(articles, start=next_index):
                 check_lease()
-                logging.info("%s -> s3://%s/%s", article.arxiv_id, bucket, object_key)
+                process_article(db, arxiv, s3, article, bucket, source_format, result, job,
+                                lambda: check_lease(allow_pause=False))
+                if job is not None:
+                    save_checkpoint(db, job, index + 1, result)
 
-                text_object_key = None
-                try:
-                    text_object_key = store_extracted_text(s3, bucket, object_key, source["ETag"], article.arxiv_id)
-                except (BotoCoreError, ClientError, OSError, PyPdfError, ValueError) as error:
-                    result.last_error = f"Could not extract text for {article.arxiv_id}: {error}"
-                    log_import_event("arxiv.paper_failed", job, arxiv_id=article.arxiv_id,
-                                     level="error", stage="text", error=result.last_error)
-                    result.text_failures += 1
-
-                try:
-                    count = publish_source(db, s3, article, bucket, object_key, source["LastModified"],
-                                           text_object_key, job)
-                    if count:
-                        logging.info("Saved %d chunks for %s in %s", count, article.arxiv_id, bucket)
-                except (BotoCoreError, ClientError, OSError, psycopg.Error, ValueError) as error:
-                    result.last_error = f"Could not save chunks for {article.arxiv_id}: {error}"
-                    log_import_event("arxiv.paper_failed", job, arxiv_id=article.arxiv_id,
-                                     level="error", stage="chunks", error=result.last_error)
-                    result.chunk_failures += 1
-                check_lease()
-
-            logging.info("Articles available in RustFS: %d. %s failures: %d. Text failures: %d. Chunk failures: %d",
-                         result.pdf_available, source_format.upper(), result.pdf_failures,
-                         result.text_failures, result.chunk_failures)
+            logging.info("Sources available in RustFS: %d. %s failures: %d",
+                         result.pdf_available, source_format.upper(), result.pdf_failures)
+    except PauseRequested:
+        return result
     except (psycopg.Error, requests.RequestException, BotoCoreError, ClientError,
             ElementTree.ParseError, KeyError, RuntimeError, ValueError) as error:
         result.last_error = str(error)
@@ -574,48 +427,58 @@ def claim_import(db) -> ImportJob | None:
         """
         WITH previous AS (
             SELECT * FROM arxiv_imports
-            WHERE status = 'running' AND lease_until <= now() AND attempts >= %s
+            WHERE lease_until <= now()
+              AND (status = 'pausing' OR (status = 'running' AND attempts >= %s))
             FOR NO KEY UPDATE
         )
         UPDATE arxiv_imports AS job
-        SET status = 'failed', finished_at = now(), lease_until = NULL
+        SET status = (CASE WHEN previous.status = 'pausing' THEN 'paused' ELSE 'failed' END)::arxiv_import_status,
+            finished_at = CASE WHEN previous.status = 'running' THEN now() END,
+            candidate_articles = CASE WHEN previous.status = 'pausing' THEN previous.candidate_articles END,
+            lease_until = NULL, claim_id = NULL
         FROM previous WHERE job.id = previous.id
-        RETURNING job.id, to_jsonb(previous), to_jsonb(job)
+        RETURNING job.id, to_jsonb(previous) - ARRAY['claim_id', 'candidate_articles', 'checkpoint'],
+                  to_jsonb(job) - ARRAY['claim_id', 'candidate_articles', 'checkpoint']
         """,
         (MAX_JOB_ATTEMPTS,),
     ).fetchall()
     for job_id, previous, current in expired:
         log_import_update(job_id, previous, current)
-        log_import_event("arxiv_import.lease_expired", None, import_id=job_id.hex,
-                         attempt=current["attempts"], level="error",
-                         error="Worker lease expired on the final attempt.")
+        if current["status"] == "failed":
+            log_import_event("arxiv_import.lease_expired", None, import_id=job_id.hex,
+                             attempt=current["attempts"], level="error",
+                             error="Worker lease expired on the final attempt.")
 
     claimed = db.execute(
         """
         WITH candidate AS (
             SELECT * FROM arxiv_imports
-            WHERE attempts < %s AND (
-                (status = 'queued' AND available_at <= now()) OR
-                (status = 'running' AND lease_until <= now())
-            )
+            WHERE (status = 'queued' AND available_at <= now() AND (attempts < %s OR checkpoint IS NOT NULL))
+               OR (status = 'running' AND lease_until <= now() AND attempts < %s)
             ORDER BY available_at, created_at, id
             LIMIT 1 FOR UPDATE SKIP LOCKED
         )
         UPDATE arxiv_imports AS job
-        SET status = 'running', attempts = candidate.attempts + 1,
+        SET status = 'running', claim_id = gen_random_uuid(),
+            attempts = CASE WHEN candidate.status = 'queued' AND candidate.checkpoint IS NOT NULL
+                            THEN candidate.attempts ELSE candidate.attempts + 1 END,
+            checkpoint = COALESCE(candidate.checkpoint, '{}'::jsonb),
             started_at = COALESCE(candidate.started_at, now()), lease_until = now() + %s
         FROM candidate
         WHERE job.id = candidate.id
         RETURNING job.id, job.date_from, job.date_to, job.bucket, job.query, job.attempts,
-                  to_jsonb(candidate), to_jsonb(job)
+                  job.claim_id, job.candidate_articles, job.checkpoint,
+                  to_jsonb(candidate) - ARRAY['claim_id', 'candidate_articles', 'checkpoint'],
+                  to_jsonb(job) - ARRAY['claim_id', 'candidate_articles', 'checkpoint']
         """,
-        (MAX_JOB_ATTEMPTS, JOB_LEASE),
+        (MAX_JOB_ATTEMPTS, MAX_JOB_ATTEMPTS, JOB_LEASE),
     ).fetchone()
     if claimed is None:
         return None
-    job_id, date_from, date_to, bucket, query, attempts, previous, current = claimed
-    log_import_update(job_id, previous, current)
-    return ImportJob(job_id, date_from, date_to, bucket, query, attempts)
+    *job_fields, previous, current = claimed
+    job = ImportJob(*job_fields)
+    log_import_update(job.id, previous, current)
+    return job
 
 
 def finish_import(db, job: ImportJob, result: ImportResult) -> None:
@@ -625,20 +488,26 @@ def finish_import(db, job: ImportJob, result: ImportResult) -> None:
     updated = update_running_import(
         db, job,
         """
-        status = %(status)s, lease_until = NULL,
-        available_at = CASE WHEN %(status)s = 'queued' THEN now() + %(delay)s ELSE previous.available_at END,
-        finished_at = CASE WHEN %(status)s <> 'queued' THEN now() END
+        status = (CASE WHEN previous.status = 'pausing' THEN 'paused' ELSE %(status)s END)::arxiv_import_status,
+        lease_until = NULL, claim_id = NULL,
+        available_at = CASE WHEN previous.status = 'running' AND %(status)s = 'queued'
+                            THEN now() + %(delay)s ELSE previous.available_at END,
+        finished_at = CASE WHEN previous.status = 'running' AND %(status)s <> 'queued' THEN now() END,
+        candidate_articles = CASE WHEN previous.status = 'pausing' THEN previous.candidate_articles END,
+        checkpoint = CASE WHEN previous.status = 'pausing' OR %(status)s <> 'queued' THEN previous.checkpoint END
         """,
         status=status, delay=JOB_RETRY_DELAY,
     )
     if updated:
         log_import_event("arxiv_import.attempt_finished", job, attempt=job.attempts,
-                         status=status, error=result.last_error, **result.counters())
+                         status=updated["status"], error=result.last_error, **result.counters())
     else:
         logging.warning("Lost lease before saving arXiv import %s attempt %d", job.id.hex, job.attempts)
 
 
 def process_import(db, job: ImportJob, source_format: str) -> None:
+    if job.candidate_articles is not None:
+        source_format = job.candidate_articles["source_format"]
     log_import_event("arxiv_import.attempt_started", job, attempt=job.attempts, bucket=job.bucket,
                      date_from=job.date_from.isoformat(), date_to=job.date_to.isoformat(), source_format=source_format)
     with ThreadPoolExecutor(max_workers=1) as executor:
@@ -683,7 +552,7 @@ def main() -> int:
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    source_format = os.getenv("ARXIV_SOURCE_FORMAT", "pdf").strip().lower()
+    source_format = os.getenv("ARXIV_SOURCE_FORMAT", "html").strip().lower()
     if source_format not in {"pdf", "html"}:
         parser.error("ARXIV_SOURCE_FORMAT must be pdf or html")
     default_bucket = os.getenv("RUSTFS_BUCKET", "arxiv-papers")

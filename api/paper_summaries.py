@@ -48,7 +48,7 @@ async def create_paper_summary(request: Request, response: Response, arxiv_id: A
         if paper is None:
             raise HTTPException(404, "Paper not found.")
         params = {"arxiv_id": arxiv_id}
-        if not paper.text_object_key or not paper.text_object_key.lower().endswith(".md"):
+        if paper.status != "texted" or not paper.text_object_key or not paper.text_object_key.lower().endswith(".md"):
             job = (await session.execute(SELECT_JOB, params)).mappings().one_or_none()
             if job is not None and job["status"] == "completed":
                 response.status_code = 200

@@ -127,7 +127,7 @@
                       "spec": {
                         "direction": "backward",
                         "editorMode": "code",
-                        "expr": "{service_name=~\"arxiv-grabber|api|embeding-service|paper-indexer\"}\n| json\n| import_id != \"\"\n| import_id=\"${latest_import_id:raw}\"",
+                        "expr": "{service_name=~\"arxiv-grabber|arxiv-text-worker|api|embeding-service|paper-indexer\"}\n| json\n| import_id != \"\"\n| import_id=\"${latest_import_id:raw}\"",
                         "queryType": "range"
                       }
                     },

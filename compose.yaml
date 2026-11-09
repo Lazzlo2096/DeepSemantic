@@ -214,8 +214,21 @@ services:
       <<: [*postgres-environment, *rustfs-environment]
       RUSTFS_ENDPOINT: http://rustfs:9000
       RUSTFS_BUCKET: "${RUSTFS_BUCKET:-arxiv-papers}"
-      ARXIV_SOURCE_FORMAT: "${ARXIV_SOURCE_FORMAT:-pdf}"
-      QDRANT_URL: "${QDRANT_URL:-http://qdrant:6333}"
+      ARXIV_SOURCE_FORMAT: "${ARXIV_SOURCE_FORMAT:-html}"
+
+  arxiv-text-worker:
+    profiles: [workers]
+    build: ./arxiv-grabber
+    entrypoint: ["python", "text_worker.py"]
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rustfs:
+        condition: service_healthy
+    environment:
+      <<: [*postgres-environment, *rustfs-environment]
+      RUSTFS_ENDPOINT: http://rustfs:9000
 
   loki:
     image: grafana/loki:3.7.0

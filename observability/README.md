@@ -2,7 +2,7 @@
 
 `just up` запускает Grafana Alloy, Loki и Grafana. Для уже запущенного стека можно отдельно выполнить `docker compose up -d loki alloy grafana`.
 
-Alloy читает логи `arxiv-grabber`, `paper-indexer`, `api` и `embeding-service` из текущего проекта Docker Compose. Loki хранит их семь дней в томе `loki-data`. Alloy сохраняет позиции чтения в томе `alloy-data`, а настройки Grafana хранятся в томе `grafana-data`.
+Alloy читает логи `arxiv-grabber`, `arxiv-text-worker`, `paper-indexer`, `api` и `embeding-service` из текущего проекта Docker Compose. Loki хранит их семь дней в томе `loki-data`. Alloy сохраняет позиции чтения в томе `alloy-data`, а настройки Grafana хранятся в томе `grafana-data`.
 
 Дашборд [«Импорт статей arXiv»](http://127.0.0.1:3000/d/ad792cc) загружается из `observability/dashboards/arxiv-imports.json` при запуске Grafana, в том числе с пустым томом `grafana-data`. Переменная `latest_import_id` через источник `Loki HTTP` выбирает последнее событие `arxiv_import.insert` в диапазоне дашборда. Для изменения дашборда правь JSON в репозитории.
 
@@ -11,20 +11,20 @@ Alloy читает логи `arxiv-grabber`, `paper-indexer`, `api` и `embeding
 Запрос LogQL для общего потока:
 
 ```logql
-{service_name=~"arxiv-grabber|paper-indexer|api|embeding-service"}
+{service_name=~"arxiv-grabber|arxiv-text-worker|paper-indexer|api|embeding-service"}
 ```
 
 Переходы статуса статьи можно найти по полям JSON:
 
 ```logql
-{service_name=~"arxiv-grabber|paper-indexer|api"}
+{service_name=~"arxiv-grabber|arxiv-text-worker"}
 | json
 | event=~"arxiv_papers[.](insert|update)"
 | table="arxiv_papers"
 | arxiv_id="2611.07970v1"
 ```
 
-При первой записи статьи воркер пишет `arxiv_papers.insert` с `operation="insert"` и `null` в `changes.status.old`. При смене статуса пишется `arxiv_papers.update` с `operation="update"` и значениями `old` и `new` в `changes.status`. Оба события записываются после коммита в PostgreSQL. Добавь `| changes_status_new="embeddinged"`, чтобы увидеть завершение индексации.
+При первой записи статьи воркер пишет `arxiv_papers.insert` с `operation="insert"` и `null` в `changes.status.old`. При смене статуса пишется `arxiv_papers.update` с `operation="update"` и значениями `old` и `new` в `changes.status`. Оба события записываются после коммита в PostgreSQL. Добавь `| changes_status_new="texted"`, чтобы увидеть завершение извлечения текста.
 
 Чтобы увидеть вставки и обновления `arxiv_imports`, в **Explore → Loki** переключи редактор на **Code**, выбери диапазон времени и нажми **Run query** после ввода запроса.
 
@@ -40,7 +40,7 @@ Alloy читает логи `arxiv-grabber`, `paper-indexer`, `api` и `embeding
 Для задания импорта используй его ID из ответа `POST /arxiv/imports`. Чтобы отфильтровать запрос выше, добавь `| import_id="…"`. Чтобы увидеть и другие события задания, выполни такой запрос:
 
 ```logql
-{service_name=~"arxiv-grabber|api"}
+{service_name=~"arxiv-grabber|arxiv-text-worker|api"}
 | json
 | import_id="4411913797a7461a864a0581086d4765"
 ```

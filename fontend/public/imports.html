@@ -52,6 +52,7 @@
           <button id="refresh-imports" type="button">Обновить</button>
         </div>
         <p id="imports-status" role="status">Загружаем задания…</p>
+        <p id="import-control-feedback" role="status" hidden></p>
         <div class="imports-table-wrap" id="imports-table-wrap" role="region" aria-labelledby="imports-title" tabindex="0" hidden>
           <table class="imports-table" aria-labelledby="imports-title">
             <thead>
@@ -89,6 +90,7 @@
           <span class="paper-stage"></span>
           <div class="import-meta import-attempts"></div>
           <div class="import-meta import-timing"></div>
+          <button class="import-action" type="button" hidden></button>
         </td>
         <td>
           <div class="import-result"></div>

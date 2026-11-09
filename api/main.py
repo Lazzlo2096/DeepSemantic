@@ -50,12 +50,13 @@ class ArxivImportJob(BaseModel):
     date_to: date
     bucket: str
     query: str
-    status: Literal["queued", "running", "completed", "failed"]
+    status: Literal["queued", "running", "pausing", "paused", "completed", "failed"]
     attempts: int
     created_at: datetime
     available_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
+    processed_articles: int | None
     result: dict[str, int] | None
 
     @field_serializer("id")
@@ -194,6 +195,39 @@ async def enqueue_arxiv_import(payload: ArxivImportRequest, request: Request):
     return ArxivImportAccepted(id=job_id.hex)
 
 
+@app.post("/arxiv/imports/{job_id}/{action}", tags=["arXiv"])
+async def control_arxiv_import(job_id: UUID, action: Literal["pause", "resume"], request: Request):
+    if action == "pause":
+        statement = """
+            UPDATE arxiv_imports
+            SET status = (CASE WHEN lease_until > now() THEN 'pausing' ELSE 'paused' END)::arxiv_import_status,
+                lease_until = CASE WHEN lease_until > now() THEN lease_until END,
+                claim_id = CASE WHEN lease_until > now() THEN claim_id END,
+                checkpoint = CASE WHEN status IN ('running', 'pausing') THEN COALESCE(checkpoint, '{}'::jsonb)
+                                  ELSE checkpoint END
+            WHERE id = :id AND status IN ('queued', 'running', 'pausing', 'paused')
+            RETURNING status
+        """
+    else:
+        statement = """
+            UPDATE arxiv_imports
+            SET status = 'queued', available_at = CASE WHEN status = 'paused' THEN now() ELSE available_at END
+            WHERE id = :id AND status IN ('paused', 'queued')
+            RETURNING status
+        """
+    async with database_session(request) as session:
+        status = (await session.execute(text(statement), {"id": job_id})).scalar_one_or_none()
+        if status is None:
+            exists = (await session.execute(text("SELECT 1 FROM arxiv_imports WHERE id = :id"), {"id": job_id})).scalar()
+            if exists is None:
+                raise HTTPException(404, "Задание импорта не найдено.")
+            raise HTTPException(409, "Команда недоступна для текущего статуса задания.")
+    print(json.dumps({
+        "event": "arxiv_import.control", "import_id": job_id.hex, "action": action, "status": status,
+    }), flush=True)
+    return {"status": status}
+
+
 @app.get("/arxiv/imports", response_model=list[ArxivImportJob], tags=["arXiv"])
 async def list_arxiv_imports(
     request: Request,
@@ -206,7 +240,8 @@ async def list_arxiv_imports(
                 SELECT job.*, to_jsonb(counters) AS result
                 FROM (
                     SELECT id, date_from, date_to, bucket, query, status, attempts, created_at,
-                           available_at, started_at, finished_at
+                           available_at, started_at, finished_at,
+                           (checkpoint->>'next_index')::integer AS processed_articles
                     FROM arxiv_imports
                     ORDER BY created_at DESC, id DESC
                     LIMIT :limit OFFSET :offset

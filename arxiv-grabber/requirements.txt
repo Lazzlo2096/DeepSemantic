@@ -2,5 +2,4 @@ boto3>=1.36,<2
 beautifulsoup4>=4.12,<5
 markdownify>=1.2,<2
 psycopg[binary]>=3.2,<4
-pypdf>=6.12,<8
 requests>=2.32.4,<3

@@ -21,16 +21,17 @@ function renderChunk(chunk) {
   return card;
 }
 
-function loadSummary(url, hasText) {
+function loadSummary(url, hasText, isHtml) {
   const panel = document.querySelector("#paper-summary");
   const button = document.querySelector("#summarize");
   const feedback = document.querySelector("#summary-status");
   const result = document.querySelector("#summary-result");
   panel.hidden = false;
+  let refreshTimer;
 
   function render(job) {
     const busy = job?.status === "queued" || job?.status === "running";
-    button.disabled = !hasText || busy;
+    button.disabled = !(hasText || (job && isHtml)) || busy;
     button.textContent = job?.status === "failed" ? "Повторить" : "Суммаризировать";
     if (job?.status === "completed") {
       for (const field of result.querySelectorAll("[data-summary]")) {
@@ -65,7 +66,7 @@ function loadSummary(url, hasText) {
     } else {
       feedback.textContent = hasText ? "Суммаризация ещё не создана." : "Полный текст статьи пока недоступен.";
     }
-    return busy;
+    return busy || (!job && isHtml);
   }
 
   async function refresh(method = "GET", polling = false) {
@@ -79,12 +80,14 @@ function loadSummary(url, hasText) {
       }
       if (!response.ok) throw new Error("Could not load the summary");
       if (render(await response.json())) {
-        setTimeout(() => refresh("GET", true), 3000);
+        clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(() => refresh("GET", true), 3000);
       }
     } catch {
       feedback.textContent = "Не удалось обновить статус суммаризации.";
       if (polling) {
-        setTimeout(() => refresh("GET", true), 5000);
+        clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(() => refresh("GET", true), 5000);
       } else {
         button.disabled = !hasText;
       }
@@ -92,6 +95,7 @@ function loadSummary(url, hasText) {
   }
 
   button.addEventListener("click", () => {
+    clearTimeout(refreshTimer);
     button.disabled = true;
     feedback.textContent = "Отправляем задание…";
     refresh("POST");
@@ -124,7 +128,8 @@ async function loadPaper(id) {
     original.href = arxivUrl(paper.arxiv_id);
     original.hidden = false;
 
-    loadSummary(`${url}/summary`, Boolean(paper.text_object_key));
+    const hasMarkdown = paper.status === "texted" && paper.text_object_key?.toLowerCase().endsWith(".md");
+    loadSummary(`${url}/summary`, Boolean(hasMarkdown), paper.object_key.toLowerCase().endsWith(".html"));
     list.replaceChildren(...chunks.map(renderChunk));
     if (location.hash.startsWith("#chunk-")) {
       document.getElementById(location.hash.slice(1))?.scrollIntoView();
