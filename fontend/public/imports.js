@@ -61,9 +61,6 @@ function renderJob(job) {
   } else {
     resultText.textContent = job.status === "running" ? "Ожидаем результаты поиска…" : "—";
   }
-  const error = row.querySelector(".import-error");
-  error.textContent = job.last_error ?? "";
-  error.hidden = !job.last_error;
   return row;
 }
 

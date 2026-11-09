@@ -57,7 +57,6 @@ class ArxivImportJob(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     result: dict[str, int] | None
-    last_error: str | None
 
     @field_serializer("id")
     def serialize_id(self, job_id: UUID) -> str:
@@ -202,7 +201,7 @@ async def list_arxiv_imports(
                 SELECT job.*, to_jsonb(counters) AS result
                 FROM (
                     SELECT id, date_from, date_to, bucket, query, status, attempts, created_at,
-                           available_at, started_at, finished_at, last_error
+                           available_at, started_at, finished_at
                     FROM arxiv_imports
                     ORDER BY created_at DESC, id DESC
                     LIMIT :limit OFFSET :offset

@@ -38,7 +38,7 @@ JOB_LEASE = timedelta(minutes=2)
 HEARTBEAT_SECONDS = 30
 MAX_JOB_ATTEMPTS = 3
 JOB_RETRY_DELAY = timedelta(minutes=1)
-PROGRESS_INTERVAL = 3
+LEASE_CHECK_INTERVAL = 3
 
 
 @dataclass(frozen=True)
@@ -479,22 +479,26 @@ def import_articles(
                 if not locked:
                     raise RuntimeError("Another arxiv-grabber import is running")
 
-            next_progress = 0.0
+            next_lease_check = 0.0
 
-            def report_progress(*, force: bool = False) -> None:
-                nonlocal next_progress
-                if job is None or (not force and time.monotonic() < next_progress):
+            def check_lease(*, force: bool = False) -> None:
+                nonlocal next_lease_check
+                if job is None or (not force and time.monotonic() < next_lease_check):
                     return
-                updated = update_running_import(
-                    db, job, "last_error = %(error)s", error=result.last_error,
-                )
-                if not updated:
+                active = db.execute(
+                    """
+                    SELECT 1 FROM arxiv_imports
+                    WHERE id = %s AND attempts = %s AND status = 'running' AND lease_until > now()
+                    """,
+                    (job.id, job.attempts),
+                ).fetchone()
+                if active is None:
                     raise RuntimeError(f"Lost lease for arXiv import {job.id.hex} attempt {job.attempts}")
-                next_progress = time.monotonic() + PROGRESS_INTERVAL
+                next_lease_check = time.monotonic() + LEASE_CHECK_INTERVAL
 
             def count_page(size: int) -> None:
                 result.articles_found += size
-                report_progress(force=True)
+                check_lease(force=True)
 
             arxiv = ArxivClient(session)
             articles = arxiv.articles(date_from, date_to, query, count_page)
@@ -526,12 +530,12 @@ def import_articles(
                     log_import_event("arxiv.paper_failed", job, arxiv_id=article.arxiv_id,
                                      level="error", stage=source_format, error=result.last_error)
                     result.pdf_failures += 1
-                    report_progress()
+                    check_lease()
                     continue
 
                 result.pdf_available += 1
                 result.pdf_reused += int(reused)
-                report_progress()
+                check_lease()
                 logging.info("%s -> s3://%s/%s", article.arxiv_id, bucket, object_key)
 
                 text_object_key = None
@@ -553,7 +557,7 @@ def import_articles(
                     log_import_event("arxiv.paper_failed", job, arxiv_id=article.arxiv_id,
                                      level="error", stage="chunks", error=result.last_error)
                     result.chunk_failures += 1
-                report_progress()
+                check_lease()
 
             logging.info("Articles available in RustFS: %d. %s failures: %d. Text failures: %d. Chunk failures: %d",
                          result.pdf_available, source_format.upper(), result.pdf_failures,
@@ -574,8 +578,7 @@ def claim_import(db) -> ImportJob | None:
             FOR NO KEY UPDATE
         )
         UPDATE arxiv_imports AS job
-        SET status = 'failed', finished_at = now(), lease_until = NULL,
-            last_error = 'Worker lease expired on the final attempt.'
+        SET status = 'failed', finished_at = now(), lease_until = NULL
         FROM previous WHERE job.id = previous.id
         RETURNING job.id, to_jsonb(previous), to_jsonb(job)
         """,
@@ -583,6 +586,9 @@ def claim_import(db) -> ImportJob | None:
     ).fetchall()
     for job_id, previous, current in expired:
         log_import_update(job_id, previous, current)
+        log_import_event("arxiv_import.lease_expired", None, import_id=job_id.hex,
+                         attempt=current["attempts"], level="error",
+                         error="Worker lease expired on the final attempt.")
 
     claimed = db.execute(
         """
@@ -597,8 +603,7 @@ def claim_import(db) -> ImportJob | None:
         )
         UPDATE arxiv_imports AS job
         SET status = 'running', attempts = candidate.attempts + 1,
-            started_at = COALESCE(candidate.started_at, now()), lease_until = now() + %s,
-            last_error = NULL
+            started_at = COALESCE(candidate.started_at, now()), lease_until = now() + %s
         FROM candidate
         WHERE job.id = candidate.id
         RETURNING job.id, job.date_from, job.date_to, job.bucket, job.query, job.attempts,
@@ -622,10 +627,9 @@ def finish_import(db, job: ImportJob, result: ImportResult) -> None:
         """
         status = %(status)s, lease_until = NULL,
         available_at = CASE WHEN %(status)s = 'queued' THEN now() + %(delay)s ELSE previous.available_at END,
-        finished_at = CASE WHEN %(status)s <> 'queued' THEN now() END,
-        last_error = %(error)s
+        finished_at = CASE WHEN %(status)s <> 'queued' THEN now() END
         """,
-        status=status, delay=JOB_RETRY_DELAY, error=result.last_error,
+        status=status, delay=JOB_RETRY_DELAY,
     )
     if updated:
         log_import_event("arxiv_import.attempt_finished", job, attempt=job.attempts,
