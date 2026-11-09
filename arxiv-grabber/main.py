@@ -319,6 +319,7 @@ def save_paper(db, article: Article, bucket: str, object_key: str, downloaded_at
                           downloaded_at = EXCLUDED.downloaded_at,
                           arxiv_import_id = EXCLUDED.arxiv_import_id,
                           text_object_key = NULL,
+                          lease_until = NULL,
                           text_available_at = now(),
                           status = 'downloaded'
             WHERE (paper.bucket, paper.object_key, paper.downloaded_at) IS DISTINCT FROM

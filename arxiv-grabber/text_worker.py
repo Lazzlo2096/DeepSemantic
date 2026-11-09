@@ -45,14 +45,14 @@ def claim_paper(db) -> Claim | None:
         WITH candidate AS (
             SELECT arxiv_id, status FROM arxiv_papers
             WHERE status IN ('downloaded', 'texting') AND lower(right(object_key, 5)) = '.html'
-              AND text_available_at <= now()
-            ORDER BY text_available_at, arxiv_id
+              AND COALESCE(lease_until, text_available_at) <= now()
+            ORDER BY COALESCE(lease_until, text_available_at), arxiv_id
             LIMIT 1 FOR UPDATE SKIP LOCKED
         )
         UPDATE arxiv_papers AS paper
-        SET status = 'texting', text_available_at = now() + %s
+        SET status = 'texting', lease_until = now() + %s
         FROM candidate WHERE paper.arxiv_id = candidate.arxiv_id
-        RETURNING paper.arxiv_id, paper.bucket, paper.object_key, paper.text_available_at,
+        RETURNING paper.arxiv_id, paper.bucket, paper.object_key, paper.lease_until,
                   paper.arxiv_import_id, candidate.status
     """, (LEASE,)).fetchone()
     return Claim(*row) if row is not None else None
@@ -80,8 +80,8 @@ def process_paper(db, s3, claim: Claim) -> None:
     # The returned deadline identifies this claim. Replacing the source invalidates it.
     updated = db.execute("""
         UPDATE arxiv_papers
-        SET status = %s::arxiv_paper_status, text_object_key = %s, text_available_at = now() + %s
-        WHERE arxiv_id = %s AND status = 'texting' AND text_available_at = %s AND text_available_at > now()
+        SET status = %s::arxiv_paper_status, text_object_key = %s, lease_until = NULL, text_available_at = now() + %s
+        WHERE arxiv_id = %s AND status = 'texting' AND lease_until = %s AND lease_until > now()
     """, (status, key, RETRY_DELAY if key is None else timedelta(0), claim.arxiv_id, claim.lease_until))
     if updated.rowcount:
         log_status(claim, "texting", status)
