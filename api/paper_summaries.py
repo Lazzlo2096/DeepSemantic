@@ -1,12 +1,11 @@
 from datetime import datetime
-from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from database import ArxivPaper, database_session
+from database import ArxivPaper, PaperSummaryStatus, database_session
 from papers import ArxivId
 from summary_schema import MARKDOWN_REQUIRED, PaperSummary
 
@@ -16,7 +15,7 @@ router = APIRouter(prefix="/papers", tags=["papers"])
 class SummaryJob(BaseModel):
     id: UUID
     arxiv_id: str
-    status: Literal["queued", "running", "completed", "failed"]
+    status: PaperSummaryStatus
     parts_completed: int
     parts_total: int
     model: str | None

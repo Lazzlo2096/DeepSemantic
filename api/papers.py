@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import column, func, select, table, text, true
 
-from database import MAX_BIGINT, ArxivPaper, PaperStatus, database_session
+from database import MAX_BIGINT, PAPER_SUMMARY_STATUS_TYPE, ArxivPaper, PaperStatus, database_session
 
 
 router = APIRouter(prefix="/papers", tags=["papers"])
@@ -63,7 +63,7 @@ async def list_papers(
     if date_from is not None and date_to is not None and date_from > date_to:
         raise HTTPException(422, "date_from must be on or before date_to.")
 
-    summaries = table("paper_summaries", column("arxiv_id"), column("status"))
+    summaries = table("paper_summaries", column("arxiv_id"), column("status", PAPER_SUMMARY_STATUS_TYPE))
     summary_ready = (
         select(summaries.c.arxiv_id)
         .where(summaries.c.arxiv_id == ArxivPaper.arxiv_id, summaries.c.status == "completed")

@@ -212,9 +212,9 @@ async def process_job(db, s3, summarizer: Summarizer, job) -> None:
         status = "failed"
     updated = await db.execute(f"""
         UPDATE paper_summaries
-        SET status = %(status)s, summary = %(summary)s, last_error = %(error)s, lease_until = NULL,
-            available_at = CASE WHEN %(status)s = 'queued' THEN now() + %(delay)s ELSE available_at END,
-            finished_at = CASE WHEN %(status)s <> 'queued' THEN now() END
+        SET status = %(status)s::paper_summary_status, summary = %(summary)s, last_error = %(error)s, lease_until = NULL,
+            available_at = CASE WHEN %(status)s::paper_summary_status = 'queued' THEN now() + %(delay)s ELSE available_at END,
+            finished_at = CASE WHEN %(status)s::paper_summary_status <> 'queued' THEN now() END
         WHERE {ACTIVE_LEASE}
     """, {
         **job, "status": status, "summary": Jsonb(summary.model_dump()) if summary else None,

@@ -14,6 +14,8 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 MAX_BIGINT = 2**63 - 1
 PaperStatus = Literal["downloaded", "texting", "texted"]
+PaperSummaryStatus = Literal["queued", "running", "completed", "failed"]
+PAPER_SUMMARY_STATUS_TYPE = ENUM(*get_args(PaperSummaryStatus), name="paper_summary_status", create_type=False)
 
 
 class Base(DeclarativeBase):
