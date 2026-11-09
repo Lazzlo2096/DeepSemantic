@@ -34,18 +34,7 @@ function loadSummary(url, hasText, isHtml) {
     button.disabled = !(hasText || (job && isHtml)) || busy;
     button.textContent = job?.status === "failed" ? "Повторить" : "Суммаризировать";
     if (job?.status === "completed") {
-      for (const field of result.querySelectorAll("[data-summary]")) {
-        const value = job.summary[field.dataset.summary];
-        if (Array.isArray(value)) {
-          field.replaceChildren(...(value.length ? value : ["В тексте не указано."]).map((entry) => {
-            const item = document.createElement("li");
-            item.textContent = entry;
-            return item;
-          }));
-        } else {
-          field.textContent = value;
-        }
-      }
+      result.textContent = job.summary;
       feedback.textContent = "Готово.";
       button.hidden = true;
       result.hidden = false;

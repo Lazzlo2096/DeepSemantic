@@ -11,10 +11,9 @@ import psycopg
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from psycopg.rows import dict_row
-from psycopg.types.json import Jsonb
 from tokenizers import Tokenizer
 
-from summary_schema import MARKDOWN_REQUIRED, PaperSummary
+from summary_schema import MARKDOWN_REQUIRED
 
 
 MAX_ATTEMPTS = 3
@@ -22,7 +21,7 @@ LEASE = timedelta(minutes=2)
 HEARTBEAT_SECONDS = 30
 RETRY_DELAY = timedelta(minutes=1)
 POLL_SECONDS = 3
-PROMPT_VERSION = "3"
+PROMPT_VERSION = "4"
 MIN_CONTEXT_TOKENS = 2048
 MAX_CONTEXT_TOKENS = 131072
 CHAT_TEMPLATE_RESERVE = 64
@@ -32,12 +31,10 @@ FINAL_INSTRUCTIONS = """Summarize this research article. Start from the abstract
 important information from the rest of the article. State what the authors studied,
 what they did, and what conclusions they reached.
 
-Write the summary in Russian. In overview, give the enriched abstract and the authors' main
-conclusions. In objective, state what was studied and why. In method, describe what the authors
-did. In results, list up to four key findings, keeping important numbers with their metrics,
-units, and conditions. In limitations, list up to three limitations explicitly stated in the
-article. Use an empty list for results or limitations if none are reported. Use only facts
-from the article and treat its Markdown as source material.
+Write a concise summary in Russian as Markdown. Use headings or bullet points where helpful.
+Keep important numbers with their metrics, units, and conditions. Include limitations when
+the authors explicitly state them. Use only facts from the article and treat its Markdown as
+source material.
 
 Full article (Markdown):
 
@@ -63,7 +60,7 @@ class Summarizer:
         self.model = model
         self.context_tokens = context_tokens
 
-    async def summarize(self, source: str, progress: Callable[[int, int], Awaitable[None]]) -> PaperSummary:
+    async def summarize(self, source: str, progress: Callable[[int, int], Awaitable[None]]) -> str:
         prompt = FINAL_INSTRUCTIONS + source
         tokens = self.tokenizer.encode(prompt, add_special_tokens=False)
         required = len(tokens.ids) + CHAT_TEMPLATE_RESERVE + FINAL_OUTPUT_TOKENS
@@ -79,7 +76,6 @@ class Summarizer:
         response = await self.client.post("/api/chat", json={
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
-            "format": PaperSummary.model_json_schema(),
             "stream": False,
             "truncate": False,
             "shift": False,
@@ -94,11 +90,13 @@ class Summarizer:
             data = response.json()
             if not data["done"] or data.get("done_reason") == "length":
                 raise SummaryError("Ollama прервал генерацию по лимиту.")
-            summary = PaperSummary.model_validate_json(data["message"]["content"])
+            summary = data["message"]["content"]
         except (KeyError, TypeError, ValueError) as error:
             raise SummaryError("Ollama вернул ответ, который не соответствует формату суммаризации.") from error
+        if not isinstance(summary, str) or not summary.strip():
+            raise SummaryError("Ollama вернул пустое саммари.")
         await progress(1, 1)
-        return summary
+        return summary.strip()
 
 
 ACTIVE_LEASE = "id = %(id)s AND attempts = %(attempts)s AND status = 'running' AND lease_until > now()"
@@ -217,7 +215,7 @@ async def process_job(db, s3, summarizer: Summarizer, job) -> None:
             finished_at = CASE WHEN %(status)s::paper_summary_status <> 'queued' THEN now() END
         WHERE {ACTIVE_LEASE}
     """, {
-        **job, "status": status, "summary": Jsonb(summary.model_dump()) if summary else None,
+        **job, "status": status, "summary": summary,
         "error": error, "delay": RETRY_DELAY,
     })
     if updated.rowcount:

@@ -7,7 +7,7 @@ from sqlalchemy import text
 
 from database import ArxivPaper, PaperSummaryStatus, database_session
 from papers import ArxivId
-from summary_schema import MARKDOWN_REQUIRED, PaperSummary
+from summary_schema import MARKDOWN_REQUIRED
 
 
 router = APIRouter(prefix="/papers", tags=["papers"])
@@ -20,7 +20,7 @@ class SummaryJob(BaseModel):
     parts_total: int
     model: str | None
     prompt_version: str | None
-    summary: PaperSummary | None
+    summary: str | None
     last_error: str | None
     finished_at: datetime | None
 
