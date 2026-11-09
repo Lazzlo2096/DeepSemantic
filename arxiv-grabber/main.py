@@ -263,13 +263,14 @@ def update_running_import(db, job: ImportJob, assignments: str, **values) -> dic
 
 
 def save_checkpoint(db, job: ImportJob, next_index: int, result: ImportResult) -> None:
-    checkpoint = {"next_index": next_index, "counters": result.counters(), "had_error": result.last_error is not None}
+    counters = result.counters()
+    checkpoint = {"next_index": next_index, "counters": counters, "had_error": result.last_error is not None}
     updated = db.execute(
         """
-        UPDATE arxiv_imports SET checkpoint = %s
+        UPDATE arxiv_imports SET checkpoint = %s, result = %s
         WHERE id = %s AND claim_id = %s AND status IN ('running', 'pausing') AND lease_until > now()
         """,
-        (Jsonb(checkpoint), job.id, job.claim_id),
+        (Jsonb(checkpoint), Jsonb(counters), job.id, job.claim_id),
     )
     if not updated.rowcount:
         raise RuntimeError(f"Lost lease for arXiv import {job.id.hex} attempt {job.attempts}")
@@ -394,8 +395,8 @@ def import_articles(
                                      for article in candidates],
                     }
                     updated = update_running_import(
-                        db, job, "candidate_arxiv_ids = %(ids)s::text[], candidate_articles = %(snapshot)s",
-                        ids=[article.arxiv_id for article in candidates], snapshot=Jsonb(snapshot),
+                        db, job, "candidate_articles = %(snapshot)s, result = %(result)s",
+                        snapshot=Jsonb(snapshot), result=Jsonb(result.counters()),
                     )
                     if not updated:
                         raise RuntimeError(f"Lost lease for arXiv import {job.id.hex} attempt {job.attempts}")
