@@ -22,7 +22,7 @@ services:
       OLLAMA_URL: *host-ollama
 
   embeding-service:
-    profiles: [container-inference]
+    profiles: !override [container-inference]
 
   paper-indexer:
     depends_on:

@@ -57,13 +57,14 @@ services:
       OLLAMA_MODEL: "${OLLAMA_MODEL:-gemma3:4b}"
       RAG_OLLAMA_GPU_LAYERS: "${RAG_OLLAMA_GPU_LAYERS:--1}"
     healthcheck:
-      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=4).close()"]
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health/live', timeout=4).close()"]
       interval: 10s
       timeout: 5s
       start_period: 10m
       retries: 3
 
   paper-indexer:
+    profiles: [workers]
     build: ./api
     command: ["python", "-m", "paper_embeddings", "--watch"]
     restart: unless-stopped
@@ -79,6 +80,7 @@ services:
     environment: *embedding-client-environment
 
   summary-worker:
+    profiles: [workers]
     build:
       context: .
       dockerfile: summary-worker/Dockerfile
@@ -97,6 +99,7 @@ services:
       SUMMARY_CONTEXT_TOKENS: "${SUMMARY_CONTEXT_TOKENS:-131072}"
 
   embeding-service:
+    profiles: [workers]
     build: ./embeding-service
     depends_on:
       rebbit:
@@ -198,6 +201,7 @@ services:
       retries: 12
 
   arxiv-grabber:
+    profiles: [workers]
     build: ./arxiv-grabber
     command: ["--worker"]
     restart: unless-stopped

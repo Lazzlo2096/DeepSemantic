@@ -154,6 +154,11 @@ app.include_router(papers_router)
 app.include_router(rag_router)
 
 
+@app.get("/health/live", include_in_schema=False)
+async def live():
+    return {"status": "ok"}
+
+
 @app.get("/health")
 async def health(request: Request):
     await request.app.state.rpc.check_worker()

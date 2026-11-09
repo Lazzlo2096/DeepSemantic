@@ -2,13 +2,13 @@
 
 В Compose работают три сервиса. `api` принимает HTTP-запросы, `rebbit` запускает RabbitMQ, а `embeding-service` загружает BGE-M3 и выполняет инференс.
 
-Из корня репозитория выполните `just up` или `docker compose up --build --detach`. Swagger UI доступен на http://127.0.0.1:8000/docs после запуска API. Порт на хосте можно изменить переменной `EMBEDDING_PORT`.
+Из корня репозитория выполните `just up`, затем включите «Эмбеддинги BGE-M3» на странице «Воркеры». Swagger UI доступен на http://127.0.0.1:8000/docs после запуска API. Порт на хосте можно изменить переменной `EMBEDDING_PORT`.
 
 При первом запуске воркер скачивает около 2,3 ГБ весов [BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3) в том `embedding-model-cache`. `just logs` показывает журналы всех сервисов, `just ps` — состояние контейнеров. `just down` сохраняет тома модели и RabbitMQ.
 
 ## Запуск на NVIDIA GPU
 
-`just up` использует CPU. На машине с NVIDIA GPU запустите `just up-gpu`. Этот режим даёт воркеру доступ к GPU, устанавливает PyTorch с CUDA 12.8 и запускает BGE-M3 на `cuda:0` в FP16. Для Docker Desktop на Windows нужны [WSL 2 и драйвер NVIDIA с поддержкой GPU](https://docs.docker.com/desktop/features/gpu/).
+`just up` настраивает воркер на CPU. На машине с NVIDIA GPU выполните `just up-gpu`, затем включите «Эмбеддинги BGE-M3». Этот режим даёт воркеру доступ к GPU, устанавливает PyTorch с CUDA 12.8 и запускает BGE-M3 на `cuda:0` в FP16. Для Docker Desktop на Windows нужны [WSL 2 и драйвер NVIDIA с поддержкой GPU](https://docs.docker.com/desktop/features/gpu/).
 
 Проверить, видит ли PyTorch видеокарту внутри воркера, можно командой `docker compose exec embeding-service python -c "import torch; print(torch.cuda.is_available())"`.
 
@@ -42,7 +42,7 @@
 
 Для проверки Ollama выполните `ollama run gemma3:4b "Ответь одним словом: работает?"`, затем `ollama ps`. Столбец `PROCESSOR` показывает, какая часть модели загружена на GPU. [Проверка в Ollama](https://docs.ollama.com/faq#how-can-i-tell-if-my-model-was-loaded-onto-the-gpu)
 
-Чтобы вернуться к контейнерным воркерам, завершите оба процесса на Windows и запустите `just up` или `just up-gpu` на машине с NVIDIA.
+Чтобы вернуться к контейнерным воркерам, завершите оба процесса на Windows, выполните `just up` или `just up-gpu` на машине с NVIDIA и включите BGE-M3 на странице «Воркеры».
 
 ## API и очередь
 
