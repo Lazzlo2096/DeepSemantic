@@ -181,7 +181,7 @@
         "spec": {
           "id": 3,
           "title": "Статусы статей arXiv",
-          "description": "JSON-события скачивания и извлечения текста для всех статей за выбранный период. Раскрой запись, чтобы увидеть полный JSON и ID импорта.",
+          "description": "Имя сервиса и JSON-строка события скачивания или извлечения текста за выбранный период.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -223,9 +223,8 @@
                 "dedupStrategy": "none",
                 "detailsMode": "inline",
                 "displayedFields": [
-                  "arxiv_id",
-                  "old_status",
-                  "new_status"
+                  "service_name",
+                  "___LOG_LINE_BODY___"
                 ],
                 "enableLogDetails": true,
                 "fontSize": "small",
@@ -243,18 +242,85 @@
             }
           }
         }
+      },
+      "summary-worker-logs": {
+        "kind": "Panel",
+        "spec": {
+          "id": 4,
+          "title": "Логи summary-worker",
+          "description": "Запуск, завершение и ошибки заданий суммаризации за выбранный период.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "deepsemantic-loki"
+                      },
+                      "spec": {
+                        "direction": "backward",
+                        "editorMode": "code",
+                        "expr": "{service_name=\"summary-worker\"}",
+                        "queryType": "range"
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "logs",
+            "version": "13.3.0",
+            "spec": {
+              "options": {
+                "allowDownload": true,
+                "dedupStrategy": "none",
+                "detailsMode": "inline",
+                "displayedFields": [
+                  "service_name",
+                  "___LOG_LINE_BODY___"
+                ],
+                "enableLogDetails": true,
+                "fontSize": "small",
+                "showControls": true,
+                "showFieldSelector": true,
+                "showTime": true,
+                "sortOrder": "Descending",
+                "timestampResolution": "ms"
+              },
+              "fieldConfig": {
+                "defaults": {},
+                "overrides": []
+              }
+            }
+          }
+        }
       }
     },
     "layout": {
-      "kind": "AutoGridLayout",
+      "kind": "GridLayout",
       "spec": {
-        "maxColumnCount": 3,
-        "columnWidthMode": "standard",
-        "rowHeightMode": "standard",
         "items": [
           {
-            "kind": "AutoGridLayoutItem",
+            "kind": "GridLayoutItem",
             "spec": {
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 8,
               "element": {
                 "kind": "ElementReference",
                 "name": "import-history"
@@ -262,8 +328,12 @@
             }
           },
           {
-            "kind": "AutoGridLayoutItem",
+            "kind": "GridLayoutItem",
             "spec": {
+              "x": 12,
+              "y": 0,
+              "width": 12,
+              "height": 8,
               "element": {
                 "kind": "ElementReference",
                 "name": "latest-import-logs"
@@ -271,11 +341,28 @@
             }
           },
           {
-            "kind": "AutoGridLayoutItem",
+            "kind": "GridLayoutItem",
             "spec": {
+              "x": 0,
+              "y": 8,
+              "width": 24,
+              "height": 8,
               "element": {
                 "kind": "ElementReference",
                 "name": "paper-status-transitions"
+              }
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "x": 0,
+              "y": 16,
+              "width": 24,
+              "height": 8,
+              "element": {
+                "kind": "ElementReference",
+                "name": "summary-worker-logs"
               }
             }
           }
