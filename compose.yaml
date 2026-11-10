@@ -13,7 +13,6 @@ x-rustfs-environment: &rustfs-environment
 x-llm-environment: &llm-environment
   LLM_PROVIDER: "${LLM_PROVIDER:-openrouter}"
   OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
-  OPENROUTER_MODEL: "${OPENROUTER_MODEL:-deepseek/deepseek-v4.1-flash-1017}"
   OLLAMA_MODEL: "${OLLAMA_MODEL:-gemma3:4b}"
 
 x-embedding-client-environment: &embedding-client-environment
@@ -59,6 +58,7 @@ services:
       - "127.0.0.1:${EMBEDDING_PORT:-8000}:8000"
     environment:
       <<: [*embedding-client-environment, *llm-environment]
+      RAG_OPENROUTER_MODEL: "${RAG_OPENROUTER_MODEL:-deepseek/deepseek-v4.1-flash-1017}"
       RUSTFS_BUCKET: "${RUSTFS_BUCKET:-arxiv-papers}"
       RAG_OLLAMA_GPU_LAYERS: "${RAG_OLLAMA_GPU_LAYERS:--1}"
     healthcheck:
@@ -100,7 +100,7 @@ services:
     environment:
       <<: [*postgres-environment, *rustfs-environment, *llm-environment]
       RUSTFS_ENDPOINT: http://rustfs:9000
-      OPENROUTER_MODEL: "${SUMMARY_OPENROUTER_MODEL:-${OPENROUTER_MODEL:-deepseek/deepseek-v4.1-flash-1017}}"
+      SUMMARY_OPENROUTER_MODEL: "${SUMMARY_OPENROUTER_MODEL:-${RAG_OPENROUTER_MODEL:-deepseek/deepseek-v4.1-flash-1017}}"
       OPENROUTER_REASONING_EFFORT: "${SUMMARY_OPENROUTER_REASONING_EFFORT:-}"
       SUMMARY_CONTEXT_TOKENS: "${SUMMARY_CONTEXT_TOKENS:-49152}"
 

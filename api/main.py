@@ -131,7 +131,7 @@ async def lifespan(app: FastAPI):
         app.state.qdrant = await stack.enter_async_context(
             httpx.AsyncClient(base_url=os.getenv("QDRANT_URL", "http://qdrant:6333"), timeout=5)
         )
-        app.state.chat_settings = chat_settings = ChatSettings.from_env()
+        app.state.chat_settings = chat_settings = ChatSettings.from_env(openrouter_model_env="RAG_OPENROUTER_MODEL")
         app.state.chat_client = await stack.enter_async_context(httpx.AsyncClient(
             base_url=chat_settings.base_url,
             timeout=httpx.Timeout(180, connect=5),

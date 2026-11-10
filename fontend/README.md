@@ -10,7 +10,7 @@
 
 `summary-worker` читает полный Markdown из RustFS и отправляет его вместе с промптом одним запросом. Саммари на русском дополняет аннотацию и описывает объект исследования, метод и выводы. Для суммаризации нужен импорт в режиме HTML.
 
-`LLM_PROVIDER` выбирает провайдера для суммаризации и ответов RAG. В режиме `openrouter` укажи `OPENROUTER_API_KEY` в `.env`. Общая модель задаётся через `OPENROUTER_MODEL`, по умолчанию `deepseek/deepseek-v4.1-flash-1017`. Для суммаризации можно задать `SUMMARY_OPENROUTER_MODEL` и `SUMMARY_OPENROUTER_REASONING_EFFORT`. В `.env.example` для воркера указаны `deepseek/deepseek-v4-pro-0813` и `high`. Для локальной генерации задай `LLM_PROVIDER=ollama` и `OLLAMA_MODEL`. После изменения `.env` пересоздай соответствующий контейнер.
+`LLM_PROVIDER` выбирает провайдера для суммаризации и ответов RAG. В режиме `openrouter` укажи `OPENROUTER_API_KEY` в `.env`. Модель для RAG задаётся через `RAG_OPENROUTER_MODEL`, по умолчанию `deepseek/deepseek-v4.1-flash-1017`. Для суммаризации можно задать `SUMMARY_OPENROUTER_MODEL` и `SUMMARY_OPENROUTER_REASONING_EFFORT`. Если модель суммаризации не задана, воркер берёт модель RAG. В `.env.example` для воркера указаны `deepseek/deepseek-v4-pro-0813` и `high`. Для локальной генерации задай `LLM_PROVIDER=ollama` и `OLLAMA_MODEL`. После изменения `.env` пересоздай соответствующий контейнер.
 
 В режиме Ollama воркер запрашивает фиксированное окно `num_ctx` из `SUMMARY_CONTEXT_TOKENS` (по умолчанию 49 152). На ответ выделяется до 768 токенов в Ollama и до 2 048 в OpenRouter. PostgreSQL хранит статус и итоговый Markdown в `paper_summaries`, по одной записи на версию статьи.
 

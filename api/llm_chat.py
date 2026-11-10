@@ -20,10 +20,10 @@ class ChatSettings:
     reasoning_effort: str = ""
 
     @classmethod
-    def from_env(cls) -> "ChatSettings":
+    def from_env(cls, *, openrouter_model_env: str) -> "ChatSettings":
         provider = os.getenv("LLM_PROVIDER", "openrouter").strip().lower()
         if provider == "openrouter":
-            return cls(provider, os.getenv("OPENROUTER_MODEL", DEFAULT_OPENROUTER_MODEL),
+            return cls(provider, os.getenv(openrouter_model_env, DEFAULT_OPENROUTER_MODEL),
                        "https://openrouter.ai/api/v1/", os.getenv("OPENROUTER_API_KEY", "").strip(),
                        reasoning_effort=os.getenv("OPENROUTER_REASONING_EFFORT", "").strip())
         if provider == "ollama":

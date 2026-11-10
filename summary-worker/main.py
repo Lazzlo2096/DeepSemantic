@@ -225,7 +225,7 @@ async def process_job(db, s3, summarizer: Summarizer, job) -> None:
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    chat = ChatSettings.from_env()
+    chat = ChatSettings.from_env(openrouter_model_env="SUMMARY_OPENROUTER_MODEL")
     if not chat.configured:
         raise SystemExit("OPENROUTER_API_KEY is required when LLM_PROVIDER=openrouter")
     s3 = boto3.client(
