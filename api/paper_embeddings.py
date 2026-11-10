@@ -29,6 +29,7 @@ PENDING_SOURCES = text("""
         SELECT 1 FROM paper_chunks AS link
         WHERE link.arxiv_id = source.arxiv_id AND link.source_kind = source.source_kind
           AND link.chunk_index = 0 AND link.source_version = source.source_version
+          AND link.source_start IS NOT NULL
     )
     ORDER BY source.arxiv_id, source.source_kind
 """)
@@ -84,12 +85,27 @@ async def replace_source_chunks(state, s3, source, tokenizer: Tokenizer, max_tok
         if current != source.source_version:
             return 0
 
-        old_ids = (await session.scalars(text("""
-            SELECT chunk.id FROM chunks AS chunk JOIN paper_chunks AS link ON link.chunk_id = chunk.id
+        existing = (await session.execute(text("""
+            SELECT chunk.id, chunk.text, link.chunk_index, link.source_version
+            FROM chunks AS chunk JOIN paper_chunks AS link ON link.chunk_id = chunk.id
             WHERE link.arxiv_id = :arxiv_id AND link.source_kind = :source_kind
+            ORDER BY link.chunk_index
             FOR UPDATE OF chunk
         """), params)).all()
-        if old_ids:
+        if len(existing) == len(fragments) and all(
+            row.chunk_index == index and row.source_version == current and row.text == fragment.text
+            for index, (row, fragment) in enumerate(zip(existing, fragments, strict=True))
+        ):
+            await session.execute(text("""
+                UPDATE paper_chunks SET source_start = :source_start, source_end = :source_end
+                WHERE chunk_id = :chunk_id
+            """), [
+                {"chunk_id": row.id, "source_start": fragment.source_start, "source_end": fragment.source_end}
+                for row, fragment in zip(existing, fragments, strict=True)
+            ])
+            return len(fragments)
+        if existing:
+            old_ids = [row.id for row in existing]
             # Include points whose writes succeeded before their PostgreSQL references were committed.
             response = await state.qdrant.post(
                 f"/collections/{collection}/points/delete?wait=true", json={"points": old_ids},
@@ -105,12 +121,18 @@ async def replace_source_chunks(state, s3, source, tokenizer: Tokenizer, max_tok
 
         ids = await session.scalars(
             insert(Chunk).returning(Chunk.id, sort_by_parameter_order=True),
-            [{"text": fragment} for fragment in fragments],
+            [{"text": fragment.text} for fragment in fragments],
         )
         await session.execute(text("""
-            INSERT INTO paper_chunks (chunk_id, arxiv_id, source_kind, source_version, chunk_index)
-            VALUES (:chunk_id, :arxiv_id, :source_kind, :source_version, :chunk_index)
-        """), [{**params, "chunk_id": chunk_id, "chunk_index": index} for index, chunk_id in enumerate(ids)])
+            INSERT INTO paper_chunks (chunk_id, arxiv_id, source_kind, source_version, chunk_index, source_start, source_end)
+            VALUES (:chunk_id, :arxiv_id, :source_kind, :source_version, :chunk_index, :source_start, :source_end)
+        """), [
+            {
+                **params, "chunk_id": chunk_id, "chunk_index": index,
+                "source_start": fragment.source_start, "source_end": fragment.source_end,
+            }
+            for index, (chunk_id, fragment) in enumerate(zip(ids, fragments, strict=True))
+        ])
     return len(fragments)
 
 
@@ -156,7 +178,7 @@ async def index_pending_chunks(state, s3, tokenizer: Tokenizer, max_tokens: int)
                     source_errors += 1
                     continue
                 if count:
-                    logging.info("Created %d %s chunks for %s", count, source.source_kind, source.arxiv_id)
+                    logging.info("Prepared %d %s chunks for %s", count, source.source_kind, source.arxiv_id)
 
             async with state.db_sessions.begin() as session:
                 last_id = await session.scalar(text("SELECT coalesce(max(id), 0) FROM chunks"))
