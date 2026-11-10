@@ -37,6 +37,9 @@ const ragSources = document.querySelector("#rag-sources");
 const ragExplanation = document.querySelector("#rag-explanation");
 const ragExplanationText = document.querySelector("#rag-explanation-text");
 const ragTrace = document.querySelector("#rag-trace");
+const ragTraceStatus = document.querySelector("#rag-trace-status");
+const ragModelHistory = document.querySelector("#rag-model-history");
+const ragModelTurns = document.querySelector("#rag-model-turns");
 const ragTraceEmpty = document.querySelector("#rag-trace-empty");
 const ragToolCalls = document.querySelector("#rag-tool-calls");
 const ragPermalink = document.querySelector("#rag-permalink");
@@ -226,6 +229,9 @@ function showLocation(moveFocus = false) {
   ragResult.hidden = true;
   ragTrace.hidden = true;
   ragTrace.open = false;
+  ragToolCalls.replaceChildren();
+  ragModelTurns.replaceChildren();
+  ragModelHistory.hidden = true;
 
   if (query || runId) {
     catalogRequest?.abort();
@@ -310,43 +316,179 @@ function renderRagAnswer(answer) {
   ragResult.hidden = false;
 }
 
+const toolLabels = new Map([
+  ["search_vectors", "Векторный поиск"],
+  ["search_text", "Текстовый поиск"],
+  ["read_document", "Чтение документа"],
+]);
+const argumentLabels = new Map([
+  ["query", "Запрос"], ["limit", "Лимит"], ["document_id", "Документ"],
+  ["source_kind", "Источник"], ["source_start", "Начало"], ["source_end", "Конец"],
+]);
+
+function toolArguments(args) {
+  if (typeof args === "string") {
+    try {
+      return JSON.parse(args);
+    } catch {
+      return args;
+    }
+  }
+  return args;
+}
+
+function renderToolArguments(args) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    const raw = document.createElement("pre");
+    raw.textContent = typeof args === "string" ? args : JSON.stringify(args);
+    return raw;
+  }
+  const list = document.createElement("dl");
+  list.className = "rag-tool-arguments";
+  for (const [name, value] of Object.entries(args)) {
+    const label = document.createElement("dt");
+    const field = document.createElement("dd");
+    label.textContent = argumentLabels.get(name) ?? name;
+    field.textContent = typeof value === "string" ? value : JSON.stringify(value);
+    list.append(label, field);
+  }
+  return list;
+}
+
+function renderToolExcerpt(item) {
+  const card = document.createElement("article");
+  const title = document.createElement("a");
+  const meta = document.createElement("p");
+  const excerpt = document.createElement("p");
+  const isSummary = item.source_kind === "summary";
+  const anchor = isSummary ? "paper-summary" : item.chunk_index == null ? "paper-text" : `chunk-${item.chunk_index + 1}`;
+  const score = typeof item.score === "number" ? ` · Сходство ${scoreFormat.format(item.score)}` : "";
+  card.className = "rag-tool-excerpt";
+  title.href = `${paperUrl(item.document_id)}#${anchor}`;
+  title.textContent = `[${item.source_id}] ${item.paper_title || item.document_id}`;
+  meta.className = "rag-tool-meta";
+  meta.textContent = `${isSummary ? "Суммаризация" : "Статья"} · arXiv:${item.document_id} · [${item.source_start}, ${item.source_end})${score}`;
+  excerpt.className = "chunk-text";
+  excerpt.textContent = item.text;
+  card.append(title, meta, excerpt);
+  return card;
+}
+
 function renderToolCall(call) {
   const details = document.createElement("details");
   const heading = document.createElement("summary");
+  const name = document.createElement("span");
+  const code = document.createElement("code");
+  const badge = document.createElement("span");
+  const duration = document.createElement("span");
+  const body = document.createElement("div");
   const inputLabel = document.createElement("h4");
-  const input = document.createElement("pre");
   const outputLabel = document.createElement("h4");
-  const output = document.createElement("pre");
-  const status = Object.hasOwn(call.result, "error") ? " · ошибка" : "";
-  heading.textContent = `${call.position}. ${call.tool_name} · ${call.duration_ms} мс${status}`;
+  const output = document.createElement("div");
+  const rawDetails = document.createElement("details");
+  const rawLabel = document.createElement("summary");
+  const raw = document.createElement("pre");
+  const error = Object.hasOwn(call.result, "error");
+  const matches = Array.isArray(call.result.matches) ? call.result.matches : null;
+  const excerpts = matches ?? (typeof call.result.text === "string" ? [call.result] : []);
+  details.className = "rag-tool";
+  name.className = "rag-tool-name";
+  name.textContent = `${call.position}. ${toolLabels.get(call.tool_name) ?? call.tool_name}`;
+  code.textContent = call.tool_name;
+  badge.className = "rag-tool-badge";
+  badge.dataset.error = String(error);
+  badge.textContent = error ? "Ошибка" : matches ? `Совпадений: ${matches.length}` : excerpts.length ? "Фрагмент" : "Готово";
+  duration.className = "rag-tool-meta";
+  duration.textContent = call.duration_ms >= 1000
+    ? `${scoreFormat.format(call.duration_ms / 1000)} с` : `${call.duration_ms} мс`;
+  heading.append(name, code, badge, duration);
+  body.className = "rag-tool-body";
   inputLabel.textContent = "Аргументы";
-  input.textContent = typeof call.arguments === "string" ? call.arguments : JSON.stringify(call.arguments, null, 2);
   outputLabel.textContent = "Результат";
-  output.textContent = JSON.stringify(call.result, null, 2);
-  details.append(heading, inputLabel, input, outputLabel, output);
+  output.className = error ? "rag-tool-error" : "paper-list";
+  if (error) output.textContent = typeof call.result.error === "string" ? call.result.error : JSON.stringify(call.result.error);
+  else if (excerpts.length) output.append(...excerpts.map(renderToolExcerpt));
+  else output.textContent = "Совпадений нет.";
+  rawLabel.textContent = "Исходные данные (JSON)";
+  raw.textContent = JSON.stringify({ arguments: call.arguments, result: call.result }, null, 2);
+  rawDetails.append(rawLabel, raw);
+  body.append(inputLabel, renderToolArguments(toolArguments(call.arguments)), outputLabel, output, rawDetails);
+  details.append(heading, body);
   return details;
 }
 
-async function showRagRun(runId, signal, remember = false) {
-  if (remember) {
-    const url = new URL(location.href);
-    url.searchParams.set("run", runId);
-    updateUrl(url, true);
+function renderModelTurn(turn) {
+  const details = document.createElement("details");
+  const heading = document.createElement("summary");
+  const name = document.createElement("span");
+  const status = document.createElement("span");
+  const body = document.createElement("div");
+  details.className = "rag-tool";
+  body.className = "rag-tool-body";
+  name.className = "rag-tool-name";
+  name.textContent = `Шаг ${turn.position} · ${turn.phase === "answer" ? "Формирование ответа" : "Поиск источников"}`;
+  status.className = "rag-tool-badge";
+  status.textContent = turn.reasoning.length ? "Есть рассуждение" : turn.reasoning_available
+    ? "Текст рассуждения недоступен" : "Рассуждение не передано";
+  heading.append(name, status);
+  for (const part of turn.reasoning) {
+    const label = document.createElement("h4");
+    const text = document.createElement("pre");
+    label.textContent = part.kind === "reasoning.summary" ? "Сводка рассуждения от провайдера" : "Рассуждение от провайдера";
+    text.textContent = part.text;
+    body.append(label, text);
   }
+  if (turn.content) {
+    const label = document.createElement("h4");
+    const text = document.createElement("pre");
+    label.textContent = "Сообщение модели";
+    text.textContent = turn.content;
+    body.append(label, text);
+  }
+  if (turn.requested_tools.length) {
+    const label = document.createElement("h4");
+    const text = document.createElement("pre");
+    label.textContent = "Запросы на вызов инструментов";
+    text.textContent = JSON.stringify(turn.requested_tools, null, 2);
+    body.append(label, text);
+  }
+  details.append(heading, body);
+  return details;
+}
+
+function rememberRagRun(runId) {
+  const url = new URL(location.href);
+  if (runId) url.searchParams.set("run", runId);
+  else url.searchParams.delete("run");
+  updateUrl(url, true);
+}
+
+function updateRagTrace(runId, running, calls = [], turns = []) {
+  if (ragTrace.hidden) ragTrace.open = running;
+  ragPermalink.href = `/?${new URLSearchParams({ mode: "rag", run: runId })}`;
+  ragToolCalls.append(...calls.slice(ragToolCalls.children.length).map(renderToolCall));
+  ragModelTurns.append(...turns.slice(ragModelTurns.children.length).map(renderModelTurn));
+  ragModelHistory.hidden = turns.length === 0;
+  ragTraceEmpty.hidden = running || calls.length > 0;
+  const status = running && !calls.length ? "Ожидаем первый результат инструмента."
+    : `Вызовов инструментов: ${calls.length}${running ? " · поиск продолжается" : ""}`;
+  if (ragTraceStatus.textContent !== status) ragTraceStatus.textContent = status;
+  ragTrace.hidden = false;
+}
+
+async function showRagRun(runId, signal, allowPending = false) {
   const response = await fetch(`/api/rag/runs/${encodeURIComponent(runId)}`, { signal, cache: "no-store" });
+  if (signal.aborted) return;
   if (response.status === 404 || response.status === 422) {
-    searchStatus.textContent = "Запуск RAG не найден.";
-    return;
+    if (!allowPending || response.status === 422) searchStatus.textContent = "Запуск RAG не найден.";
+    return response.status === 404 ? "missing" : undefined;
   }
   if (!response.ok) throw new Error(`RAG history returned ${response.status}`);
   const run = await response.json();
   if (signal.aborted) return;
 
-  searchQuery.value = run.query;
-  ragPermalink.href = `/?${new URLSearchParams({ mode: "rag", run: run.run_id })}`;
-  ragToolCalls.replaceChildren(...run.tool_calls.map(renderToolCall));
-  ragTraceEmpty.hidden = run.tool_calls.length > 0;
-  ragTrace.hidden = false;
+  if (ragTrace.hidden && !allowPending) searchQuery.value = run.query;
+  updateRagTrace(run.run_id, run.status === "running", run.tool_calls, run.model_turns);
   if (run.status === "answered") {
     renderRagAnswer(run.answer);
     searchStatus.textContent = "Ответ готов.";
@@ -355,7 +497,64 @@ async function showRagRun(runId, signal, remember = false) {
   } else if (run.status === "failed") {
     searchStatus.textContent = `Запуск завершился ошибкой. ${run.error ?? ""}`;
   } else {
-    searchStatus.textContent = "Запуск ещё не завершён.";
+    searchStatus.textContent = searchModes.rag.pending;
+  }
+  return run.status;
+}
+
+function waitForRagUpdate(signal) {
+  return new Promise((resolve) => {
+    const stop = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", stop);
+      resolve();
+    };
+    const timer = setTimeout(stop, 1000);
+    signal.addEventListener("abort", stop, { once: true });
+    if (signal.aborted) stop();
+  });
+}
+
+async function followRagRun(runId, signal, allowPending = false) {
+  const deadline = Date.now() + 160_000;
+  while (!signal.aborted) {
+    const status = await showRagRun(runId, signal, allowPending);
+    if (status !== "running" && !(allowPending && status === "missing")) return;
+    if (Date.now() >= deadline) {
+      searchStatus.textContent = "Запуск ещё не завершён. Обновите страницу, чтобы проверить его.";
+      return;
+    }
+    await waitForRagUpdate(signal);
+  }
+}
+
+async function postRagSearch(query, signal) {
+  const runId = crypto.randomUUID();
+  rememberRagRun(runId);
+  updateRagTrace(runId, true);
+  const polling = new AbortController();
+  const stopPolling = () => polling.abort();
+  signal.addEventListener("abort", stopPolling, { once: true });
+  const pending = fetch(searchModes.rag.endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, run_id: runId }),
+    signal,
+  });
+  const live = followRagRun(runId, polling.signal, true).catch(() => {
+    if (!polling.signal.aborted) ragTraceStatus.textContent = "История обновится после завершения запроса.";
+  });
+  try {
+    const response = await pending;
+    if (!response.ok && !response.headers.has("X-RAG-Run-Id") && !signal.aborted) {
+      rememberRagRun(null);
+      ragTrace.hidden = true;
+    }
+    return response;
+  } finally {
+    stopPolling();
+    signal.removeEventListener("abort", stopPolling);
+    await live;
   }
 }
 
@@ -367,16 +566,16 @@ async function loadSearch(query, mode, moveFocus, runId) {
   searchSubmit.disabled = true;
   searchTitle.textContent = settings.title;
   searchChunks.replaceChildren();
-  searchResults.setAttribute("aria-busy", "true");
+  searchResults.setAttribute("aria-busy", String(mode !== "rag"));
   searchStatus.textContent = runId ? "Загружаем историю запуска…" : settings.pending;
 
   try {
     if (runId) {
-      await showRagRun(runId, request.signal);
+      await followRagRun(runId, request.signal);
       if (moveFocus && !request.signal.aborted) searchTitle.focus();
       return;
     }
-    const response = await fetch(settings.endpoint, {
+    const response = mode === "rag" ? await postRagSearch(query, request.signal) : await fetch(settings.endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query }),
@@ -385,7 +584,8 @@ async function loadSearch(query, mode, moveFocus, runId) {
     if (request.signal.aborted) return;
     const failedRunId = mode === "rag" && response.headers.get("X-RAG-Run-Id");
     if (!response.ok && failedRunId) {
-      await showRagRun(failedRunId, request.signal, true);
+      rememberRagRun(failedRunId);
+      await showRagRun(failedRunId, request.signal);
       if (moveFocus && !request.signal.aborted) searchTitle.focus();
       return;
     }
@@ -412,7 +612,8 @@ async function loadSearch(query, mode, moveFocus, runId) {
     const result = await response.json();
     if (request.signal.aborted) return;
     if (mode === "rag") {
-      await showRagRun(result.run_id, request.signal, true);
+      rememberRagRun(result.run_id);
+      await showRagRun(result.run_id, request.signal);
     } else {
       searchChunks.replaceChildren(...result.map(renderSearchResult));
       searchStatus.textContent = result.length ? `Найдено фрагментов: ${result.length}` : settings.empty;

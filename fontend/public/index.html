@@ -114,7 +114,15 @@
         </section>
         <details id="rag-trace" class="paper" hidden>
           <summary>Как найден ответ</summary>
-          <p><a id="rag-permalink">Ссылка на запуск</a></p>
+          <div class="rag-trace-meta">
+            <p id="rag-trace-status" role="status"></p>
+            <a id="rag-permalink">Ссылка на запуск</a>
+          </div>
+          <section id="rag-model-history" aria-labelledby="rag-model-title" hidden>
+            <h3 id="rag-model-title">Сообщения модели</h3>
+            <div id="rag-model-turns" class="paper-list"></div>
+          </section>
+          <h3>Вызовы инструментов</h3>
           <p id="rag-trace-empty" hidden>В этом запуске инструментов не вызывали.</p>
           <div id="rag-tool-calls" class="paper-list"></div>
         </details>

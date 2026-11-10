@@ -122,7 +122,29 @@ summary { width: fit-content; cursor: pointer; color: var(--accent); font-size: 
 #rag-result a { color: var(--accent); }
 #rag-trace { margin-top: 12px; }
 #rag-trace a { color: var(--accent); }
-#rag-tool-calls pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+#rag-trace pre { margin: 0; padding: 10px; background: #f3f5f9; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rag-trace-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; margin-block: 10px; }
+.rag-trace-meta p { margin: 0; color: var(--muted); }
+.rag-tool { border: 1px solid var(--border); border-radius: 8px; }
+.rag-tool > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 10px; width: 100%; padding: 10px 12px; }
+.rag-tool > summary::before { content: "▸"; }
+.rag-tool[open] > summary::before { content: "▾"; }
+.rag-tool > summary:hover { background: #f3f5f9; border-radius: 8px; }
+.rag-tool > summary code { font-weight: 400; overflow-wrap: anywhere; }
+.rag-tool-name { color: #18253b; font-weight: 700; }
+.rag-tool-badge { padding: 2px 7px; border-radius: 999px; background: #e4edff; color: #23458d; font-size: 0.8rem; }
+.rag-tool-badge[data-error="true"] { background: #fbe8eb; color: #962e37; }
+.rag-tool-meta { margin: 4px 0 0; color: var(--muted); font-size: 0.85rem; overflow-wrap: anywhere; }
+.rag-tool > summary .rag-tool-meta { margin: 0 0 0 auto; }
+.rag-tool-body { display: grid; gap: 8px; padding: 12px; border-top: 1px solid var(--border); }
+.rag-tool-body h4 { margin: 0; }
+.rag-tool-body details pre { margin-top: 8px; }
+.rag-tool-arguments { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr); gap: 4px 12px; margin: 0; }
+.rag-tool-arguments dt { color: var(--muted); overflow-wrap: anywhere; }
+.rag-tool-arguments dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.rag-tool-excerpt { padding: 10px 12px; background: #f5f7fb; border: 1px solid var(--border); border-radius: 8px; }
+.rag-tool-excerpt > a { font-weight: 650; overflow-wrap: anywhere; }
+.rag-tool-error { padding: 8px 10px; border-radius: 6px; background: #fbe8eb; color: #962e37; overflow-wrap: anywhere; }
 #paper-chunks .paper:target { border-color: var(--accent); scroll-margin-top: 20px; }
 
 .pagination { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 20px; }

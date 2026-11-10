@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 from codecs import getincrementaldecoder
 from time import perf_counter
 from typing import Annotated, Literal
@@ -10,14 +11,16 @@ import httpx
 from botocore.exceptions import BotoCoreError
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
+from pydantic import UUID4, BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
 from sqlalchemy import text
 
 from chunks import PaperChunkSource, find_chunks, find_text_chunks, require_zero_chunk_overlap
 from database import database_session
 from llm_chat import ChatResponseError
 from papers import open_paper_object
-from rag_history import RagRunRecord, RagToolCall, finish_run, load_run, save_tool_call, start_run
+from rag_history import (
+    RagModelTurn, RagRunRecord, RagToolCall, finish_run, load_run, save_model_turn, save_tool_call, start_run,
+)
 
 
 router = APIRouter(prefix="/rag", tags=["rag"])
@@ -29,6 +32,7 @@ MAX_TOOL_ROUNDS = 4
 MAX_TOOL_CALLS = 8
 MAX_EVIDENCE_BYTES = 6000
 MAX_SLICE_CHARS = 1500
+REASONING_TAG = re.compile(r"<(think|thinking|reasoning)\b[^>]*>.*?(?:</\1\s*>|$)", re.IGNORECASE | re.DOTALL)
 QueryText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000, pattern=r"^[^\x00]+$")]
 RESEARCH_INSTRUCTIONS = """Собери источники для ответа на вопрос пользователя через инструменты.
 Начни с поиска. Для смысловых запросов используй search_vectors, для точных терминов, фраз и формул
@@ -49,6 +53,7 @@ ANSWER_INSTRUCTIONS = """Ответь на русском языке, опира
 
 class RagQuestion(BaseModel):
     query: QueryText
+    run_id: UUID4 | None = None
 
 
 class SearchArguments(BaseModel):
@@ -174,7 +179,51 @@ async def run_tool(request: Request, name: str, raw_arguments: str | dict, versi
     return results
 
 
-async def collect_sources(request: Request, question: str, run_id: UUID) -> tuple[list[RagSource], list[dict]]:
+def visible_model_content(message: dict) -> str | None:
+    content = message.get("content")
+    if isinstance(content, str):
+        return REASONING_TAG.sub("", content).replace("\x00", "").strip() or None
+    return None
+
+
+def reasoning_available(message: dict) -> bool:
+    return any(message.get(key) for key in ("reasoning", "reasoning_details", "thinking"))
+
+
+def visible_reasoning(message: dict) -> list[dict]:
+    parts = []
+    details = message.get("reasoning_details")
+    if isinstance(details, list):
+        for detail in details:
+            if not isinstance(detail, dict):
+                continue
+            kind = detail.get("type")
+            if kind == "reasoning.text":
+                content = detail.get("text")
+            elif kind == "reasoning.summary":
+                content = detail.get("summary")
+            else:
+                continue
+            if isinstance(content, str) and content.strip():
+                parts.append({"kind": kind, "text": content})
+    for field in ("reasoning", "thinking"):
+        content = message.get(field)
+        texts = [part["text"] for part in parts if part["kind"] == "reasoning.text"]
+        if isinstance(content, str) and content.strip() and content not in texts and content != "\n".join(texts):
+            parts.append({"kind": "reasoning.text", "text": content})
+    return parts
+
+
+def tool_requests(calls: list) -> list[dict]:
+    requests = []
+    for call in calls:
+        function = call.get("function") if isinstance(call, dict) else None
+        if isinstance(function, dict):
+            requests.append({key: function[key] for key in ("name", "arguments") if key in function})
+    return requests
+
+
+async def collect_sources(request: Request, question: str, run_id: UUID) -> tuple[list[RagSource], list[dict], int]:
     state = request.app.state
     chat = state.chat_settings
     messages = [{"role": "system", "content": RESEARCH_INSTRUCTIONS}, {"role": "user", "content": question}]
@@ -185,7 +234,7 @@ async def collect_sources(request: Request, question: str, run_id: UUID) -> tupl
     remaining_bytes = MAX_EVIDENCE_BYTES
     max_tokens = REASONING_OUTPUT_TOKENS if chat.reasoning_effort else OUTPUT_TOKENS
 
-    for _ in range(MAX_TOOL_ROUNDS):
+    for position in range(1, MAX_TOOL_ROUNDS + 1):
         assistant = await chat.turn(
             state.chat_client, messages, max_tokens=max_tokens, tools=TOOLS,
             ollama_options={"num_ctx": CONTEXT_TOKENS, **state.rag_ollama_options},
@@ -193,6 +242,11 @@ async def collect_sources(request: Request, question: str, run_id: UUID) -> tupl
         calls = assistant.get("tool_calls") or []
         if not isinstance(calls, list):
             raise ChatResponseError("Invalid tool calls")
+        await save_model_turn(request, run_id, RagModelTurn(
+            position=position, phase="research", content=visible_model_content(assistant),
+            requested_tools=tool_requests(calls), reasoning=visible_reasoning(assistant),
+            reasoning_available=reasoning_available(assistant),
+        ))
         if not calls:
             break
         messages.append(assistant)
@@ -250,7 +304,7 @@ async def collect_sources(request: Request, question: str, run_id: UUID) -> tupl
             remaining_calls -= 1
         if not remaining_calls or remaining_bytes < 256:
             break
-    return list(sources.values()), search_steps
+    return list(sources.values()), search_steps, position
 
 
 async def generate_answer(payload: RagQuestion, request: Request, run_id: UUID) -> RagAnswer:
@@ -259,20 +313,27 @@ async def generate_answer(payload: RagQuestion, request: Request, run_id: UUID) 
 
     try:
         async with asyncio.timeout(150):
-            sources, search_steps = await collect_sources(request, payload.query, run_id)
+            sources, search_steps, position = await collect_sources(request, payload.query, run_id)
             if not sources:
                 return RagAnswer(run_id=run_id, status="insufficient_evidence", points=[], sources=[], source_explanation="")
             material = json.dumps({
                 "question": payload.query, "search_steps": search_steps,
                 "sources": [source.model_dump() for source in sources],
             }, ensure_ascii=False)
-            content = await chat.complete(
+            assistant = await chat.turn(
                 state.chat_client,
                 [{"role": "system", "content": ANSWER_INSTRUCTIONS}, {"role": "user", "content": material}],
                 max_tokens=REASONING_OUTPUT_TOKENS if chat.reasoning_effort else OUTPUT_TOKENS,
                 ollama_options={"num_ctx": CONTEXT_TOKENS, **state.rag_ollama_options},
                 schema=GeneratedAnswer.model_json_schema(),
             )
+            content = visible_model_content(assistant)
+            await save_model_turn(request, run_id, RagModelTurn(
+                position=position + 1, phase="answer", content=content, requested_tools=[],
+                reasoning=visible_reasoning(assistant), reasoning_available=reasoning_available(assistant),
+            ))
+            if content is None:
+                raise ChatResponseError("Empty response")
             generated = GeneratedAnswer.model_validate_json(content)
             cited_ids = {source_id for point in generated.points for source_id in point.source_ids}
             sources_by_id = {source.id: source for source in sources}
@@ -303,7 +364,7 @@ async def answer_question(payload: RagQuestion, request: Request):
     if not request.app.state.chat_settings.configured:
         raise HTTPException(503, "OPENROUTER_API_KEY is required.")
 
-    run_id = await start_run(request, payload.query)
+    run_id = await start_run(request, payload.query, payload.run_id)
     headers = {"X-RAG-Run-Id": str(run_id)}
     try:
         answer = await generate_answer(payload, request, run_id)
