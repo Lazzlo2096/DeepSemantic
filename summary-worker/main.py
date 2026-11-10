@@ -13,7 +13,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from psycopg.rows import dict_row
 from tokenizers import Tokenizer
 
-from llm_chat import ChatSettings
+from llm_chat import ChatResponseError, ChatSettings
 from summary_schema import MARKDOWN_REQUIRED
 
 
@@ -28,6 +28,7 @@ DEFAULT_CONTEXT_TOKENS = 49152
 MAX_CONTEXT_TOKENS = 131072
 CHAT_TEMPLATE_RESERVE = 64
 FINAL_OUTPUT_TOKENS = 768
+OPENROUTER_OUTPUT_TOKENS = 2048
 
 FINAL_INSTRUCTIONS = """Summarize this research article. Start from the abstract and enrich it with
 important information from the rest of the article. State what the authors studied,
@@ -79,16 +80,19 @@ class Summarizer:
                 )
             ollama_options["num_ctx"] = self.context_tokens
         await progress(0, 1)
+        max_tokens = OPENROUTER_OUTPUT_TOKENS if self.chat.provider == "openrouter" else FINAL_OUTPUT_TOKENS
         try:
             summary = await self.chat.complete(
                 self.client, [{"role": "user", "content": prompt}],
-                max_tokens=FINAL_OUTPUT_TOKENS, ollama_options=ollama_options,
+                max_tokens=max_tokens, ollama_options=ollama_options,
             )
         except httpx.HTTPStatusError as error:
             message = error.response.text.lower()
             if "context" in message and any(word in message for word in ("exceed", "too long", "too large", "overflow")):
                 raise SummaryInputError(f"Полный запрос превышает рабочий контекст {self.chat.provider}.") from error
             raise
+        except ChatResponseError as error:
+            raise SummaryError(f"{self.chat.provider}: {error} (лимит ответа {max_tokens} токенов).") from error
         except ValueError as error:
             raise SummaryError(f"{self.chat.provider} вернул неполное или пустое саммари.") from error
         await progress(1, 1)

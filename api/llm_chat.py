@@ -60,7 +60,7 @@ class ChatSettings:
             if self.provider == "openrouter":
                 choice = data["choices"][0]
                 if choice["finish_reason"] != "stop":
-                    raise ChatResponseError("Incomplete generation")
+                    raise ChatResponseError(f"finish_reason={choice['finish_reason']!r}")
                 content = choice["message"]["content"]
             else:
                 if data["done"] is not True or data.get("done_reason") == "length":

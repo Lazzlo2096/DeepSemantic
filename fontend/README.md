@@ -12,7 +12,7 @@
 
 `LLM_PROVIDER` выбирает провайдера для суммаризации и ответов RAG. В режиме `openrouter` укажи `OPENROUTER_API_KEY` в `.env`. Модель задаётся через `OPENROUTER_MODEL`, по умолчанию `deepseek/deepseek-v4.1-flash-1017`. Для локальной генерации задай `LLM_PROVIDER=ollama` и `OLLAMA_MODEL`. После изменения `.env` пересоздай контейнеры API и воркера.
 
-В режиме Ollama воркер запрашивает фиксированное окно `num_ctx` из `SUMMARY_CONTEXT_TOKENS` (по умолчанию 49 152). Для ответа выделяется до 768 токенов. PostgreSQL хранит статус и итоговый Markdown в `paper_summaries`, по одной записи на версию статьи.
+В режиме Ollama воркер запрашивает фиксированное окно `num_ctx` из `SUMMARY_CONTEXT_TOKENS` (по умолчанию 49 152). На ответ выделяется до 768 токенов в Ollama и до 2 048 в OpenRouter. PostgreSQL хранит статус и итоговый Markdown в `paper_summaries`, по одной записи на версию статьи.
 
 При обновлении работающего стека с `paper-summarizer` сначала выполни `docker compose down --remove-orphans` с тем же набором Compose-файлов, затем запусти проект в своём режиме. Тома и задания суммаризации сохранятся.
 
