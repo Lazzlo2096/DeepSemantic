@@ -2,7 +2,7 @@
 
 `just up` запускает Grafana Alloy, Loki и Grafana. Для уже запущенного стека можно отдельно выполнить `docker compose up -d loki alloy grafana`.
 
-Alloy читает логи `arxiv-grabber`, `arxiv-text-worker`, `paper-indexer`, `api`, `embeding-service` и `summary-worker` из текущего проекта Docker Compose. Loki хранит их семь дней в томе `loki-data`. Alloy сохраняет позиции чтения в томе `alloy-data`, а настройки Grafana хранятся в томе `grafana-data`.
+Alloy читает логи `arxiv-grabber`, `arxiv-text-worker`, `embeding-worker`, `api`, `embeding-service` и `summary-worker` из текущего проекта Docker Compose. Loki хранит их семь дней в томе `loki-data`. Alloy сохраняет позиции чтения в томе `alloy-data`, а настройки Grafana хранятся в томе `grafana-data`.
 
 Дашборд [«Импорт статей arXiv»](http://127.0.0.1:3000/d/ad792cc) загружается из `observability/dashboards/arxiv-imports.json` при запуске Grafana, в том числе с пустым томом `grafana-data`. Переменная `latest_import_id` через источник `Loki HTTP` выбирает последнее событие `arxiv_import.insert` в диапазоне дашборда. Для изменения дашборда правь JSON в репозитории.
 
@@ -11,7 +11,7 @@ Alloy читает логи `arxiv-grabber`, `arxiv-text-worker`, `paper-indexer
 Запрос LogQL для общего потока:
 
 ```logql
-{service_name=~"arxiv-grabber|arxiv-text-worker|paper-indexer|api|embeding-service|summary-worker"}
+{service_name=~"arxiv-grabber|arxiv-text-worker|embeding-worker|api|embeding-service|summary-worker"}
 ```
 
 Переходы статуса статьи можно найти по полям JSON:
@@ -49,4 +49,4 @@ Alloy читает логи `arxiv-grabber`, `arxiv-text-worker`, `paper-indexer
 | import_id="4411913797a7461a864a0581086d4765"
 ```
 
-По этому фильтру видны постановка в очередь, начало попытки (`arxiv_import.attempt_started`), итог попытки со счётчиками и ошибкой (`arxiv_import.attempt_finished`), а также ошибки обработки отдельных статей и их переходы статуса. `paper-indexer` индексирует статьи отдельно и связывает свои события со статьёй через `arxiv_id`.
+По этому фильтру видны постановка в очередь, начало попытки (`arxiv_import.attempt_started`), итог попытки со счётчиками и ошибкой (`arxiv_import.attempt_finished`), а также ошибки обработки отдельных статей и их переходы статуса. `embeding-worker` индексирует статьи отдельно и пишет прогресс по ID чанков.

@@ -24,6 +24,6 @@ services:
   embeding-service:
     profiles: !override [container-inference]
 
-  paper-indexer:
+  embeding-worker:
     depends_on:
       embeding-service: !reset null

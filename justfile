@@ -1,6 +1,6 @@
 set windows-shell := ["powershell.exe", "-NoProfile", "-Command"]
 
-workers := "arxiv-grabber arxiv-text-worker paper-indexer summary-worker"
+workers := "arxiv-grabber arxiv-text-worker embeding-worker summary-worker"
 container_workers := workers + " embeding-service"
 
 default:

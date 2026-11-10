@@ -2,7 +2,7 @@ const endpoint = "/api/workers";
 const workerNames = new Map([
   ["arxiv-grabber", "Скачивание arXiv"],
   ["arxiv-text-worker", "Извлечение текста arXiv"],
-  ["paper-indexer", "Индексация статей"],
+  ["embeding-worker", "Индексация статей"],
   ["summary-worker", "Суммаризация"],
   ["embeding-service", "Эмбеддинги BGE-M3"],
 ]);

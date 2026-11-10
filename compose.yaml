@@ -68,7 +68,7 @@ services:
       start_period: 10m
       retries: 3
 
-  paper-indexer:
+  embeding-worker:
     profiles: [workers]
     build: ./api
     command: ["python", "-m", "paper_embeddings", "--watch"]
