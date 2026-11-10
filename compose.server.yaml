@@ -1,0 +1,24 @@
+services:
+  fontend:
+    restart: unless-stopped
+    ports: !override
+      - "80:80"
+      - "443:443"
+      - "127.0.0.1:${FONTEND_PORT:-8080}:8080"
+    volumes:
+      - ./fontend/Caddyfile.server:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+
+  ollama:
+    profiles: [ollama]
+
+  ollama-init:
+    profiles: [ollama]
+
+  summary-worker:
+    depends_on:
+      ollama-init:
+        required: false
+
+volumes:
+  caddy-data:

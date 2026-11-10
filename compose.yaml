@@ -34,6 +34,7 @@ services:
       - "127.0.0.1:${FONTEND_PORT:-8080}:80"
     volumes:
       - ./fontend/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./fontend/routes.caddy:/etc/caddy/routes.caddy:ro
       - ./fontend/public:/srv:ro
 
   worker-control:

@@ -1,0 +1,2 @@
+/bootstrap.sh text eol=lf
+/create-swapfile.sh text eol=lf

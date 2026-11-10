@@ -15,6 +15,7 @@ WORKERS = ("arxiv-grabber", "arxiv-text-worker", "embeding-worker", "summary-wor
 STARTABLE = {"created", "exited"}
 STOPPABLE = {"running", "restarting", "paused"}
 DOCKER_STATES = STARTABLE | STOPPABLE | {"dead", "removing"}
+PREFERRED_DOCKER_API_VERSION = "1.40"
 
 
 class WorkerStatus(BaseModel):
@@ -36,7 +37,7 @@ async def lifespan(app: FastAPI):
     app.state.external_embedding = os.getenv("EMBEDDING_WORKER_EXTERNAL") == "true"
     app.state.worker_locks = {worker: asyncio.Lock() for worker in WORKERS}
     transport = httpx.AsyncHTTPTransport(uds="/var/run/docker.sock")
-    async with httpx.AsyncClient(transport=transport, base_url="http://docker/v1.40/", timeout=5) as client:
+    async with httpx.AsyncClient(transport=transport, base_url="http://docker/", timeout=5) as client:
         app.state.docker = client
         yield
 
@@ -49,10 +50,22 @@ def is_external(request: Request, worker: str) -> bool:
     return worker == "embeding-service" and request.app.state.external_embedding
 
 
+async def docker_client(request: Request) -> httpx.AsyncClient:
+    client = request.app.state.docker
+    if client.base_url.path == "/":
+        response = await client.get("http://docker/version")
+        response.raise_for_status()
+        minimum = response.json()["MinAPIVersion"]
+        version = max(PREFERRED_DOCKER_API_VERSION, minimum, key=lambda value: tuple(map(int, value.split("."))))
+        client.base_url = f"http://docker/v{version}/"
+    return client
+
+
 async def containers_by_worker(request: Request) -> dict[str, list[dict]]:
     groups = {worker: [] for worker in WORKERS}
     try:
-        response = await request.app.state.docker.get("containers/json", params={
+        client = await docker_client(request)
+        response = await client.get("containers/json", params={
             "all": "true",
             "filters": json.dumps({"label": [
                 f"com.docker.compose.project={request.app.state.project}",
