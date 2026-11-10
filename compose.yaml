@@ -59,6 +59,7 @@ services:
     environment:
       <<: [*embedding-client-environment, *llm-environment]
       RAG_OPENROUTER_MODEL: "${RAG_OPENROUTER_MODEL:-deepseek/deepseek-v4.1-flash-1017}"
+      OPENROUTER_REASONING_EFFORT: "${RAG_OPENROUTER_REASONING_EFFORT:-}"
       RUSTFS_BUCKET: "${RUSTFS_BUCKET:-arxiv-papers}"
       RAG_OLLAMA_GPU_LAYERS: "${RAG_OLLAMA_GPU_LAYERS:--1}"
     healthcheck:
