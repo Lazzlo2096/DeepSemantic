@@ -12,4 +12,5 @@
 !rag.py
 !llm_chat.py
 !worker_control.py
+!storage.py
 !requirements.txt

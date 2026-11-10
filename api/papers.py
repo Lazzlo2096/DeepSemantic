@@ -1,7 +1,12 @@
 from datetime import UTC, date, datetime, time
+from pathlib import PurePosixPath
 from typing import Annotated, Literal
+from urllib.parse import quote
 
+from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import column, func, select, table, text, true
 
@@ -11,6 +16,7 @@ from database import MAX_BIGINT, PAPER_SUMMARY_STATUS_TYPE, ArxivPaper, PaperSta
 router = APIRouter(prefix="/papers", tags=["papers"])
 ArxivId = Annotated[str, Path(min_length=1, pattern=r"^[^\x00]+$")]
 PaperSort = Literal["downloaded_desc", "submitted_desc", "submitted_asc", "status"]
+TEXT_MEDIA_TYPES = {".md": "text/markdown", ".txt": "text/plain"}
 
 
 class PaperResponse(BaseModel):
@@ -36,6 +42,39 @@ class PaperChunkResponse(BaseModel):
     chunk_id: int
     chunk_index: int
     text: str
+
+
+class PaperFileResponse(StreamingResponse):
+    def __init__(self, stored_object, media_type: str, filename: str | None):
+        self.object_body = stored_object["Body"]
+        headers = {
+            "Content-Length": str(stored_object["ContentLength"]),
+            "X-Content-Type-Options": "nosniff",
+        }
+        if filename is not None:
+            headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename, safe='')}"
+        super().__init__(self.object_body.iter_chunks(chunk_size=64 * 1024), media_type=media_type, headers=headers)
+
+    async def __call__(self, scope, receive, send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            self.object_body.close()
+
+
+async def paper_file(request: Request, bucket: str, key: str, media_type: str, filename: str | None = None):
+    s3 = request.app.state.rustfs
+    if s3 is None:
+        raise HTTPException(503, "Paper storage is unavailable.")
+    try:
+        stored_object = await run_in_threadpool(s3.get_object, Bucket=bucket, Key=key)
+    except ClientError as error:
+        if error.response["ResponseMetadata"]["HTTPStatusCode"] == 404:
+            raise HTTPException(404, "Paper file not found.") from error
+        raise HTTPException(503, "Paper storage is unavailable.") from error
+    except BotoCoreError as error:
+        raise HTTPException(503, "Paper storage is unavailable.") from error
+    return PaperFileResponse(stored_object, media_type, filename)
 
 
 def paper_order(paper, sort: PaperSort):
@@ -118,6 +157,25 @@ async def list_paper_chunks(request: Request, arxiv_id: ArxivId):
     if not rows:
         raise HTTPException(404, "Paper not found.")
     return [row for row in rows if row["chunk_id"] is not None]
+
+
+@router.get("/{arxiv_id:path}/text", response_class=StreamingResponse)
+async def get_paper_text(request: Request, arxiv_id: ArxivId):
+    paper = await get_paper(request, arxiv_id)
+    key = paper.text_object_key
+    media_type = TEXT_MEDIA_TYPES.get(PurePosixPath(key).suffix.lower()) if key else None
+    if media_type is None:
+        raise HTTPException(404, "Paper text not found.")
+    return await paper_file(request, paper.bucket, key, media_type)
+
+
+@router.get("/{arxiv_id:path}/html", response_class=StreamingResponse)
+async def download_paper_html(request: Request, arxiv_id: ArxivId):
+    paper = await get_paper(request, arxiv_id)
+    source = PurePosixPath(paper.object_key)
+    if source.suffix.lower() != ".html":
+        raise HTTPException(404, "Paper HTML not found.")
+    return await paper_file(request, paper.bucket, paper.object_key, "application/octet-stream", source.name)
 
 
 @router.get("/{arxiv_id:path}", response_model=PaperResponse)

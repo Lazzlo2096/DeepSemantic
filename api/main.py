@@ -1,7 +1,7 @@
 import asyncio
 import json
 import os
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager, closing
 from datetime import date, datetime
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
@@ -21,6 +21,7 @@ from llm_chat import ChatSettings
 from paper_summaries import router as paper_summaries_router
 from papers import router as papers_router
 from rag import router as rag_router
+from storage import connect_rustfs
 
 
 QUEUE = "embeddings.requests"
@@ -128,6 +129,7 @@ async def lifespan(app: FastAPI):
         stack.push_async_callback(engine.dispose)
         app.state.db_engine = engine
         app.state.db_sessions = async_sessionmaker(engine, expire_on_commit=False)
+        app.state.rustfs = stack.enter_context(closing(connect_rustfs())) if os.getenv("RUSTFS_ENDPOINT") else None
         app.state.qdrant = await stack.enter_async_context(
             httpx.AsyncClient(base_url=os.getenv("QDRANT_URL", "http://qdrant:6333"), timeout=5)
         )

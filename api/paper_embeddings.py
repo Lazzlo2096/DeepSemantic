@@ -2,11 +2,8 @@ import argparse
 import asyncio
 import logging
 import os
-from contextlib import closing
 
-import boto3
 import httpx
-from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -45,17 +42,6 @@ PENDING_CHUNKS = text("""
     ORDER BY chunk.id
     LIMIT :batch_size
 """)
-
-
-def connect_rustfs():
-    return boto3.client(
-        "s3",
-        endpoint_url=os.environ["RUSTFS_ENDPOINT"],
-        aws_access_key_id=os.environ["RUSTFS_ACCESS_KEY"],
-        aws_secret_access_key=os.environ["RUSTFS_SECRET_KEY"],
-        region_name="us-east-1",
-        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}, connect_timeout=5, read_timeout=30),
-    )
 
 
 def read_article(s3, bucket: str, key: str) -> str:
@@ -203,16 +189,18 @@ async def main(watch: bool = False) -> int:
     if not 3 <= max_tokens <= 8192:
         raise ValueError("EMBEDDING_MAX_TOKENS must be between 3 and 8192")
     tokenizer = Tokenizer.from_file("bge-m3-tokenizer.json")
-    with closing(connect_rustfs()) as s3:
-        async with lifespan(app):
-            if not watch:
-                return await index_pending_chunks(app.state, s3, tokenizer, max_tokens)
-            while True:
-                try:
-                    await index_pending_chunks(app.state, s3, tokenizer, max_tokens)
-                except (HTTPException, httpx.HTTPError, OperationalError, RuntimeError) as error:
-                    logging.warning("Paper indexing will retry in %d seconds: %s", POLL_INTERVAL_SECONDS, error)
-                await asyncio.sleep(POLL_INTERVAL_SECONDS)
+    async with lifespan(app):
+        s3 = app.state.rustfs
+        if s3 is None:
+            raise RuntimeError("RUSTFS_ENDPOINT is required for paper indexing.")
+        if not watch:
+            return await index_pending_chunks(app.state, s3, tokenizer, max_tokens)
+        while True:
+            try:
+                await index_pending_chunks(app.state, s3, tokenizer, max_tokens)
+            except (HTTPException, httpx.HTTPError, OperationalError, RuntimeError) as error:
+                logging.warning("Paper indexing will retry in %d seconds: %s", POLL_INTERVAL_SECONDS, error)
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
 
 if __name__ == "__main__":

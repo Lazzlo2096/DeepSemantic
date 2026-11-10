@@ -21,8 +21,11 @@
         <p class="eyebrow" id="paper-id">Статья arXiv</p>
         <h1 id="paper-title">Статья</h1>
         <p id="paper-authors" hidden></p>
-        <a id="paper-arxiv" class="paper-arxiv" target="_blank" rel="noopener"
-           aria-label="Оригинал на arXiv, новая вкладка" hidden>Оригинал на arXiv ↗</a>
+        <div class="paper-actions">
+          <a id="paper-arxiv" class="paper-arxiv" target="_blank" rel="noopener"
+             aria-label="Оригинал на arXiv, новая вкладка" hidden>Оригинал на arXiv ↗</a>
+          <a id="paper-html" class="paper-download" download hidden>Скачать HTML</a>
+        </div>
       </header>
 
       <section id="paper-summary" class="paper" aria-labelledby="summary-title" hidden>
@@ -31,7 +34,15 @@
           <button id="summarize" type="button" disabled>Суммаризировать</button>
         </div>
         <p id="summary-status" role="status">Проверяем статус…</p>
-        <div id="summary-result" hidden></div>
+        <div id="summary-result" class="formatted-text" hidden></div>
+      </section>
+
+      <section id="paper-text" class="paper" aria-labelledby="text-title" hidden>
+        <div class="results-bar">
+          <h2 id="text-title">Полный текст статьи</h2>
+          <p id="text-status" role="status"></p>
+        </div>
+        <div id="text-result" class="formatted-text" role="region" aria-labelledby="text-title" tabindex="0" hidden></div>
       </section>
 
       <section aria-labelledby="chunks-title">

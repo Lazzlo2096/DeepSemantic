@@ -57,7 +57,8 @@ services:
     ports:
       - "127.0.0.1:${EMBEDDING_PORT:-8000}:8000"
     environment:
-      <<: [*embedding-client-environment, *llm-environment]
+      <<: [*embedding-client-environment, *llm-environment, *rustfs-environment]
+      RUSTFS_ENDPOINT: http://rustfs:9000
       RAG_OPENROUTER_MODEL: "${RAG_OPENROUTER_MODEL:-deepseek/deepseek-v4.1-flash-1017}"
       OPENROUTER_REASONING_EFFORT: "${RAG_OPENROUTER_REASONING_EFFORT:-}"
       RUSTFS_BUCKET: "${RUSTFS_BUCKET:-arxiv-papers}"
