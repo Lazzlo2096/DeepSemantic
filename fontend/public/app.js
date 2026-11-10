@@ -36,6 +36,7 @@ const ragPoints = document.querySelector("#rag-points");
 const ragSources = document.querySelector("#rag-sources");
 const ragExplanation = document.querySelector("#rag-explanation");
 const ragExplanationText = document.querySelector("#rag-explanation-text");
+const ragHistory = document.querySelector("#rag-history");
 const ragTrace = document.querySelector("#rag-trace");
 const ragTraceStatus = document.querySelector("#rag-trace-status");
 const ragModelHistory = document.querySelector("#rag-model-history");
@@ -234,7 +235,7 @@ function showLocation(moveFocus = false) {
   catalog.hidden = Boolean(query || runId);
   searchResults.hidden = !catalog.hidden;
   ragResult.hidden = true;
-  ragTrace.hidden = true;
+  ragHistory.hidden = true;
   ragTrace.open = false;
   ragUnassignedStep.hidden = true;
   ragUnassignedStep.open = false;
@@ -479,7 +480,7 @@ function rememberRagRun(runId) {
 }
 
 function updateRagTrace(runId, running, calls = [], turns = []) {
-  if (ragTrace.hidden) ragTrace.open = running;
+  if (ragHistory.hidden) ragTrace.open = running;
   ragPermalink.href = `/?${new URLSearchParams({ mode: "rag", run: runId })}`;
   ragModelTurns.append(...turns.slice(ragModelTurns.children.length).map(renderModelTurn));
   // The API returns calls in execution order. Each step executes its requests before the next step.
@@ -498,7 +499,7 @@ function updateRagTrace(runId, running, calls = [], turns = []) {
   const status = running && !calls.length ? "Ожидаем первый результат инструмента."
     : `Вызовов инструментов: ${calls.length}${running ? " · поиск продолжается" : ""}`;
   if (ragTraceStatus.textContent !== status) ragTraceStatus.textContent = status;
-  ragTrace.hidden = false;
+  ragHistory.hidden = false;
 }
 
 async function showRagRun(runId, signal, allowPending = false) {
@@ -512,7 +513,7 @@ async function showRagRun(runId, signal, allowPending = false) {
   const run = await response.json();
   if (signal.aborted) return;
 
-  if (ragTrace.hidden && !allowPending) searchQuery.value = run.query;
+  if (ragHistory.hidden && !allowPending) searchQuery.value = run.query;
   updateRagTrace(run.run_id, run.status === "running", run.tool_calls, run.model_turns);
   if (run.status === "answered") {
     renderRagAnswer(run.answer);
@@ -568,7 +569,7 @@ async function postRagSearch(query, signal) {
     const response = await pending;
     if (!response.ok && !response.headers.has("X-RAG-Run-Id") && !signal.aborted) {
       rememberRagRun(null);
-      ragTrace.hidden = true;
+      ragHistory.hidden = true;
     }
     return response;
   } finally {
