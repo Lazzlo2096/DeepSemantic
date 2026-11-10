@@ -9,9 +9,11 @@ default:
 build:
     docker compose --profile workers build
 
-up:
-    docker compose up --build --detach
-    docker compose up --build --no-start --no-deps {{container_workers}}
+up *compose_args:
+    docker compose {{compose_args}} up --build --detach
+    docker compose {{compose_args}} up --build --no-start --no-deps {{container_workers}}
+
+up-server: (up "-f" "compose.yaml" "-f" "compose.server.yaml")
 
 up-gpu:
     docker compose -f compose.yaml -f compose.cuda.yaml up --build --detach

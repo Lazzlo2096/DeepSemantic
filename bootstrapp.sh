@@ -12,4 +12,4 @@ apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y just docker.io docker-compose-v2 docker-buildx
 systemctl enable --now docker.service
 
-COMPOSE_FILE=compose.yaml:compose.server.yaml exec just up
+exec just up-server
