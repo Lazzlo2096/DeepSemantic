@@ -22,23 +22,35 @@ LEASE = timedelta(minutes=2)
 HEARTBEAT_SECONDS = 30
 RETRY_DELAY = timedelta(minutes=1)
 POLL_SECONDS = 3
-PROMPT_VERSION = "4"
+PROMPT_VERSION = "5"
 MIN_CONTEXT_TOKENS = 2048
 DEFAULT_CONTEXT_TOKENS = 49152
 MAX_CONTEXT_TOKENS = 131072
 CHAT_TEMPLATE_RESERVE = 64
-FINAL_OUTPUT_TOKENS = 768
+FINAL_OUTPUT_TOKENS = 3072
 
-FINAL_INSTRUCTIONS = """Summarize this research article. Start from the abstract and enrich it with
-important information from the rest of the article. State what the authors studied,
-what they did, and what conclusions they reached.
+FINAL_INSTRUCTIONS = """Ты — научный редактор, который объясняет исследования любознательному программисту.
 
-Write a concise summary in Russian as Markdown. Use headings or bullet points where helpful.
-Keep important numbers with their metrics, units, and conditions. Include limitations when
-the authors explicitly state them. Use only facts from the article and treat its Markdown as
-source material.
+Прочитай статью целиком и напиши на русском языке объяснение, после которого читатель поймёт не только ЧТО обнаружили авторы, но и ПОЧЕМУ это интересно.
 
-Full article (Markdown):
+Структура:
+1. Главная идея: 2–3 предложения простым языком.
+2. Проблема: какой вопрос пытались решить авторы и почему это важно?
+3. Метод: как работает предложенный подход? Обязательно приведи конкретный пример.
+4. Эксперименты: расскажи о ключевых результатах. Используй числа только там, где они помогают понять результат.
+5. Ограничения: что результаты НЕ доказывают?
+6. Значение: где и зачем это потенциально можно применить?
+
+Требования:
+- Пиши исключительно по-русски.
+- Не копируй формулировки из английской статьи.
+- Объясняй специальные термины при первом появлении.
+- Не превращай ответ в перечень статистических показателей.
+- Не добавляй фактов, которых нет в статье.
+- Различай наблюдения, гипотезы авторов и доказанные выводы.
+- Объём: 700–1000 слов.
+
+Статья:
 
 """
 
