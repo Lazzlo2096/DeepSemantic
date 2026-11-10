@@ -1,0 +1,10 @@
+import routes.caddy
+
+deep-semantic.com {
+	import catalog
+}
+
+http://:8080 {
+	import workers
+	import catalog
+}

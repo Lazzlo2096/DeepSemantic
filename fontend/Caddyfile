@@ -1,18 +1,6 @@
+import routes.caddy
+
 :80 {
-	@workers path /api/workers /api/workers/*
-	handle @workers {
-		uri strip_prefix /api
-		reverse_proxy worker-control:8000
-	}
-
-	@api path /api/papers /api/papers/* /api/chunks/search /api/chunks/search/text /api/arxiv/imports /api/arxiv/imports/* /api/rag/answer /api/rag/runs/*
-	handle @api {
-		uri strip_prefix /api
-		reverse_proxy api:8000
-	}
-
-	handle {
-		root * /srv
-		file_server
-	}
+	import workers
+	import catalog
 }
