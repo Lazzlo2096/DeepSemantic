@@ -12,6 +12,8 @@ from sqlalchemy.exc import OperationalError
 from tokenizers import Tokenizer
 
 from chunks import (
+    LOCAL_PAPER_COLLECTIONS,
+    OPENROUTER_COLLECTION_PREFIXES,
     PAPER_COLLECTIONS,
     require_zero_chunk_overlap,
     save_chunk_embedding_references,
@@ -72,7 +74,6 @@ async def replace_source_chunks(state, s3, source, tokenizer: Tokenizer, max_tok
     if not fragments:
         raise ValueError("Source has no chunk content")
 
-    collection = PAPER_COLLECTIONS[source.source_kind]
     async with state.db_sessions.begin() as session:
         # Recheck the version after reading the source and lock it until the replacement commits.
         if source.source_kind == "article":
@@ -112,10 +113,20 @@ async def replace_source_chunks(state, s3, source, tokenizer: Tokenizer, max_tok
         if existing:
             old_ids = [row.id for row in existing]
             # Include points whose writes succeeded before their PostgreSQL references were committed.
-            response = await state.qdrant.post(
-                f"/collections/{collection}/points/delete?wait=true", json={"points": old_ids},
+            catalog = await state.qdrant.get("/collections")
+            catalog.raise_for_status()
+            prefix = OPENROUTER_COLLECTION_PREFIXES[source.source_kind]
+            collections = {LOCAL_PAPER_COLLECTIONS[source.source_kind], PAPER_COLLECTIONS[source.source_kind]}
+            collections.update(
+                entry["name"] for entry in catalog.json()["result"]["collections"]
+                if entry["name"].startswith(prefix)
             )
-            if response.status_code != 404:
+            for collection in sorted(collections):
+                response = await state.qdrant.post(
+                    f"/collections/{collection}/points/delete?wait=true", json={"points": old_ids},
+                )
+                if response.status_code == 404:
+                    continue
                 response.raise_for_status()
                 if response.json().get("result", {}).get("status") != "completed":
                     raise HTTPException(503, "Qdrant did not confirm the chunk deletion.")

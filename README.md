@@ -12,7 +12,7 @@ chmod +x ./bootstrap.sh
 ./bootstrap.sh
 ```
 
-После установки укажи в `.env` ключ `OPENROUTER_API_KEY` и выбери модели `RAG_OPENROUTER_MODEL` и `SUMMARY_OPENROUTER_MODEL`. Запускай и останавливай проект из каталога `DeepSemantic`.
+После установки укажи в `.env` ключ `OPENROUTER_API_KEY` и выбери модели `RAG_OPENROUTER_MODEL` и `SUMMARY_OPENROUTER_MODEL`. Для эмбеддингов через OpenRouter шаблон задаёт `EMBEDDING_PROVIDER=openrouter` и `EMBEDDING_OPENROUTER_MODEL=baai/bge-m3`. Запускай и останавливай проект из каталога `DeepSemantic`.
 
 ```sh
 just up-server # запустить проект

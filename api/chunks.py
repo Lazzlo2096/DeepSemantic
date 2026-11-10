@@ -10,12 +10,19 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from sqlalchemy import select, text, update
 
 from database import MAX_BIGINT, Chunk, database_session
-from embedding_schemas import EmbeddingRequest, Text
+from embedding_schemas import EMBEDDING_MODEL_KEY, EMBEDDING_PROVIDER, EmbeddingRequest, Text
 
 
 router = APIRouter(prefix="/chunks", tags=["chunks"])
-QDRANT_COLLECTION = "documents_bge_m3"
-PAPER_COLLECTIONS = {"article": QDRANT_COLLECTION, "summary": "paper_summaries_bge_m3"}
+LOCAL_PAPER_COLLECTIONS = {"article": "documents_bge_m3", "summary": "paper_summaries_bge_m3"}
+OPENROUTER_COLLECTION_PREFIXES = {
+    "article": "documents_openrouter_",
+    "summary": "paper_summaries_openrouter_",
+}
+PAPER_COLLECTIONS = (
+    {kind: f"{prefix}{EMBEDDING_MODEL_KEY}" for kind, prefix in OPENROUTER_COLLECTION_PREFIXES.items()}
+    if EMBEDDING_PROVIDER == "openrouter" else LOCAL_PAPER_COLLECTIONS
+)
 PaperChunkSource = Literal["article", "summary"]
 ChunkId = Annotated[int, Path(ge=1, le=MAX_BIGINT)]
 
@@ -277,7 +284,7 @@ async def embed_chunk(request: Request, chunk_id: ChunkId):
             raise HTTPException(404, "Chunk not found.")
         source_kind = await session.scalar(text("SELECT source_kind FROM paper_chunks WHERE chunk_id = :id"),
                                            {"id": chunk_id})
-        collection = PAPER_COLLECTIONS.get(source_kind, QDRANT_COLLECTION)
+        collection = PAPER_COLLECTIONS.get(source_kind, PAPER_COLLECTIONS["article"])
         await upsert_chunk_embeddings(request.app.state.qdrant, [chunk_id], result, collection)
         await save_chunk_embedding_references(session, [chunk_id], collection)
     return result["embeddings"][0]
