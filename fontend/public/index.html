@@ -5,14 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Статьи arXiv · DeepSemantic</title>
     <meta name="description" content="Каталог статей arXiv, загруженных в DeepSemantic.">
-    <link rel="stylesheet" href="/styles.css">
-    <script type="module" src="/app.js"></script>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" sizes="any">
+    <link rel="stylesheet" href="/styles.css?v=4">
+    <script type="module" src="/app.js?v=3"></script>
   </head>
   <body>
     <header class="topbar">
       <div class="shell brand">
-        <span class="brand-mark" aria-hidden="true">DS</span>
-        <span>DeepSemantic</span>
+        <a class="brand-link" href="/">
+          <img class="brand-mark" src="/icon.svg" width="32" height="32" alt="">
+          DeepSemantic
+        </a>
         <nav class="topbar-nav" aria-label="Разделы">
           <a class="topbar-link" href="/imports.html">Импорт arXiv</a>
           <a class="topbar-link" href="/workers.html">Воркеры</a>
@@ -29,15 +32,15 @@
           <fieldset class="search-modes">
             <legend>Режим поиска</legend>
             <div class="search-mode-options">
-              <label><input type="radio" name="mode" value="rag"> Поиск по RAG</label>
-              <label><input type="radio" name="mode" value="vector" checked> Векторный поиск по эмбеддингам</label>
+              <label><input type="radio" name="mode" value="rag" checked> Поиск по RAG</label>
+              <label><input type="radio" name="mode" value="vector"> Векторный поиск по эмбеддингам</label>
               <label><input type="radio" name="mode" value="text"> Текстовый поиск</label>
             </div>
           </fieldset>
           <label for="search-query">Запрос</label>
           <div class="search-controls">
-            <input id="search-query" name="query" type="search" required maxlength="1000"
-                   placeholder="Например, как модели запоминают прошлые разговоры">
+            <input id="search-query" name="query" type="search" required
+                   placeholder="Например, что такое фильтрация в этой статье?">
             <button id="search-submit" type="submit">Найти</button>
           </div>
         </form>
@@ -102,20 +105,22 @@
           <button id="back-to-catalog" type="button">Вернуться к каталогу</button>
         </div>
         <p id="search-status" role="status"></p>
-        <details id="rag-trace" class="paper" hidden>
-          <summary>Как найден ответ</summary>
-          <div class="rag-trace-meta">
+        <div id="rag-history" hidden>
+          <a id="rag-permalink">Ссылка на запуск</a>
+          <details id="rag-trace" class="paper">
+            <summary>Как найден ответ</summary>
             <p id="rag-trace-status" role="status"></p>
-            <a id="rag-permalink">Ссылка на запуск</a>
-          </div>
-          <section id="rag-model-history" aria-labelledby="rag-model-title" hidden>
-            <h3 id="rag-model-title">Сообщения модели</h3>
-            <div id="rag-model-turns" class="paper-list"></div>
-          </section>
-          <h3>Вызовы инструментов</h3>
-          <p id="rag-trace-empty" hidden>В этом запуске инструментов не вызывали.</p>
-          <div id="rag-tool-calls" class="paper-list"></div>
-        </details>
+            <section id="rag-model-history" aria-labelledby="rag-model-title" hidden>
+              <h3 id="rag-model-title">Шаги модели</h3>
+              <div id="rag-model-turns" class="paper-list"></div>
+              <details id="rag-unassigned-step" class="rag-tool" hidden>
+                <summary>Вызовы без сохранённого шага</summary>
+                <div id="rag-unassigned-calls" class="rag-tool-body"></div>
+              </details>
+            </section>
+            <p id="rag-trace-empty" hidden>В этом запуске инструментов не вызывали.</p>
+          </details>
+        </div>
         <section id="rag-result" class="paper" aria-labelledby="rag-title" hidden>
           <h3 id="rag-title">Ответ по статьям</h3>
           <ul id="rag-points"></ul>

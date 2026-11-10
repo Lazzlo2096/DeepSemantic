@@ -15,18 +15,10 @@ body { margin: 0; }
 .shell { width: min(920px, calc(100% - 40px)); margin-inline: auto; }
 .topbar { border-bottom: 1px solid var(--border); background: #fff; }
 .brand { display: flex; align-items: center; gap: 12px; min-height: 64px; font-weight: 700; }
+.brand-link { display: flex; align-items: center; gap: 12px; color: #000; text-decoration: none; white-space: nowrap; }
 .topbar-nav { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 16px; margin-inline-start: auto; }
 .topbar-link { color: var(--accent); font-size: 0.9rem; }
-.brand-mark {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  color: #fff;
-  background: var(--accent);
-  font-size: 12px;
-}
+.brand-mark { flex-shrink: 0; }
 
 main { padding-block: 36px 56px; }
 .intro {
@@ -121,10 +113,9 @@ summary { width: fit-content; cursor: pointer; color: var(--accent); font-size: 
 #rag-points li + li { margin-top: 6px; }
 #rag-result a { color: var(--accent); }
 #rag-trace { margin-block: 12px; }
-#rag-trace a { color: var(--accent); }
+#rag-permalink, #rag-trace a { color: var(--accent); }
 #rag-trace pre { margin: 0; padding: 10px; background: #f3f5f9; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.rag-trace-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; margin-block: 10px; }
-.rag-trace-meta p { margin: 0; color: var(--muted); }
+#rag-trace-status { margin-block: 10px; color: var(--muted); }
 .rag-tool { border: 1px solid var(--border); border-radius: 8px; }
 .rag-tool > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 10px; width: 100%; padding: 10px 12px; }
 .rag-tool > summary::before { content: "▸"; }

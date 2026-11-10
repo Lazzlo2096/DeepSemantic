@@ -36,12 +36,14 @@ const ragPoints = document.querySelector("#rag-points");
 const ragSources = document.querySelector("#rag-sources");
 const ragExplanation = document.querySelector("#rag-explanation");
 const ragExplanationText = document.querySelector("#rag-explanation-text");
+const ragHistory = document.querySelector("#rag-history");
 const ragTrace = document.querySelector("#rag-trace");
 const ragTraceStatus = document.querySelector("#rag-trace-status");
 const ragModelHistory = document.querySelector("#rag-model-history");
 const ragModelTurns = document.querySelector("#rag-model-turns");
 const ragTraceEmpty = document.querySelector("#rag-trace-empty");
-const ragToolCalls = document.querySelector("#rag-tool-calls");
+const ragUnassignedStep = document.querySelector("#rag-unassigned-step");
+const ragUnassignedCalls = document.querySelector("#rag-unassigned-calls");
 const ragPermalink = document.querySelector("#rag-permalink");
 const scoreFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const searchModes = {
@@ -215,21 +217,29 @@ function applyFilters() {
   showLocation();
 }
 
+function updateSearchInput(mode) {
+  searchQuery.placeholder = searchModes[mode].placeholder;
+  if (mode === "rag") searchQuery.removeAttribute("maxlength");
+  else searchQuery.maxLength = 1000;
+}
+
 function showLocation(moveFocus = false) {
   const params = new URLSearchParams(location.search);
   const selectedMode = params.get("mode");
-  const mode = Object.hasOwn(searchModes, selectedMode) ? selectedMode : "vector";
+  const mode = Object.hasOwn(searchModes, selectedMode) ? selectedMode : "rag";
   const runId = mode === "rag" ? params.get("run") : null;
   searchMode.value = mode;
-  searchQuery.placeholder = searchModes[mode].placeholder;
+  updateSearchInput(mode);
   searchQuery.value = params.get("query") ?? "";
   const query = searchQuery.value.trim();
   catalog.hidden = Boolean(query || runId);
   searchResults.hidden = !catalog.hidden;
   ragResult.hidden = true;
-  ragTrace.hidden = true;
+  ragHistory.hidden = true;
   ragTrace.open = false;
-  ragToolCalls.replaceChildren();
+  ragUnassignedStep.hidden = true;
+  ragUnassignedStep.open = false;
+  ragUnassignedCalls.replaceChildren();
   ragModelTurns.replaceChildren();
   ragModelHistory.hidden = true;
 
@@ -447,10 +457,16 @@ function renderModelTurn(turn) {
   }
   if (turn.requested_tools.length) {
     const label = document.createElement("h4");
+    const calls = document.createElement("div");
+    const requested = document.createElement("details");
+    const requestedLabel = document.createElement("summary");
     const text = document.createElement("pre");
-    label.textContent = "Запросы на вызов инструментов";
+    label.textContent = "Вызовы инструментов";
+    calls.className = "paper-list rag-step-calls";
+    requestedLabel.textContent = "Запросы модели (JSON)";
     text.textContent = JSON.stringify(turn.requested_tools, null, 2);
-    body.append(label, text);
+    requested.append(requestedLabel, text);
+    body.append(label, calls, requested);
   }
   details.append(heading, body);
   return details;
@@ -464,16 +480,26 @@ function rememberRagRun(runId) {
 }
 
 function updateRagTrace(runId, running, calls = [], turns = []) {
-  if (ragTrace.hidden) ragTrace.open = running;
+  if (ragHistory.hidden) ragTrace.open = running;
   ragPermalink.href = `/?${new URLSearchParams({ mode: "rag", run: runId })}`;
-  ragToolCalls.append(...calls.slice(ragToolCalls.children.length).map(renderToolCall));
   ragModelTurns.append(...turns.slice(ragModelTurns.children.length).map(renderModelTurn));
-  ragModelHistory.hidden = turns.length === 0;
+  // The API returns calls in execution order. Each step executes its requests before the next step.
+  let callOffset = 0;
+  for (const [index, turn] of turns.entries()) {
+    const requestedCount = turn.requested_tools.length;
+    if (requestedCount === 0) continue;
+    const group = ragModelTurns.children[index].querySelector(".rag-step-calls");
+    group.append(...calls.slice(callOffset + group.children.length, callOffset + requestedCount).map(renderToolCall));
+    callOffset += requestedCount;
+  }
+  ragUnassignedCalls.append(...calls.slice(callOffset + ragUnassignedCalls.children.length).map(renderToolCall));
+  ragUnassignedStep.hidden = ragUnassignedCalls.children.length === 0;
+  ragModelHistory.hidden = turns.length === 0 && ragUnassignedStep.hidden;
   ragTraceEmpty.hidden = running || calls.length > 0;
   const status = running && !calls.length ? "Ожидаем первый результат инструмента."
     : `Вызовов инструментов: ${calls.length}${running ? " · поиск продолжается" : ""}`;
   if (ragTraceStatus.textContent !== status) ragTraceStatus.textContent = status;
-  ragTrace.hidden = false;
+  ragHistory.hidden = false;
 }
 
 async function showRagRun(runId, signal, allowPending = false) {
@@ -487,7 +513,7 @@ async function showRagRun(runId, signal, allowPending = false) {
   const run = await response.json();
   if (signal.aborted) return;
 
-  if (ragTrace.hidden && !allowPending) searchQuery.value = run.query;
+  if (ragHistory.hidden && !allowPending) searchQuery.value = run.query;
   updateRagTrace(run.run_id, run.status === "running", run.tool_calls, run.model_turns);
   if (run.status === "answered") {
     renderRagAnswer(run.answer);
@@ -516,14 +542,9 @@ function waitForRagUpdate(signal) {
 }
 
 async function followRagRun(runId, signal, allowPending = false) {
-  const deadline = Date.now() + 160_000;
   while (!signal.aborted) {
     const status = await showRagRun(runId, signal, allowPending);
     if (status !== "running" && !(allowPending && status === "missing")) return;
-    if (Date.now() >= deadline) {
-      searchStatus.textContent = "Запуск ещё не завершён. Обновите страницу, чтобы проверить его.";
-      return;
-    }
     await waitForRagUpdate(signal);
   }
 }
@@ -548,7 +569,7 @@ async function postRagSearch(query, signal) {
     const response = await pending;
     if (!response.ok && !response.headers.has("X-RAG-Run-Id") && !signal.aborted) {
       rememberRagRun(null);
-      ragTrace.hidden = true;
+      ragHistory.hidden = true;
     }
     return response;
   } finally {
@@ -590,7 +611,8 @@ async function loadSearch(query, mode, moveFocus, runId) {
       return;
     }
     if (response.status === 422) {
-      searchStatus.textContent = "Проверь запрос и попробуй ещё раз. Максимум 1000 символов.";
+      searchStatus.textContent = mode === "rag" ? "Проверь запрос и попробуй ещё раз."
+        : "Проверь запрос и попробуй ещё раз. Максимум 1000 символов.";
       return;
     }
     if (response.status === 503 && mode === "vector") {
@@ -633,7 +655,7 @@ async function loadSearch(query, mode, moveFocus, runId) {
 }
 
 searchForm.addEventListener("change", (event) => {
-  if (event.target.name === "mode") searchQuery.placeholder = searchModes[searchMode.value].placeholder;
+  if (event.target.name === "mode") updateSearchInput(searchMode.value);
 });
 
 searchForm.addEventListener("submit", (event) => {
