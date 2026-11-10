@@ -25,8 +25,16 @@
         <p class="eyebrow">Каталог публикаций</p>
         <h1 id="page-title">Статьи arXiv</h1>
         <p>Публикации, загруженные в DeepSemantic. Открой статью, чтобы прочитать её чанки.</p>
-        <form id="search-form" class="search-form" role="search">
-          <label for="search-query">Поиск по смыслу</label>
+        <form id="search-form" class="search-form" role="search" aria-label="Поиск по статьям">
+          <fieldset class="search-modes">
+            <legend>Режим поиска</legend>
+            <div class="search-mode-options">
+              <label><input type="radio" name="mode" value="rag"> Поиск по RAG <span class="search-mode-note">mock</span></label>
+              <label><input type="radio" name="mode" value="vector" checked> Векторный поиск по эмбеддингам</label>
+              <label><input type="radio" name="mode" value="text"> Текстовый поиск</label>
+            </div>
+          </fieldset>
+          <label for="search-query">Запрос</label>
           <div class="search-controls">
             <input id="search-query" name="query" type="search" required maxlength="1000"
                    placeholder="Например, как модели запоминают прошлые разговоры">
@@ -93,19 +101,13 @@
           <h2 id="search-title" tabindex="-1">Похожие фрагменты</h2>
           <button id="back-to-catalog" type="button">Вернуться к каталогу</button>
         </div>
-        <section id="rag-panel" class="paper" aria-labelledby="rag-title">
-          <div class="results-bar">
-            <h3 id="rag-title">Ответ по статьям</h3>
-            <button id="rag-submit" type="button" disabled>Ответить по статьям</button>
-          </div>
-          <p id="rag-status" role="status"></p>
-          <div id="rag-result" hidden>
-            <ul id="rag-points"></ul>
-            <h3>Источники</h3>
-            <div id="rag-sources" class="paper-list"></div>
-          </div>
-        </section>
         <p id="search-status" role="status"></p>
+        <section id="rag-result" class="paper" aria-labelledby="rag-title" hidden>
+          <h3 id="rag-title">Ответ LLM · mock</h3>
+          <p id="rag-answer"></p>
+          <p>Запрос</p>
+          <p id="rag-query" class="chunk-text"></p>
+        </section>
         <div id="search-chunks" class="paper-list"></div>
       </section>
       <noscript><p>Для загрузки каталога включи JavaScript.</p></noscript>

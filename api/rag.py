@@ -31,6 +31,16 @@ class RagQuestion(BaseModel):
     query: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
 
 
+class MockRagAnswer(BaseModel):
+    query: str
+    answer: str = "Тестовый ответ LLM."
+
+
+@router.post("/mock", response_model=MockRagAnswer)
+async def mock_answer(payload: RagQuestion):
+    return MockRagAnswer(query=payload.query)
+
+
 class AnswerPoint(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

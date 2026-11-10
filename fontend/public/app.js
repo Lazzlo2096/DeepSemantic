@@ -22,6 +22,7 @@ const dateFrom = catalogFilters.elements.namedItem("date_from");
 const dateTo = catalogFilters.elements.namedItem("date_to");
 const statusFilter = catalogFilters.elements.namedItem("status");
 const searchForm = document.querySelector("#search-form");
+const searchMode = searchForm.elements.namedItem("mode");
 const searchQuery = document.querySelector("#search-query");
 const searchSubmit = document.querySelector("#search-submit");
 const searchResults = document.querySelector("#search-results");
@@ -30,12 +31,32 @@ const searchStatus = document.querySelector("#search-status");
 const searchChunks = document.querySelector("#search-chunks");
 const searchTemplate = document.querySelector("#search-result-template");
 const backToCatalog = document.querySelector("#back-to-catalog");
-const ragSubmit = document.querySelector("#rag-submit");
-const ragStatus = document.querySelector("#rag-status");
 const ragResult = document.querySelector("#rag-result");
-const ragPoints = document.querySelector("#rag-points");
-const ragSources = document.querySelector("#rag-sources");
+const ragAnswer = document.querySelector("#rag-answer");
+const ragQuery = document.querySelector("#rag-query");
 const scoreFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
+const searchModes = {
+  rag: {
+    endpoint: "/api/rag/mock",
+    title: "Поиск по RAG",
+    pending: "Отправляем запрос в mock LLM…",
+    placeholder: "Например, что такое фильтрация в этой статье?",
+  },
+  vector: {
+    endpoint: "/api/chunks/search",
+    title: "Векторный поиск по эмбеддингам",
+    pending: "Ищем похожие фрагменты…",
+    placeholder: "Например, как модели запоминают прошлые разговоры",
+    empty: "Похожие фрагменты не найдены. Поиск работает по индексированным чанкам.",
+  },
+  text: {
+    endpoint: "/api/chunks/search/text",
+    title: "Текстовый поиск",
+    pending: "Ищем строку в тексте чанков…",
+    placeholder: "Введите слово, фразу или формулу",
+    empty: "В сохранённых чанках нет такой строки.",
+  },
+};
 
 let currentPage = 0;
 let requestedPage = 0;
@@ -43,7 +64,6 @@ let pageCount = 0;
 let appliedFilters = new URLSearchParams();
 let catalogRequest;
 let searchRequest;
-let ragRequest;
 
 for (const [value, label] of stageLabels) {
   statusFilter.add(new Option(label, value));
@@ -188,27 +208,27 @@ function applyFilters() {
 
 function showLocation(moveFocus = false) {
   const params = new URLSearchParams(location.search);
+  const selectedMode = params.get("mode");
+  const mode = Object.hasOwn(searchModes, selectedMode) ? selectedMode : "vector";
+  searchMode.value = mode;
+  searchQuery.placeholder = searchModes[mode].placeholder;
   searchQuery.value = params.get("query") ?? "";
   const query = searchQuery.value.trim();
   catalog.hidden = Boolean(query);
   searchResults.hidden = !query;
-  ragRequest?.abort();
-  ragRequest = undefined;
-  ragSubmit.disabled = true;
-  ragStatus.textContent = "";
   ragResult.hidden = true;
 
   if (query) {
     catalogRequest?.abort();
     catalogRequest = undefined;
-    loadSearch(query, moveFocus);
+    loadSearch(query, mode, moveFocus);
     return;
   }
 
   searchRequest?.abort();
   searchRequest = undefined;
   searchSubmit.disabled = false;
-  searchChunks.setAttribute("aria-busy", "false");
+  searchResults.setAttribute("aria-busy", "false");
   catalogFilters.reset();
   dateTo.setCustomValidity("");
   appliedFilters = new URLSearchParams();
@@ -238,22 +258,26 @@ function renderSearchResult(chunk) {
   }
   const label = chunk.source_kind === "summary" ? "Чанк суммаризации" : "Чанк";
   card.querySelector(".search-fragment").textContent = `${label} №${chunk.chunk_id}`;
-  card.querySelector(".search-score").textContent = `Сходство ${scoreFormat.format(chunk.score)}`;
+  const score = card.querySelector(".search-score");
+  score.hidden = typeof chunk.score !== "number";
+  if (!score.hidden) score.textContent = `Сходство ${scoreFormat.format(chunk.score)}`;
   card.querySelector(".search-excerpt").textContent = chunk.text;
   return card;
 }
 
-async function loadSearch(query, moveFocus) {
+async function loadSearch(query, mode, moveFocus) {
+  const settings = searchModes[mode];
   searchRequest?.abort();
   const request = new AbortController();
   searchRequest = request;
   searchSubmit.disabled = true;
+  searchTitle.textContent = settings.title;
   searchChunks.replaceChildren();
-  searchChunks.setAttribute("aria-busy", "true");
-  searchStatus.textContent = "Ищем похожие фрагменты…";
+  searchResults.setAttribute("aria-busy", "true");
+  searchStatus.textContent = settings.pending;
 
   try {
-    const response = await fetch("/api/chunks/search", {
+    const response = await fetch(settings.endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query }),
@@ -261,20 +285,28 @@ async function loadSearch(query, moveFocus) {
     });
     if (request.signal.aborted) return;
     if (response.status === 422) {
-      searchStatus.textContent = "Запрос слишком длинный для поиска. Сократи его и попробуй снова.";
+      searchStatus.textContent = "Проверь запрос и попробуй ещё раз. Максимум 1000 символов.";
+      return;
+    }
+    if (response.status === 503 && mode === "vector") {
+      searchStatus.textContent = "Сервис эмбеддингов или векторный индекс сейчас недоступен.";
       return;
     }
     if (!response.ok) {
       throw new Error(`Search request returned ${response.status}`);
     }
 
-    const matches = await response.json();
+    const result = await response.json();
     if (request.signal.aborted) return;
-    searchChunks.replaceChildren(...matches.map(renderSearchResult));
-    ragSubmit.disabled = !matches.some((chunk) => chunk.arxiv_id);
-    searchStatus.textContent = matches.length
-      ? `Найдено фрагментов: ${matches.length}`
-      : "Похожие фрагменты не найдены. Поиск работает по индексированным чанкам.";
+    if (mode === "rag") {
+      ragAnswer.textContent = result.answer;
+      ragQuery.textContent = result.query;
+      ragResult.hidden = false;
+      searchStatus.textContent = "Запрос обработан в деморежиме.";
+    } else {
+      searchChunks.replaceChildren(...result.map(renderSearchResult));
+      searchStatus.textContent = result.length ? `Найдено фрагментов: ${result.length}` : settings.empty;
+    }
     if (moveFocus) searchTitle.focus();
   } catch {
     if (!request.signal.aborted) {
@@ -284,88 +316,13 @@ async function loadSearch(query, moveFocus) {
     if (!request.signal.aborted) {
       searchRequest = undefined;
       searchSubmit.disabled = false;
-      searchChunks.setAttribute("aria-busy", "false");
+      searchResults.setAttribute("aria-busy", "false");
     }
   }
 }
 
-function renderRagAnswer(answer) {
-  const links = new Map();
-  ragSources.replaceChildren(...answer.sources.map((source) => {
-    const details = document.createElement("details");
-    const summary = document.createElement("summary");
-    const article = document.createElement("a");
-    const excerpt = document.createElement("p");
-    const chunkNumber = source.chunk_index + 1;
-    const fromSummary = source.source_kind === "summary";
-    const anchor = fromSummary ? "paper-summary" : `chunk-${chunkNumber}`;
-    article.href = `${paperUrl(source.arxiv_id)}#${anchor}`;
-    article.textContent = fromSummary ? "Открыть суммаризацию" : `Открыть чанк №${chunkNumber} в статье`;
-    article.className = "paper-title";
-    summary.textContent = `[${source.id}] ${source.paper_title || source.arxiv_id}`;
-    excerpt.className = "chunk-text";
-    excerpt.textContent = source.text;
-    details.append(summary, excerpt, article);
-    links.set(source.id, article.href);
-    return details;
-  }));
-  ragPoints.replaceChildren(...answer.points.map((point) => {
-    const item = document.createElement("li");
-    item.textContent = point.text;
-    for (const id of new Set(point.source_ids)) {
-      const reference = document.createElement("a");
-      reference.href = links.get(id);
-      reference.textContent = `[${id}]`;
-      reference.setAttribute("aria-label", `Открыть источник ${id}`);
-      item.append(" ", reference);
-    }
-    return item;
-  }));
-  ragResult.hidden = false;
-}
-
-ragSubmit.addEventListener("click", async () => {
-  const query = new URLSearchParams(location.search).get("query");
-  const request = new AbortController();
-  ragRequest = request;
-  ragSubmit.disabled = true;
-  ragResult.hidden = true;
-  ragStatus.textContent = "Готовим ответ по статьям…";
-
-  try {
-    const response = await fetch("/api/rag/answer", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query }),
-      signal: request.signal,
-    });
-    if (request.signal.aborted) return;
-    if (response.status === 503) {
-      ragStatus.textContent = "Поиск или Ollama пока недоступны. Попробуй ещё раз.";
-      return;
-    }
-    if (response.status === 504) {
-      ragStatus.textContent = "Сервис не успел ответить. Попробуй ещё раз.";
-      return;
-    }
-    if (!response.ok) throw new Error(`RAG request returned ${response.status}`);
-
-    const answer = await response.json();
-    if (request.signal.aborted) return;
-    if (answer.status === "insufficient_evidence") {
-      ragStatus.textContent = "В найденных фрагментах недостаточно данных для ответа.";
-      return;
-    }
-    renderRagAnswer(answer);
-    ragStatus.textContent = "Ответ готов.";
-  } catch {
-    if (!request.signal.aborted) ragStatus.textContent = "Не удалось получить ответ по статьям.";
-  } finally {
-    if (!request.signal.aborted) {
-      ragRequest = undefined;
-      ragSubmit.disabled = false;
-    }
-  }
+searchForm.addEventListener("change", (event) => {
+  if (event.target.name === "mode") searchQuery.placeholder = searchModes[searchMode.value].placeholder;
 });
 
 searchForm.addEventListener("submit", (event) => {
@@ -379,6 +336,7 @@ searchForm.addEventListener("submit", (event) => {
 
   const url = new URL(location.href);
   url.searchParams.set("query", query);
+  url.searchParams.set("mode", searchMode.value);
   updateUrl(url);
   showLocation(true);
 });
@@ -386,6 +344,7 @@ searchForm.addEventListener("submit", (event) => {
 backToCatalog.addEventListener("click", () => {
   const url = new URL(location.href);
   url.searchParams.delete("query");
+  url.searchParams.delete("mode");
   updateUrl(url);
   showLocation(true);
 });

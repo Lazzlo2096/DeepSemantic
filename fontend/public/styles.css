@@ -41,6 +41,12 @@ h1 { margin: 8px 0 12px; font-size: clamp(2.2rem, 7vw, 3.5rem); line-height: 1.0
 .intro > p:not(.eyebrow) { max-width: 54ch; margin: 0; line-height: 1.55; color: var(--muted); }
 .search-form { margin-top: 22px; }
 .search-form label { display: block; margin-bottom: 7px; font-weight: 650; }
+.search-modes { min-width: 0; padding: 0; border: 0; margin: 0 0 14px; }
+.search-modes legend { padding: 0; margin-bottom: 7px; font-weight: 650; }
+.search-mode-options { display: flex; flex-wrap: wrap; gap: 7px 12px; }
+.search-mode-options label { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 0.9rem; cursor: pointer; }
+.search-mode-options input { margin: 0; accent-color: var(--accent); }
+.search-mode-note { color: var(--muted); font-size: 0.8rem; }
 .search-controls { display: flex; gap: 8px; }
 .search-controls input { flex: 1; }
 .search-controls input, .filter-fields input, .filter-fields select {
@@ -65,7 +71,7 @@ h1 { margin: 8px 0 12px; font-size: clamp(2.2rem, 7vw, 3.5rem); line-height: 1.0
   margin-bottom: 14px;
 }
 h2 { margin: 0; font-size: 1.25rem; scroll-margin-top: 20px; }
-#status, #search-status, #rag-status { color: var(--muted); font-size: 0.9rem; }
+#status, #search-status { color: var(--muted); font-size: 0.9rem; }
 #status { margin: 0; }
 .catalog-filters {
   margin-bottom: 14px;
@@ -112,10 +118,6 @@ h3 { margin: 9px 0 5px; font-size: 1.08rem; line-height: 1.4; overflow-wrap: any
 summary { width: fit-content; cursor: pointer; color: var(--accent); font-size: 0.9rem; font-weight: 600; }
 .paper-abstract { max-width: 76ch; margin: 10px 0 0; color: #334258; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
 .search-excerpt { margin: 10px 0 0; line-height: 1.6; overflow-wrap: anywhere; }
-#rag-status { margin: 0; }
-#rag-points { padding-inline-start: 22px; line-height: 1.6; overflow-wrap: anywhere; }
-#rag-points li + li { margin-top: 6px; }
-#rag-points a { color: var(--accent); }
 #paper-chunks .paper:target { border-color: var(--accent); scroll-margin-top: 20px; }
 
 .pagination { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 20px; }

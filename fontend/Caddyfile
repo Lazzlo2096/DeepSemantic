@@ -5,7 +5,7 @@
 		reverse_proxy worker-control:8000
 	}
 
-	@api path /api/papers /api/papers/* /api/chunks/search /api/arxiv/imports /api/arxiv/imports/* /api/rag/answer
+	@api path /api/papers /api/papers/* /api/chunks/search /api/chunks/search/text /api/arxiv/imports /api/arxiv/imports/* /api/rag/answer /api/rag/mock
 	handle @api {
 		uri strip_prefix /api
 		reverse_proxy api:8000

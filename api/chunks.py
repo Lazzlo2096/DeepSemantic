@@ -48,19 +48,47 @@ class ChunkSearchRequest(BaseModel):
     limit: int = Field(default=10, ge=1, le=50)
 
 
-class ChunkSearchResult(BaseModel):
+class ChunkTextSearchRequest(ChunkSearchRequest):
+    query: Annotated[Text, Field(max_length=1000, pattern=r"^[^\x00]*$")]
+
+
+class ChunkMatch(BaseModel):
     chunk_id: int
     text: str
-    score: float
     arxiv_id: str | None
     paper_title: str | None
     chunk_index: int | None
     source_kind: PaperChunkSource | None = None
 
 
+class ChunkSearchResult(ChunkMatch):
+    score: float
+
+
 @router.post("/search", response_model=list[ChunkSearchResult])
 async def search_chunks(payload: ChunkSearchRequest, request: Request):
     return await find_chunks(request, payload.query, payload.limit)
+
+
+@router.post("/search/text", response_model=list[ChunkMatch])
+async def search_chunk_text(payload: ChunkTextSearchRequest, request: Request):
+    literal = payload.query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+    async with database_session(request) as session:
+        return (await session.execute(
+            text("""
+                SELECT chunk.id AS chunk_id, chunk.text, paper.arxiv_id,
+                       paper.title AS paper_title, link.chunk_index, link.source_kind
+                FROM chunks AS chunk
+                LEFT JOIN paper_chunks AS link ON link.chunk_id = chunk.id
+                LEFT JOIN current_paper_chunks AS current ON current.chunk_id = link.chunk_id
+                LEFT JOIN arxiv_papers AS paper ON paper.arxiv_id = link.arxiv_id
+                WHERE chunk.text ILIKE :pattern ESCAPE '!'
+                  AND (link.chunk_id IS NULL OR current.chunk_id IS NOT NULL)
+                ORDER BY chunk.id
+                LIMIT :limit
+            """),
+            {"pattern": f"%{literal}%", "limit": payload.limit},
+        )).mappings().all()
 
 
 async def query_collection(qdrant: httpx.AsyncClient, collection: str, embedding, limit: int):
