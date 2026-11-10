@@ -28,7 +28,6 @@ DEFAULT_CONTEXT_TOKENS = 49152
 MAX_CONTEXT_TOKENS = 131072
 CHAT_TEMPLATE_RESERVE = 64
 FINAL_OUTPUT_TOKENS = 768
-OPENROUTER_OUTPUT_TOKENS = 2048
 
 FINAL_INSTRUCTIONS = """Summarize this research article. Start from the abstract and enrich it with
 important information from the rest of the article. State what the authors studied,
@@ -80,7 +79,7 @@ class Summarizer:
                 )
             ollama_options["num_ctx"] = self.context_tokens
         await progress(0, 1)
-        max_tokens = OPENROUTER_OUTPUT_TOKENS if self.chat.provider == "openrouter" else FINAL_OUTPUT_TOKENS
+        max_tokens = None if self.chat.provider == "openrouter" else FINAL_OUTPUT_TOKENS
         try:
             summary = await self.chat.complete(
                 self.client, [{"role": "user", "content": prompt}],
@@ -92,7 +91,7 @@ class Summarizer:
                 raise SummaryInputError(f"Полный запрос превышает рабочий контекст {self.chat.provider}.") from error
             raise
         except ChatResponseError as error:
-            raise SummaryError(f"{self.chat.provider}: {error} (лимит ответа {max_tokens} токенов).") from error
+            raise SummaryError(f"{self.chat.provider}: {error}.") from error
         except ValueError as error:
             raise SummaryError(f"{self.chat.provider} вернул неполное или пустое саммари.") from error
         await progress(1, 1)

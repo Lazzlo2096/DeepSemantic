@@ -36,13 +36,15 @@ class ChatSettings:
         return self.provider == "ollama" or bool(self.api_key)
 
     async def complete(self, client: httpx.AsyncClient, messages: list[dict[str, str]], *,
-                       max_tokens: int, ollama_options: dict, schema: dict | None = None) -> str:
+                       max_tokens: int | None, ollama_options: dict, schema: dict | None = None) -> str:
         payload = {"model": self.model, "messages": messages, "stream": False}
         if self.provider == "openrouter":
             if not self.api_key:
                 raise RuntimeError("OPENROUTER_API_KEY is required")
             reasoning = {"effort": self.reasoning_effort} if self.reasoning_effort else {"enabled": False}
-            payload.update(max_tokens=max_tokens, temperature=0.1, reasoning=reasoning)
+            payload.update(temperature=0.1, reasoning=reasoning)
+            if max_tokens is not None:
+                payload["max_tokens"] = max_tokens
             if schema is not None:
                 payload["response_format"] = {
                     "type": "json_schema", "json_schema": {"name": "rag_answer", "strict": True, "schema": schema},
