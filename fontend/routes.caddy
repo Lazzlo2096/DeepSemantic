@@ -2,7 +2,9 @@
 	@workers path /api/workers /api/workers/*
 	handle @workers {
 		uri strip_prefix /api
-		reverse_proxy worker-control:8000
+		reverse_proxy worker-control:8000 {
+			header_up Host {args[0]}
+		}
 	}
 }
 

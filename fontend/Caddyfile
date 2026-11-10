@@ -1,6 +1,6 @@
 import routes.caddy
 
 :80 {
-	import workers
+	import workers {hostport}
 	import catalog
 }

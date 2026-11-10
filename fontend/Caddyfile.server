@@ -1,10 +1,11 @@
 import routes.caddy
 
 deep-semantic.com {
+	import workers localhost
 	import catalog
 }
 
 http://:8080 {
-	import workers
+	import workers {hostport}
 	import catalog
 }
