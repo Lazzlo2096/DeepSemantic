@@ -105,6 +105,8 @@ h3 { margin: 9px 0 5px; font-size: 1.08rem; line-height: 1.4; overflow-wrap: any
 .formatted-text :is(th, td) { padding: 4px 8px; border: 1px solid var(--border); }
 #text-result { max-height: 65vh; overflow: auto; }
 #text-result img { max-width: 100%; height: auto; }
+#text-result .katex-display { overflow-x: auto; overflow-y: hidden; padding-block: 0.25em; }
+#text-result .katex-display > .katex { width: max-content; min-width: 100%; }
 .paper-plain-text { margin: 0; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
 .paper-authors { margin: 0 0 12px; color: var(--muted); font-size: 0.9rem; line-height: 1.5; }
 summary { width: fit-content; cursor: pointer; color: var(--accent); font-size: 0.9rem; font-weight: 600; }

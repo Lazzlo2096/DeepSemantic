@@ -2,7 +2,11 @@ import { arxivPath, arxivUrl } from "./arxiv.js";
 import MarkdownIt from "./vendor/markdown-it.mjs";
 
 const markdown = new MarkdownIt({ html: false });
-const articleMarkdown = new MarkdownIt({ html: true });
+const articleMarkdown = new MarkdownIt({ html: true }).use(window.texmath, {
+  engine: window.katex,
+  delimiters: "dollars",
+  katexOptions: { trust: false, throwOnError: false, maxExpand: 500, maxSize: 25 },
+});
 const tableTags = new Set(["caption", "thead", "tbody", "tfoot", "tr", "th", "td"]);
 const arxivId = new URLSearchParams(location.search).get("id");
 const status = document.querySelector("#status");
