@@ -71,9 +71,6 @@ ANSWER_INSTRUCTIONS = """Ответь на русском языке, опира
 В source_explanation кратко укажи существенное ограничение охвата источников, если оно есть.
 Иначе верни пустую строку. Не пересказывай вызовы инструментов и не перечисляй ID фрагментов в пояснении.
 Если источников недостаточно для ответа, верни пустой points и пустой source_explanation."""
-PROMPT_VERSION = sha256(
-    json.dumps([RESEARCH_INSTRUCTIONS, ANSWER_INSTRUCTIONS], ensure_ascii=False).encode("utf-8")
-).hexdigest()
 
 
 class RagQuestion(BaseModel):
@@ -103,13 +100,22 @@ class ReadArguments(BaseModel):
 
 TOOL_SPECS = {
     "search_vectors": (SearchArguments, "Смысловой поиск. Возвращает текст чанка, векторное сходство и его координаты."),
-    "search_text": (SearchArguments, "Буквальный поиск строки без учёта регистра. Возвращает текст чанка и координаты."),
+    "search_text": (
+        SearchArguments,
+        "Буквальный поиск строки без учёта регистра. Все тексты в индексе сейчас на английском языке. "
+        "Формулируй поисковую строку на английском. Возвращает текст чанка и координаты.",
+    ),
     "read_document": (ReadArguments, "Читает указанный диапазон исходного текста статьи или суммаризации."),
 }
 TOOLS = [
     {"type": "function", "function": {"name": name, "description": description, "parameters": arguments.model_json_schema()}}
     for name, (arguments, description) in TOOL_SPECS.items()
 ]
+PROMPT_VERSION = sha256(
+    json.dumps(
+        [RESEARCH_INSTRUCTIONS, ANSWER_INSTRUCTIONS, TOOLS], ensure_ascii=False, sort_keys=True,
+    ).encode("utf-8")
+).hexdigest()
 
 
 class AnswerPoint(BaseModel):
