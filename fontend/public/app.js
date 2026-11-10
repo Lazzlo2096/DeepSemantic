@@ -32,14 +32,14 @@ const searchChunks = document.querySelector("#search-chunks");
 const searchTemplate = document.querySelector("#search-result-template");
 const backToCatalog = document.querySelector("#back-to-catalog");
 const ragResult = document.querySelector("#rag-result");
-const ragAnswer = document.querySelector("#rag-answer");
-const ragQuery = document.querySelector("#rag-query");
+const ragPoints = document.querySelector("#rag-points");
+const ragSources = document.querySelector("#rag-sources");
 const scoreFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const searchModes = {
   rag: {
-    endpoint: "/api/rag/mock",
+    endpoint: "/api/rag/answer",
     title: "Поиск по RAG",
-    pending: "Отправляем запрос в mock LLM…",
+    pending: "Ищем источники и готовим ответ…",
     placeholder: "Например, что такое фильтрация в этой статье?",
   },
   vector: {
@@ -265,6 +265,40 @@ function renderSearchResult(chunk) {
   return card;
 }
 
+function renderRagAnswer(answer) {
+  const links = new Map();
+  ragSources.replaceChildren(...answer.sources.map((source) => {
+    const details = document.createElement("details");
+    const heading = document.createElement("summary");
+    const link = document.createElement("a");
+    const excerpt = document.createElement("p");
+    const isSummary = source.source_kind === "summary";
+    const anchor = isSummary ? "paper-summary"
+      : source.chunk_index === null ? "paper-text" : `chunk-${source.chunk_index + 1}`;
+    link.href = `${paperUrl(source.arxiv_id)}#${anchor}`;
+    link.textContent = isSummary ? "Открыть суммаризацию" : "Открыть фрагмент статьи";
+    heading.textContent = `[${source.id}] ${source.paper_title || source.arxiv_id} · [${source.source_start}, ${source.source_end})`;
+    excerpt.className = "chunk-text";
+    excerpt.textContent = source.text;
+    details.append(heading, excerpt, link);
+    links.set(source.id, link.href);
+    return details;
+  }));
+  ragPoints.replaceChildren(...answer.points.map((point) => {
+    const item = document.createElement("li");
+    item.textContent = point.text;
+    for (const id of new Set(point.source_ids)) {
+      const link = document.createElement("a");
+      link.href = links.get(id);
+      link.textContent = `[${id}]`;
+      link.setAttribute("aria-label", `Открыть источник ${id}`);
+      item.append(" ", link);
+    }
+    return item;
+  }));
+  ragResult.hidden = false;
+}
+
 async function loadSearch(query, mode, moveFocus) {
   const settings = searchModes[mode];
   searchRequest?.abort();
@@ -292,6 +326,14 @@ async function loadSearch(query, mode, moveFocus) {
       searchStatus.textContent = "Сервис эмбеддингов или векторный индекс сейчас недоступен.";
       return;
     }
+    if (response.status === 503 && mode === "rag") {
+      searchStatus.textContent = "Модель для RAG сейчас недоступна.";
+      return;
+    }
+    if (response.status === 504 && mode === "rag") {
+      searchStatus.textContent = "Модель не успела подготовить ответ.";
+      return;
+    }
     if (!response.ok) {
       throw new Error(`Search request returned ${response.status}`);
     }
@@ -299,10 +341,9 @@ async function loadSearch(query, mode, moveFocus) {
     const result = await response.json();
     if (request.signal.aborted) return;
     if (mode === "rag") {
-      ragAnswer.textContent = result.answer;
-      ragQuery.textContent = result.query;
-      ragResult.hidden = false;
-      searchStatus.textContent = "Запрос обработан в деморежиме.";
+      if (result.status === "answered") renderRagAnswer(result);
+      searchStatus.textContent = result.status === "answered"
+        ? "Ответ готов." : "В найденных фрагментах недостаточно данных для ответа.";
     } else {
       searchChunks.replaceChildren(...result.map(renderSearchResult));
       searchStatus.textContent = result.length ? `Найдено фрагментов: ${result.length}` : settings.empty;

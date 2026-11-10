@@ -62,19 +62,22 @@ class PaperFileResponse(StreamingResponse):
             self.object_body.close()
 
 
-async def paper_file(request: Request, bucket: str, key: str, media_type: str, filename: str | None = None):
+async def open_paper_object(request: Request, bucket: str, key: str):
     s3 = request.app.state.rustfs
     if s3 is None:
         raise HTTPException(503, "Paper storage is unavailable.")
     try:
-        stored_object = await run_in_threadpool(s3.get_object, Bucket=bucket, Key=key)
+        return await run_in_threadpool(s3.get_object, Bucket=bucket, Key=key)
     except ClientError as error:
         if error.response["ResponseMetadata"]["HTTPStatusCode"] == 404:
             raise HTTPException(404, "Paper file not found.") from error
         raise HTTPException(503, "Paper storage is unavailable.") from error
     except BotoCoreError as error:
         raise HTTPException(503, "Paper storage is unavailable.") from error
-    return PaperFileResponse(stored_object, media_type, filename)
+
+
+async def paper_file(request: Request, bucket: str, key: str, media_type: str, filename: str | None = None):
+    return PaperFileResponse(await open_paper_object(request, bucket, key), media_type, filename)
 
 
 def paper_order(paper, sort: PaperSort):

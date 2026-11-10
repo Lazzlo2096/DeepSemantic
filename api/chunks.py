@@ -59,6 +59,9 @@ class ChunkMatch(BaseModel):
     paper_title: str | None
     chunk_index: int | None
     source_kind: PaperChunkSource | None = None
+    source_start: int | None = None
+    source_end: int | None = None
+    source_version: str | None = Field(default=None, exclude=True)
 
 
 class ChunkSearchResult(ChunkMatch):
@@ -72,23 +75,30 @@ async def search_chunks(payload: ChunkSearchRequest, request: Request):
 
 @router.post("/search/text", response_model=list[ChunkMatch])
 async def search_chunk_text(payload: ChunkTextSearchRequest, request: Request):
-    literal = payload.query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+    return await find_text_chunks(request, payload.query, payload.limit)
+
+
+async def find_text_chunks(request: Request, query: str, limit: int, *, located_only: bool = False) -> list[ChunkMatch]:
+    literal = query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
     async with database_session(request) as session:
-        return (await session.execute(
+        rows = (await session.execute(
             text("""
                 SELECT chunk.id AS chunk_id, chunk.text, paper.arxiv_id,
-                       paper.title AS paper_title, link.chunk_index, link.source_kind
+                       paper.title AS paper_title, link.chunk_index, link.source_kind,
+                       link.source_start, link.source_end, link.source_version
                 FROM chunks AS chunk
                 LEFT JOIN paper_chunks AS link ON link.chunk_id = chunk.id
                 LEFT JOIN current_paper_chunks AS current ON current.chunk_id = link.chunk_id
                 LEFT JOIN arxiv_papers AS paper ON paper.arxiv_id = link.arxiv_id
                 WHERE chunk.text ILIKE :pattern ESCAPE '!'
                   AND (link.chunk_id IS NULL OR current.chunk_id IS NOT NULL)
+                  AND (NOT :located_only OR link.source_start IS NOT NULL)
                 ORDER BY chunk.id
                 LIMIT :limit
             """),
-            {"pattern": f"%{literal}%", "limit": payload.limit},
+            {"pattern": f"%{literal}%", "limit": limit, "located_only": located_only},
         )).mappings().all()
+    return [ChunkMatch(**row) for row in rows]
 
 
 async def query_collection(qdrant: httpx.AsyncClient, collection: str, embedding, limit: int):
@@ -117,12 +127,13 @@ async def query_collection(qdrant: httpx.AsyncClient, collection: str, embedding
     }
 
 
-async def find_chunks(request: Request, query: str, limit: int) -> list[ChunkSearchResult]:
+async def find_chunks(request: Request, query: str, limit: int, *, located_only: bool = False) -> list[ChunkSearchResult]:
     state = request.app.state
     embedding = await state.rpc.embed(EmbeddingRequest(texts=[query]))
     collections = tuple(PAPER_COLLECTIONS.values())
+    candidate_limit = limit * 3 if located_only else limit
     results = await asyncio.gather(*(
-        query_collection(state.qdrant, collection, embedding, limit) for collection in collections
+        query_collection(state.qdrant, collection, embedding, candidate_limit) for collection in collections
     ))
     scores = dict(zip(collections, results, strict=True))
     chunk_ids = {chunk_id for collection_scores in results for chunk_id in collection_scores}
@@ -133,7 +144,8 @@ async def find_chunks(request: Request, query: str, limit: int) -> list[ChunkSea
         rows = (await session.execute(
             text("""
                 SELECT chunk.id AS chunk_id, chunk.text, chunk.qdrant_collection, paper.arxiv_id,
-                       paper.title AS paper_title, link.chunk_index, link.source_kind
+                       paper.title AS paper_title, link.chunk_index, link.source_kind,
+                       link.source_start, link.source_end, link.source_version
                 FROM chunks AS chunk
                 LEFT JOIN paper_chunks AS link ON link.chunk_id = chunk.id
                 LEFT JOIN current_paper_chunks AS current ON current.chunk_id = link.chunk_id
@@ -141,8 +153,9 @@ async def find_chunks(request: Request, query: str, limit: int) -> list[ChunkSea
                 WHERE chunk.id = ANY(:chunk_ids)
                   AND chunk.qdrant_point_id = chunk.id
                   AND (link.chunk_id IS NULL OR current.chunk_id IS NOT NULL)
+                  AND (NOT :located_only OR link.source_start IS NOT NULL)
             """),
-            {"chunk_ids": list(chunk_ids)},
+            {"chunk_ids": list(chunk_ids), "located_only": located_only},
         )).mappings().all()
     matches = []
     for row in rows:

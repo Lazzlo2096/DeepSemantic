@@ -37,7 +37,20 @@ class ChatSettings:
 
     async def complete(self, client: httpx.AsyncClient, messages: list[dict[str, str]], *,
                        max_tokens: int | None, ollama_options: dict, schema: dict | None = None) -> str:
+        message = await self.turn(
+            client, messages, max_tokens=max_tokens, ollama_options=ollama_options, schema=schema,
+        )
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise ChatResponseError("Empty response")
+        return content.strip()
+
+    async def turn(self, client: httpx.AsyncClient, messages: list[dict], *,
+                   max_tokens: int | None, ollama_options: dict, schema: dict | None = None,
+                   tools: list[dict] | None = None) -> dict:
         payload = {"model": self.model, "messages": messages, "stream": False}
+        if tools:
+            payload["tools"] = tools
         if self.provider == "openrouter":
             if not self.api_key:
                 raise RuntimeError("OPENROUTER_API_KEY is required")
@@ -49,6 +62,7 @@ class ChatSettings:
                 payload["response_format"] = {
                     "type": "json_schema", "json_schema": {"name": "rag_answer", "strict": True, "schema": schema},
                 }
+            if schema is not None or tools:
                 payload["provider"] = {"require_parameters": True}
             response = await client.post("chat/completions", json=payload,
                                          headers={"Authorization": f"Bearer {self.api_key}"})
@@ -64,15 +78,17 @@ class ChatSettings:
             data = response.json()
             if self.provider == "openrouter":
                 choice = data["choices"][0]
-                if choice["finish_reason"] != "stop":
+                allowed_reasons = ("stop", "tool_calls") if tools else ("stop",)
+                if choice["finish_reason"] not in allowed_reasons:
                     raise ChatResponseError(f"finish_reason={choice['finish_reason']!r}")
-                content = choice["message"]["content"]
+                message = choice["message"]
             else:
                 if data["done"] is not True or data.get("done_reason") == "length":
                     raise ChatResponseError("Incomplete generation")
-                content = data["message"]["content"]
+                message = data["message"]
         except (IndexError, KeyError, TypeError) as error:
             raise ChatResponseError("Invalid response") from error
-        if not isinstance(content, str) or not content.strip():
-            raise ChatResponseError("Empty response")
-        return content.strip()
+        if not isinstance(message, dict) or message.get("role", "assistant") != "assistant":
+            raise ChatResponseError("Invalid assistant message")
+        fields = ("content", "tool_calls", "reasoning", "reasoning_details", "thinking")
+        return {"role": "assistant", **{field: message[field] for field in fields if field in message}}

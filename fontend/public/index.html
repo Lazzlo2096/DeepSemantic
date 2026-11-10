@@ -29,7 +29,7 @@
           <fieldset class="search-modes">
             <legend>Режим поиска</legend>
             <div class="search-mode-options">
-              <label><input type="radio" name="mode" value="rag"> Поиск по RAG <span class="search-mode-note">mock</span></label>
+              <label><input type="radio" name="mode" value="rag"> Поиск по RAG</label>
               <label><input type="radio" name="mode" value="vector" checked> Векторный поиск по эмбеддингам</label>
               <label><input type="radio" name="mode" value="text"> Текстовый поиск</label>
             </div>
@@ -103,10 +103,10 @@
         </div>
         <p id="search-status" role="status"></p>
         <section id="rag-result" class="paper" aria-labelledby="rag-title" hidden>
-          <h3 id="rag-title">Ответ LLM · mock</h3>
-          <p id="rag-answer"></p>
-          <p>Запрос</p>
-          <p id="rag-query" class="chunk-text"></p>
+          <h3 id="rag-title">Ответ по статьям</h3>
+          <ul id="rag-points"></ul>
+          <h3>Источники</h3>
+          <div id="rag-sources" class="paper-list"></div>
         </section>
         <div id="search-chunks" class="paper-list"></div>
       </section>
