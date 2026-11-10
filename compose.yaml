@@ -71,7 +71,9 @@ services:
 
   embeding-worker:
     profiles: [workers]
-    build: ./api
+    build:
+      context: ./api
+      target: embeding-worker
     command: ["python", "-m", "paper_embeddings", "--watch"]
     restart: unless-stopped
     depends_on:
@@ -81,9 +83,14 @@ services:
         condition: service_completed_successfully
       qdrant:
         condition: service_started
+      rustfs:
+        condition: service_healthy
       embeding-service:
         condition: service_started
-    environment: *embedding-client-environment
+    environment:
+      <<: [*embedding-client-environment, *rustfs-environment]
+      RUSTFS_ENDPOINT: http://rustfs:9000
+      EMBEDDING_MAX_TOKENS: "${EMBEDDING_MAX_TOKENS:-512}"
 
   summary-worker:
     profiles: [workers]

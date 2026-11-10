@@ -122,7 +122,7 @@ async function loadPaper(id) {
     const hasMarkdown = paper.status === "texted" && paper.text_object_key?.toLowerCase().endsWith(".md");
     loadSummary(`${url}/summary`, Boolean(hasMarkdown), paper.object_key.toLowerCase().endsWith(".html"));
     list.replaceChildren(...chunks.map(renderChunk));
-    if (location.hash.startsWith("#chunk-")) {
+    if (location.hash === "#paper-summary" || location.hash.startsWith("#chunk-")) {
       document.getElementById(location.hash.slice(1))?.scrollIntoView();
     }
     status.textContent = chunks.length ? `Всего чанков: ${chunks.length}` : "У этой статьи пока нет чанков.";

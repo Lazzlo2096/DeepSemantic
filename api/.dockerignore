@@ -5,6 +5,7 @@
 !chunks.py
 !papers.py
 !embedding_schemas.py
+!paper_chunking.py
 !paper_embeddings.py
 !paper_summaries.py
 !summary_schema.py

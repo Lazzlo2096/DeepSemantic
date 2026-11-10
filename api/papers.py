@@ -108,7 +108,7 @@ async def list_paper_chunks(request: Request, arxiv_id: ArxivId):
             text("""
                 SELECT chunk.id AS chunk_id, link.chunk_index, chunk.text
                 FROM arxiv_papers AS paper
-                LEFT JOIN paper_chunks AS link ON link.arxiv_id = paper.arxiv_id
+                LEFT JOIN current_paper_chunks AS link ON link.arxiv_id = paper.arxiv_id AND link.source_kind = 'article'
                 LEFT JOIN chunks AS chunk ON chunk.id = link.chunk_id
                 WHERE paper.arxiv_id = :arxiv_id
                 ORDER BY link.chunk_index

@@ -1,5 +1,6 @@
+import asyncio
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import quote
 
 import httpx
@@ -13,6 +14,8 @@ from embedding_schemas import EmbeddingRequest, Text
 
 router = APIRouter(prefix="/chunks", tags=["chunks"])
 QDRANT_COLLECTION = "documents_bge_m3"
+PAPER_COLLECTIONS = {"article": QDRANT_COLLECTION, "summary": "paper_summaries_bge_m3"}
+PaperChunkSource = Literal["article", "summary"]
 ChunkId = Annotated[int, Path(ge=1, le=MAX_BIGINT)]
 
 
@@ -52,6 +55,7 @@ class ChunkSearchResult(BaseModel):
     arxiv_id: str | None
     paper_title: str | None
     chunk_index: int | None
+    source_kind: PaperChunkSource | None = None
 
 
 @router.post("/search", response_model=list[ChunkSearchResult])
@@ -59,11 +63,10 @@ async def search_chunks(payload: ChunkSearchRequest, request: Request):
     return await find_chunks(request, payload.query, payload.limit)
 
 
-async def find_chunks(request: Request, query: str, limit: int) -> list[ChunkSearchResult]:
-    embedding = await request.app.state.rpc.embed(EmbeddingRequest(texts=[query]))
+async def query_collection(qdrant: httpx.AsyncClient, collection: str, embedding, limit: int):
     try:
-        response = await request.app.state.qdrant.post(
-            f"/collections/{QDRANT_COLLECTION}/points/query",
+        response = await qdrant.post(
+            f"/collections/{collection}/points/query",
             json={
                 "query": embedding["embeddings"][0],
                 "limit": limit,
@@ -74,39 +77,51 @@ async def find_chunks(request: Request, query: str, limit: int) -> list[ChunkSea
             },
         )
         if response.status_code == 404:
-            return []
+            return {}
         response.raise_for_status()
     except httpx.HTTPError as error:
         raise HTTPException(503, "Could not search Qdrant.") from error
 
-    scores = {
+    return {
         point["id"]: point["score"]
         for point in response.json()["result"]["points"]
         if isinstance(point["id"], int) and 1 <= point["id"] <= MAX_BIGINT
     }
-    if not scores:
+
+
+async def find_chunks(request: Request, query: str, limit: int) -> list[ChunkSearchResult]:
+    state = request.app.state
+    embedding = await state.rpc.embed(EmbeddingRequest(texts=[query]))
+    collections = tuple(PAPER_COLLECTIONS.values())
+    results = await asyncio.gather(*(
+        query_collection(state.qdrant, collection, embedding, limit) for collection in collections
+    ))
+    scores = dict(zip(collections, results, strict=True))
+    chunk_ids = {chunk_id for collection_scores in results for chunk_id in collection_scores}
+    if not chunk_ids:
         return []
 
     async with database_session(request) as session:
         rows = (await session.execute(
             text("""
-                SELECT chunk.id AS chunk_id, chunk.text, paper.arxiv_id,
-                       paper.title AS paper_title, link.chunk_index
+                SELECT chunk.id AS chunk_id, chunk.text, chunk.qdrant_collection, paper.arxiv_id,
+                       paper.title AS paper_title, link.chunk_index, link.source_kind
                 FROM chunks AS chunk
                 LEFT JOIN paper_chunks AS link ON link.chunk_id = chunk.id
+                LEFT JOIN current_paper_chunks AS current ON current.chunk_id = link.chunk_id
                 LEFT JOIN arxiv_papers AS paper ON paper.arxiv_id = link.arxiv_id
                 WHERE chunk.id = ANY(:chunk_ids)
-                  AND chunk.qdrant_collection = :collection
                   AND chunk.qdrant_point_id = chunk.id
+                  AND (link.chunk_id IS NULL OR current.chunk_id IS NOT NULL)
             """),
-            {"chunk_ids": list(scores), "collection": QDRANT_COLLECTION},
+            {"chunk_ids": list(chunk_ids)},
         )).mappings().all()
-    chunks_by_id = {row["chunk_id"]: row for row in rows}
-    return [
-        ChunkSearchResult(**chunks_by_id[chunk_id], score=score)
-        for chunk_id, score in scores.items()
-        if chunk_id in chunks_by_id
-    ]
+    matches = []
+    for row in rows:
+        score = scores.get(row["qdrant_collection"], {}).get(row["chunk_id"])
+        if score is not None:
+            matches.append(ChunkSearchResult(**row, score=score))
+    return sorted(matches, key=lambda match: (-match.score, match.chunk_id))[:limit]
 
 
 @router.post("", response_model=ChunkResponse, status_code=201)
@@ -130,8 +145,8 @@ async def get_chunk(request: Request, chunk_id: ChunkId):
     return await read_chunk(request, chunk_id)
 
 
-async def upsert_chunk_embeddings(qdrant: httpx.AsyncClient, chunk_ids: list[int], result):
-    collection_path = f"/collections/{QDRANT_COLLECTION}"
+async def upsert_chunk_embeddings(qdrant: httpx.AsyncClient, chunk_ids: list[int], result, collection: str):
+    collection_path = f"/collections/{collection}"
     if len(result["embeddings"]) != len(chunk_ids):
         raise HTTPException(502, "Embedding worker returned the wrong number of vectors.")
     points = [
@@ -164,12 +179,12 @@ async def upsert_chunk_embeddings(qdrant: httpx.AsyncClient, chunk_ids: list[int
 
 
 async def save_chunk_embedding_references(
-    session, chunk_ids: list[int],
+    session, chunk_ids: list[int], collection: str,
 ) -> None:
     updated = await session.scalars(
         update(Chunk)
         .where(Chunk.id.in_(chunk_ids))
-        .values(qdrant_collection=QDRANT_COLLECTION, qdrant_point_id=Chunk.id)
+        .values(qdrant_collection=collection, qdrant_point_id=Chunk.id)
         .returning(Chunk.id)
     )
     if set(updated) != set(chunk_ids):
@@ -207,9 +222,15 @@ async def embed_chunk(request: Request, chunk_id: ChunkId):
     except ValidationError as error:
         raise HTTPException(422, "Stored chunk text does not meet embedding input limits.") from error
     result = await request.app.state.rpc.embed(payload)
-    await upsert_chunk_embeddings(request.app.state.qdrant, [chunk_id], result)
     async with database_session(request) as session:
-        await save_chunk_embedding_references(session, [chunk_id])
+        # Serialize the write with source replacement so it cannot recreate a deleted point.
+        if await session.get(Chunk, chunk_id, with_for_update=True) is None:
+            raise HTTPException(404, "Chunk not found.")
+        source_kind = await session.scalar(text("SELECT source_kind FROM paper_chunks WHERE chunk_id = :id"),
+                                           {"id": chunk_id})
+        collection = PAPER_COLLECTIONS.get(source_kind, QDRANT_COLLECTION)
+        await upsert_chunk_embeddings(request.app.state.qdrant, [chunk_id], result, collection)
+        await save_chunk_embedding_references(session, [chunk_id], collection)
     return result["embeddings"][0]
 
 

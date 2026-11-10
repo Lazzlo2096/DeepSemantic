@@ -236,7 +236,8 @@ function renderSearchResult(chunk) {
   if (chunk.arxiv_id) {
     linkPaper(card, chunk.arxiv_id);
   }
-  card.querySelector(".search-fragment").textContent = `Чанк №${chunk.chunk_id}`;
+  const label = chunk.source_kind === "summary" ? "Чанк суммаризации" : "Чанк";
+  card.querySelector(".search-fragment").textContent = `${label} №${chunk.chunk_id}`;
   card.querySelector(".search-score").textContent = `Сходство ${scoreFormat.format(chunk.score)}`;
   card.querySelector(".search-excerpt").textContent = chunk.text;
   return card;
@@ -296,8 +297,10 @@ function renderRagAnswer(answer) {
     const article = document.createElement("a");
     const excerpt = document.createElement("p");
     const chunkNumber = source.chunk_index + 1;
-    article.href = `${paperUrl(source.arxiv_id)}#chunk-${chunkNumber}`;
-    article.textContent = `Открыть чанк №${chunkNumber} в статье`;
+    const fromSummary = source.source_kind === "summary";
+    const anchor = fromSummary ? "paper-summary" : `chunk-${chunkNumber}`;
+    article.href = `${paperUrl(source.arxiv_id)}#${anchor}`;
+    article.textContent = fromSummary ? "Открыть суммаризацию" : `Открыть чанк №${chunkNumber} в статье`;
     article.className = "paper-title";
     summary.textContent = `[${source.id}] ${source.paper_title || source.arxiv_id}`;
     excerpt.className = "chunk-text";
