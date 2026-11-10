@@ -19,6 +19,7 @@ x-embedding-client-environment: &embedding-client-environment
   <<: [*amqp-environment, *postgres-environment]
   EMBEDDING_RPC_TIMEOUT: "${EMBEDDING_RPC_TIMEOUT:-60}"
   QDRANT_URL: "${QDRANT_URL:-http://qdrant:6333}"
+  CHUNK_OVERLAP_PERCENT: "${CHUNK_OVERLAP_PERCENT:-0}"
 
 services:
   fontend:

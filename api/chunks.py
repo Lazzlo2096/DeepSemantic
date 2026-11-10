@@ -1,4 +1,5 @@
 import asyncio
+import os
 from datetime import datetime
 from typing import Annotated, Literal
 from urllib.parse import quote
@@ -17,6 +18,11 @@ QDRANT_COLLECTION = "documents_bge_m3"
 PAPER_COLLECTIONS = {"article": QDRANT_COLLECTION, "summary": "paper_summaries_bge_m3"}
 PaperChunkSource = Literal["article", "summary"]
 ChunkId = Annotated[int, Path(ge=1, le=MAX_BIGINT)]
+
+
+def require_zero_chunk_overlap() -> None:
+    if os.getenv("CHUNK_OVERLAP_PERCENT", "0").strip() != "0":
+        raise HTTPException(503, "Search over stored chunks requires CHUNK_OVERLAP_PERCENT=0 (0% overlap).")
 
 
 class ChunkRequest(BaseModel):
@@ -79,6 +85,7 @@ async def search_chunk_text(payload: ChunkTextSearchRequest, request: Request):
 
 
 async def find_text_chunks(request: Request, query: str, limit: int, *, located_only: bool = False) -> list[ChunkMatch]:
+    require_zero_chunk_overlap()
     literal = query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
     async with database_session(request) as session:
         rows = (await session.execute(
@@ -128,6 +135,7 @@ async def query_collection(qdrant: httpx.AsyncClient, collection: str, embedding
 
 
 async def find_chunks(request: Request, query: str, limit: int, *, located_only: bool = False) -> list[ChunkSearchResult]:
+    require_zero_chunk_overlap()
     state = request.app.state
     embedding = await state.rpc.embed(EmbeddingRequest(texts=[query]))
     collections = tuple(PAPER_COLLECTIONS.values())

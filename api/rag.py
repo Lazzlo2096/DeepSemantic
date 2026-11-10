@@ -11,7 +11,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
 from sqlalchemy import text
 
-from chunks import PaperChunkSource, find_chunks, find_text_chunks
+from chunks import PaperChunkSource, find_chunks, find_text_chunks, require_zero_chunk_overlap
 from database import database_session
 from llm_chat import ChatResponseError
 from papers import open_paper_object
@@ -236,6 +236,7 @@ async def collect_sources(request: Request, question: str) -> list[RagSource]:
 
 @router.post("/answer", response_model=RagAnswer)
 async def answer_question(payload: RagQuestion, request: Request):
+    require_zero_chunk_overlap()
     state = request.app.state
     chat = state.chat_settings
     if not chat.configured:

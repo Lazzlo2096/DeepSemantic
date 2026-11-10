@@ -11,7 +11,12 @@ from sqlalchemy import delete, insert, text
 from sqlalchemy.exc import OperationalError
 from tokenizers import Tokenizer
 
-from chunks import PAPER_COLLECTIONS, save_chunk_embedding_references, upsert_chunk_embeddings
+from chunks import (
+    PAPER_COLLECTIONS,
+    require_zero_chunk_overlap,
+    save_chunk_embedding_references,
+    upsert_chunk_embeddings,
+)
 from database import Chunk
 from embedding_schemas import EmbeddingRequest
 from main import app, lifespan
@@ -207,6 +212,7 @@ async def index_pending_chunks(state, s3, tokenizer: Tokenizer, max_tokens: int)
 
 
 async def main(watch: bool = False) -> int:
+    require_zero_chunk_overlap()
     max_tokens = int(os.getenv("EMBEDDING_MAX_TOKENS", "512"))
     if not 3 <= max_tokens <= 8192:
         raise ValueError("EMBEDDING_MAX_TOKENS must be between 3 and 8192")
