@@ -3,6 +3,7 @@ import json
 import logging
 import re
 from codecs import getincrementaldecoder
+from hashlib import sha256
 from itertools import count
 from time import perf_counter
 from typing import Annotated, Literal
@@ -70,6 +71,9 @@ ANSWER_INSTRUCTIONS = """Ответь на русском языке, опира
 В source_explanation кратко укажи существенное ограничение охвата источников, если оно есть.
 Иначе верни пустую строку. Не пересказывай вызовы инструментов и не перечисляй ID фрагментов в пояснении.
 Если источников недостаточно для ответа, верни пустой points и пустой source_explanation."""
+PROMPT_VERSION = sha256(
+    json.dumps([RESEARCH_INSTRUCTIONS, ANSWER_INSTRUCTIONS], ensure_ascii=False).encode("utf-8")
+).hexdigest()
 
 
 class RagQuestion(BaseModel):
@@ -367,10 +371,17 @@ async def generate_answer(payload: RagQuestion, request: Request, run_id: UUID) 
 @router.post("/answer", response_model=RagAnswer)
 async def answer_question(payload: RagQuestion, request: Request):
     require_zero_chunk_overlap()
-    if not request.app.state.chat_settings.configured:
+    chat = request.app.state.chat_settings
+    if not chat.configured:
         raise HTTPException(503, "OPENROUTER_API_KEY is required.")
 
-    run_id = await start_run(request, payload.query, payload.run_id)
+    reasoning_effort = None
+    if chat.provider == "openrouter":
+        reasoning_effort = chat.reasoning_effort or "disabled"
+    run_id = await start_run(
+        request, payload.query, payload.run_id,
+        model=chat.model, reasoning_effort=reasoning_effort, prompt_version=PROMPT_VERSION,
+    )
     headers = {"X-RAG-Run-Id": str(run_id)}
     try:
         answer = await generate_answer(payload, request, run_id)
