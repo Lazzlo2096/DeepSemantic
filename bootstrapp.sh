@@ -8,6 +8,8 @@ fi
 
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 
+bash ./create-swapfile.sh
+
 if [[ ! -e .env && ! -L .env ]]; then
     cp --update=none --no-target-directory .env.example .env
 fi
