@@ -136,10 +136,11 @@ async def lifespan(app: FastAPI):
         app.state.chat_settings = chat_settings = ChatSettings.from_env(openrouter_model_env="RAG_OPENROUTER_MODEL")
         app.state.chat_client = await stack.enter_async_context(httpx.AsyncClient(
             base_url=chat_settings.base_url,
-            timeout=httpx.Timeout(180, connect=5),
+            timeout=None,
         ))
         app.state.rag_ollama_options = (
-            {"num_gpu": int(os.getenv("RAG_OLLAMA_GPU_LAYERS", "-1"))} if chat_settings.provider == "ollama" else {}
+            {"num_gpu": int(os.getenv("RAG_OLLAMA_GPU_LAYERS", "-1")), "num_predict": -1}
+            if chat_settings.provider == "ollama" else {}
         )
         connection = await stack.enter_async_context(
             await aio_pika.connect_robust(os.environ["AMQP_URL"], timeout=5)

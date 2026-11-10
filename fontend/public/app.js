@@ -215,13 +215,19 @@ function applyFilters() {
   showLocation();
 }
 
+function updateSearchInput(mode) {
+  searchQuery.placeholder = searchModes[mode].placeholder;
+  if (mode === "rag") searchQuery.removeAttribute("maxlength");
+  else searchQuery.maxLength = 1000;
+}
+
 function showLocation(moveFocus = false) {
   const params = new URLSearchParams(location.search);
   const selectedMode = params.get("mode");
   const mode = Object.hasOwn(searchModes, selectedMode) ? selectedMode : "vector";
   const runId = mode === "rag" ? params.get("run") : null;
   searchMode.value = mode;
-  searchQuery.placeholder = searchModes[mode].placeholder;
+  updateSearchInput(mode);
   searchQuery.value = params.get("query") ?? "";
   const query = searchQuery.value.trim();
   catalog.hidden = Boolean(query || runId);
@@ -516,14 +522,9 @@ function waitForRagUpdate(signal) {
 }
 
 async function followRagRun(runId, signal, allowPending = false) {
-  const deadline = Date.now() + 160_000;
   while (!signal.aborted) {
     const status = await showRagRun(runId, signal, allowPending);
     if (status !== "running" && !(allowPending && status === "missing")) return;
-    if (Date.now() >= deadline) {
-      searchStatus.textContent = "Запуск ещё не завершён. Обновите страницу, чтобы проверить его.";
-      return;
-    }
     await waitForRagUpdate(signal);
   }
 }
@@ -590,7 +591,8 @@ async function loadSearch(query, mode, moveFocus, runId) {
       return;
     }
     if (response.status === 422) {
-      searchStatus.textContent = "Проверь запрос и попробуй ещё раз. Максимум 1000 символов.";
+      searchStatus.textContent = mode === "rag" ? "Проверь запрос и попробуй ещё раз."
+        : "Проверь запрос и попробуй ещё раз. Максимум 1000 символов.";
       return;
     }
     if (response.status === 503 && mode === "vector") {
@@ -633,7 +635,7 @@ async function loadSearch(query, mode, moveFocus, runId) {
 }
 
 searchForm.addEventListener("change", (event) => {
-  if (event.target.name === "mode") searchQuery.placeholder = searchModes[searchMode.value].placeholder;
+  if (event.target.name === "mode") updateSearchInput(searchMode.value);
 });
 
 searchForm.addEventListener("submit", (event) => {
