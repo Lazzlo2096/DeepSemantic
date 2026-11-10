@@ -26,5 +26,15 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y just docker.io docker-compose-
 printf '[bootstrap] Starting Docker and enabling it at boot.\n'
 systemctl enable --now docker.service
 
-printf '[bootstrap] Building and starting the server with just up-server.\n'
-exec just up-server
+cat <<'EOF'
+
+[bootstrap] Установка завершена!
+
+Откройте .env и укажите ключ OpenRouter в OPENROUTER_API_KEY.
+Выберите модели для поиска по RAG (RAG_OPENROUTER_MODEL) и суммаризации (SUMMARY_OPENROUTER_MODEL).
+
+Запустите проект командой just up-server.
+Для остановки выполните just down.
+
+Пользуйтесь! :-)
+EOF

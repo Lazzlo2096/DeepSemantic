@@ -12,9 +12,9 @@ chmod +x ./bootstrap.sh
 ./bootstrap.sh
 ```
 
-После установки запускай и останавливай проект из каталога `DeepSemantic`.
+После установки укажи в `.env` ключ `OPENROUTER_API_KEY` и выбери модели `RAG_OPENROUTER_MODEL` и `SUMMARY_OPENROUTER_MODEL`. Запускай и останавливай проект из каталога `DeepSemantic`.
 
 ```sh
-just up-server # снова запустить проект
+just up-server # запустить проект
 just down      # остановить проект
 ```

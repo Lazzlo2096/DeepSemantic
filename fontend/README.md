@@ -6,7 +6,7 @@
 
 На Ubuntu запусти `sudo bash bootstrap.sh` из корня проекта. Запись DNS для `deep-semantic.com` должна указывать на публичный адрес сервера, а TCP-порты 80 и 443 должны быть свободны и доступны из интернета. Caddy выпустит и будет обновлять сертификат автоматически. [Каталог на сервере](https://deep-semantic.com)
 
-Для повторного запуска используй `sudo just up-server`. По умолчанию сервер использует OpenRouter и пропускает сервисы Ollama. Для локальной генерации на сервере задай `LLM_PROVIDER=ollama` и `COMPOSE_PROFILES=ollama` в `.env`.
+Укажи в `.env` ключ `OPENROUTER_API_KEY` и выбери модели `RAG_OPENROUTER_MODEL` и `SUMMARY_OPENROUTER_MODEL`. Затем запусти `sudo just up-server`. По умолчанию сервер использует OpenRouter и пропускает сервисы Ollama. Для локальной генерации на сервере задай `LLM_PROVIDER=ollama` и `COMPOSE_PROFILES=ollama` в `.env`.
 
 Управление воркерами доступно без пароля через публичную страницу. [Воркеры на сервере](https://deep-semantic.com/workers.html)
 
