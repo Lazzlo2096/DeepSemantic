@@ -102,16 +102,6 @@
           <button id="back-to-catalog" type="button">Вернуться к каталогу</button>
         </div>
         <p id="search-status" role="status"></p>
-        <section id="rag-result" class="paper" aria-labelledby="rag-title" hidden>
-          <h3 id="rag-title">Ответ по статьям</h3>
-          <ul id="rag-points"></ul>
-          <section id="rag-explanation" aria-labelledby="rag-explanation-title" hidden>
-            <h3 id="rag-explanation-title">Почему выбраны эти источники</h3>
-            <p id="rag-explanation-text"></p>
-          </section>
-          <h3>Источники</h3>
-          <div id="rag-sources" class="paper-list"></div>
-        </section>
         <details id="rag-trace" class="paper" hidden>
           <summary>Как найден ответ</summary>
           <div class="rag-trace-meta">
@@ -126,6 +116,16 @@
           <p id="rag-trace-empty" hidden>В этом запуске инструментов не вызывали.</p>
           <div id="rag-tool-calls" class="paper-list"></div>
         </details>
+        <section id="rag-result" class="paper" aria-labelledby="rag-title" hidden>
+          <h3 id="rag-title">Ответ по статьям</h3>
+          <ul id="rag-points"></ul>
+          <section id="rag-explanation" aria-labelledby="rag-explanation-title" hidden>
+            <h3 id="rag-explanation-title">Почему выбраны эти источники</h3>
+            <p id="rag-explanation-text"></p>
+          </section>
+          <h3>Источники</h3>
+          <div id="rag-sources" class="paper-list"></div>
+        </section>
         <div id="search-chunks" class="paper-list"></div>
       </section>
       <noscript><p>Для загрузки каталога включи JavaScript.</p></noscript>

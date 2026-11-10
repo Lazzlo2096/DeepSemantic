@@ -120,7 +120,7 @@ summary { width: fit-content; cursor: pointer; color: var(--accent); font-size: 
 #rag-points { padding-inline-start: 22px; line-height: 1.6; overflow-wrap: anywhere; }
 #rag-points li + li { margin-top: 6px; }
 #rag-result a { color: var(--accent); }
-#rag-trace { margin-top: 12px; }
+#rag-trace { margin-block: 12px; }
 #rag-trace a { color: var(--accent); }
 #rag-trace pre { margin: 0; padding: 10px; background: #f3f5f9; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .rag-trace-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; margin-block: 10px; }
