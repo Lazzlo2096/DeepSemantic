@@ -2,11 +2,13 @@ import asyncio
 import json
 import logging
 from codecs import getincrementaldecoder
+from time import perf_counter
 from typing import Annotated, Literal
+from uuid import UUID
 
 import httpx
 from botocore.exceptions import BotoCoreError
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
 from sqlalchemy import text
@@ -15,6 +17,7 @@ from chunks import PaperChunkSource, find_chunks, find_text_chunks, require_zero
 from database import database_session
 from llm_chat import ChatResponseError
 from papers import open_paper_object
+from rag_history import RagRunRecord, RagToolCall, finish_run, load_run, save_tool_call, start_run
 
 
 router = APIRouter(prefix="/rag", tags=["rag"])
@@ -39,7 +42,9 @@ ANSWER_INSTRUCTIONS = """Ответь на русском языке, опира
 Верни до трёх пунктов в points. Для каждого пункта укажи в source_ids идентификаторы подтверждающих источников.
 Пиши обычным текстом, без Markdown. Для точных чисел и условий используй первичный текст статьи.
 Высокое векторное сходство само по себе не подтверждает факт или эквивалентность формул.
-Если источников недостаточно для ответа, верни пустой points."""
+В source_explanation кратко (до двух предложений) поясни, какие из выполненных поисковых шагов дали
+процитированные источники и чем те подтверждают вывод. Опирайся на search_steps и sources.
+Если источников недостаточно для ответа, верни пустой points и пустой source_explanation."""
 
 
 class RagQuestion(BaseModel):
@@ -86,6 +91,7 @@ class AnswerPoint(BaseModel):
 class GeneratedAnswer(BaseModel):
     model_config = ConfigDict(extra="forbid")
     points: list[AnswerPoint] = Field(max_length=3)
+    source_explanation: str = Field(max_length=600)
 
 
 class RagSource(BaseModel):
@@ -100,6 +106,7 @@ class RagSource(BaseModel):
 
 
 class RagAnswer(GeneratedAnswer):
+    run_id: UUID
     status: Literal["answered", "insufficient_evidence"]
     sources: list[RagSource]
 
@@ -167,11 +174,12 @@ async def run_tool(request: Request, name: str, raw_arguments: str | dict, versi
     return results
 
 
-async def collect_sources(request: Request, question: str) -> list[RagSource]:
+async def collect_sources(request: Request, question: str, run_id: UUID) -> tuple[list[RagSource], list[dict]]:
     state = request.app.state
     chat = state.chat_settings
     messages = [{"role": "system", "content": RESEARCH_INSTRUCTIONS}, {"role": "user", "content": question}]
     sources = {}
+    search_steps = []
     versions = {}
     remaining_calls = MAX_TOOL_CALLS
     remaining_bytes = MAX_EVIDENCE_BYTES
@@ -202,6 +210,8 @@ async def collect_sources(request: Request, question: str) -> list[RagSource]:
             if not isinstance(name, str) or not isinstance(arguments, (str, dict)):
                 raise ChatResponseError("Malformed tool arguments")
 
+            started = perf_counter()
+            result = {"error": "Tool execution did not complete."}
             try:
                 matches = await run_tool(request, name, arguments, versions)
                 items = []
@@ -227,28 +237,34 @@ async def collect_sources(request: Request, question: str) -> list[RagSource]:
                 result = {"error": f"Invalid arguments. Provide a nonempty query or a range of at most {MAX_SLICE_CHARS} characters."}
             except HTTPException as error:
                 result = {"error": error.detail}
+            finally:
+                await save_tool_call(request, run_id, RagToolCall(
+                    position=MAX_TOOL_CALLS - remaining_calls + 1, tool_name=name,
+                    arguments=arguments, result=result, duration_ms=round((perf_counter() - started) * 1000),
+                ))
+            returned = result.get("matches", [result] if "source_id" in result else [])
+            search_steps.append({
+                "tool_name": name, "source_ids": [item["source_id"] for item in returned], "error": "error" in result,
+            })
             messages.append({**result_message, "content": json.dumps(result, ensure_ascii=False)})
             remaining_calls -= 1
         if not remaining_calls or remaining_bytes < 256:
             break
-    return list(sources.values())
+    return list(sources.values()), search_steps
 
 
-@router.post("/answer", response_model=RagAnswer)
-async def answer_question(payload: RagQuestion, request: Request):
-    require_zero_chunk_overlap()
+async def generate_answer(payload: RagQuestion, request: Request, run_id: UUID) -> RagAnswer:
     state = request.app.state
     chat = state.chat_settings
-    if not chat.configured:
-        raise HTTPException(503, "OPENROUTER_API_KEY is required.")
 
     try:
         async with asyncio.timeout(150):
-            sources = await collect_sources(request, payload.query)
+            sources, search_steps = await collect_sources(request, payload.query, run_id)
             if not sources:
-                return RagAnswer(status="insufficient_evidence", points=[], sources=[])
+                return RagAnswer(run_id=run_id, status="insufficient_evidence", points=[], sources=[], source_explanation="")
             material = json.dumps({
-                "question": payload.query, "sources": [source.model_dump() for source in sources],
+                "question": payload.query, "search_steps": search_steps,
+                "sources": [source.model_dump() for source in sources],
             }, ensure_ascii=False)
             content = await chat.complete(
                 state.chat_client,
@@ -274,6 +290,39 @@ async def answer_question(payload: RagQuestion, request: Request):
         raise HTTPException(502, f"{chat.provider} returned an incomplete answer or invalid citations.") from error
 
     return RagAnswer(
+        run_id=run_id,
         status="answered" if generated.points else "insufficient_evidence",
         points=generated.points, sources=[sources_by_id[id] for id in sorted(cited_ids)],
+        source_explanation=generated.source_explanation if generated.points else "",
     )
+
+
+@router.post("/answer", response_model=RagAnswer)
+async def answer_question(payload: RagQuestion, request: Request):
+    require_zero_chunk_overlap()
+    if not request.app.state.chat_settings.configured:
+        raise HTTPException(503, "OPENROUTER_API_KEY is required.")
+
+    run_id = await start_run(request, payload.query)
+    headers = {"X-RAG-Run-Id": str(run_id)}
+    try:
+        answer = await generate_answer(payload, request, run_id)
+    except asyncio.CancelledError:
+        await finish_run(request, run_id, "failed", error="RAG request interrupted.")
+        raise
+    except HTTPException as error:
+        await finish_run(request, run_id, "failed", error=str(error.detail))
+        raise HTTPException(error.status_code, error.detail, {**(error.headers or {}), **headers}) from error
+    except Exception as error:
+        logger.exception("RAG run %s failed", run_id)
+        message = "RAG request failed."
+        await finish_run(request, run_id, "failed", error=message)
+        raise HTTPException(500, message, headers) from error
+    await finish_run(request, run_id, answer.status, answer=answer.model_dump(mode="json"))
+    return answer
+
+
+@router.get("/runs/{run_id}", response_model=RagRunRecord)
+async def get_run(request: Request, response: Response, run_id: UUID):
+    response.headers["Cache-Control"] = "no-store"
+    return await load_run(request, run_id)

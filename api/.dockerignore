@@ -10,6 +10,7 @@
 !paper_summaries.py
 !summary_schema.py
 !rag.py
+!rag_history.py
 !llm_chat.py
 !worker_control.py
 !storage.py

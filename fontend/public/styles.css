@@ -120,6 +120,9 @@ summary { width: fit-content; cursor: pointer; color: var(--accent); font-size: 
 #rag-points { padding-inline-start: 22px; line-height: 1.6; overflow-wrap: anywhere; }
 #rag-points li + li { margin-top: 6px; }
 #rag-result a { color: var(--accent); }
+#rag-trace { margin-top: 12px; }
+#rag-trace a { color: var(--accent); }
+#rag-tool-calls pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 #paper-chunks .paper:target { border-color: var(--accent); scroll-margin-top: 20px; }
 
 .pagination { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 20px; }

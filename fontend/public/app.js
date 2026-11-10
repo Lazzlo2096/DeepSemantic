@@ -34,6 +34,12 @@ const backToCatalog = document.querySelector("#back-to-catalog");
 const ragResult = document.querySelector("#rag-result");
 const ragPoints = document.querySelector("#rag-points");
 const ragSources = document.querySelector("#rag-sources");
+const ragExplanation = document.querySelector("#rag-explanation");
+const ragExplanationText = document.querySelector("#rag-explanation-text");
+const ragTrace = document.querySelector("#rag-trace");
+const ragTraceEmpty = document.querySelector("#rag-trace-empty");
+const ragToolCalls = document.querySelector("#rag-tool-calls");
+const ragPermalink = document.querySelector("#rag-permalink");
 const scoreFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const searchModes = {
   rag: {
@@ -210,18 +216,21 @@ function showLocation(moveFocus = false) {
   const params = new URLSearchParams(location.search);
   const selectedMode = params.get("mode");
   const mode = Object.hasOwn(searchModes, selectedMode) ? selectedMode : "vector";
+  const runId = mode === "rag" ? params.get("run") : null;
   searchMode.value = mode;
   searchQuery.placeholder = searchModes[mode].placeholder;
   searchQuery.value = params.get("query") ?? "";
   const query = searchQuery.value.trim();
-  catalog.hidden = Boolean(query);
-  searchResults.hidden = !query;
+  catalog.hidden = Boolean(query || runId);
+  searchResults.hidden = !catalog.hidden;
   ragResult.hidden = true;
+  ragTrace.hidden = true;
+  ragTrace.open = false;
 
-  if (query) {
+  if (query || runId) {
     catalogRequest?.abort();
     catalogRequest = undefined;
-    loadSearch(query, mode, moveFocus);
+    loadSearch(query, mode, moveFocus, runId);
     return;
   }
 
@@ -296,10 +305,61 @@ function renderRagAnswer(answer) {
     }
     return item;
   }));
+  ragExplanationText.textContent = answer.source_explanation;
+  ragExplanation.hidden = !answer.source_explanation;
   ragResult.hidden = false;
 }
 
-async function loadSearch(query, mode, moveFocus) {
+function renderToolCall(call) {
+  const details = document.createElement("details");
+  const heading = document.createElement("summary");
+  const inputLabel = document.createElement("h4");
+  const input = document.createElement("pre");
+  const outputLabel = document.createElement("h4");
+  const output = document.createElement("pre");
+  const status = Object.hasOwn(call.result, "error") ? " · ошибка" : "";
+  heading.textContent = `${call.position}. ${call.tool_name} · ${call.duration_ms} мс${status}`;
+  inputLabel.textContent = "Аргументы";
+  input.textContent = typeof call.arguments === "string" ? call.arguments : JSON.stringify(call.arguments, null, 2);
+  outputLabel.textContent = "Результат";
+  output.textContent = JSON.stringify(call.result, null, 2);
+  details.append(heading, inputLabel, input, outputLabel, output);
+  return details;
+}
+
+async function showRagRun(runId, signal, remember = false) {
+  if (remember) {
+    const url = new URL(location.href);
+    url.searchParams.set("run", runId);
+    updateUrl(url, true);
+  }
+  const response = await fetch(`/api/rag/runs/${encodeURIComponent(runId)}`, { signal, cache: "no-store" });
+  if (response.status === 404 || response.status === 422) {
+    searchStatus.textContent = "Запуск RAG не найден.";
+    return;
+  }
+  if (!response.ok) throw new Error(`RAG history returned ${response.status}`);
+  const run = await response.json();
+  if (signal.aborted) return;
+
+  searchQuery.value = run.query;
+  ragPermalink.href = `/?${new URLSearchParams({ mode: "rag", run: run.run_id })}`;
+  ragToolCalls.replaceChildren(...run.tool_calls.map(renderToolCall));
+  ragTraceEmpty.hidden = run.tool_calls.length > 0;
+  ragTrace.hidden = false;
+  if (run.status === "answered") {
+    renderRagAnswer(run.answer);
+    searchStatus.textContent = "Ответ готов.";
+  } else if (run.status === "insufficient_evidence") {
+    searchStatus.textContent = "В найденных фрагментах недостаточно данных для ответа.";
+  } else if (run.status === "failed") {
+    searchStatus.textContent = `Запуск завершился ошибкой. ${run.error ?? ""}`;
+  } else {
+    searchStatus.textContent = "Запуск ещё не завершён.";
+  }
+}
+
+async function loadSearch(query, mode, moveFocus, runId) {
   const settings = searchModes[mode];
   searchRequest?.abort();
   const request = new AbortController();
@@ -308,9 +368,14 @@ async function loadSearch(query, mode, moveFocus) {
   searchTitle.textContent = settings.title;
   searchChunks.replaceChildren();
   searchResults.setAttribute("aria-busy", "true");
-  searchStatus.textContent = settings.pending;
+  searchStatus.textContent = runId ? "Загружаем историю запуска…" : settings.pending;
 
   try {
+    if (runId) {
+      await showRagRun(runId, request.signal);
+      if (moveFocus && !request.signal.aborted) searchTitle.focus();
+      return;
+    }
     const response = await fetch(settings.endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -318,6 +383,12 @@ async function loadSearch(query, mode, moveFocus) {
       signal: request.signal,
     });
     if (request.signal.aborted) return;
+    const failedRunId = mode === "rag" && response.headers.get("X-RAG-Run-Id");
+    if (!response.ok && failedRunId) {
+      await showRagRun(failedRunId, request.signal, true);
+      if (moveFocus && !request.signal.aborted) searchTitle.focus();
+      return;
+    }
     if (response.status === 422) {
       searchStatus.textContent = "Проверь запрос и попробуй ещё раз. Максимум 1000 символов.";
       return;
@@ -341,14 +412,12 @@ async function loadSearch(query, mode, moveFocus) {
     const result = await response.json();
     if (request.signal.aborted) return;
     if (mode === "rag") {
-      if (result.status === "answered") renderRagAnswer(result);
-      searchStatus.textContent = result.status === "answered"
-        ? "Ответ готов." : "В найденных фрагментах недостаточно данных для ответа.";
+      await showRagRun(result.run_id, request.signal, true);
     } else {
       searchChunks.replaceChildren(...result.map(renderSearchResult));
       searchStatus.textContent = result.length ? `Найдено фрагментов: ${result.length}` : settings.empty;
     }
-    if (moveFocus) searchTitle.focus();
+    if (moveFocus && !request.signal.aborted) searchTitle.focus();
   } catch {
     if (!request.signal.aborted) {
       searchStatus.textContent = "Не удалось выполнить поиск. Попробуй ещё раз.";
@@ -378,6 +447,7 @@ searchForm.addEventListener("submit", (event) => {
   const url = new URL(location.href);
   url.searchParams.set("query", query);
   url.searchParams.set("mode", searchMode.value);
+  url.searchParams.delete("run");
   updateUrl(url);
   showLocation(true);
 });
@@ -386,6 +456,7 @@ backToCatalog.addEventListener("click", () => {
   const url = new URL(location.href);
   url.searchParams.delete("query");
   url.searchParams.delete("mode");
+  url.searchParams.delete("run");
   updateUrl(url);
   showLocation(true);
 });

@@ -8,7 +8,7 @@ COPY requirements.txt .
 RUN python -m pip install --no-cache-dir -r requirements.txt \
     && useradd --create-home --uid 10001 app
 
-COPY main.py database.py chunks.py papers.py embedding_schemas.py paper_chunking.py paper_embeddings.py paper_summaries.py summary_schema.py rag.py llm_chat.py storage.py .
+COPY main.py database.py chunks.py papers.py embedding_schemas.py paper_chunking.py paper_embeddings.py paper_summaries.py summary_schema.py rag.py rag_history.py llm_chat.py storage.py .
 
 FROM base AS worker-control
 COPY worker_control.py .
