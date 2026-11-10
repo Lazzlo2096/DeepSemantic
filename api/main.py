@@ -16,15 +16,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from chunks import router as chunks_router
 from database import MAX_BIGINT, create_database_engine, database_session
-from embedding_schemas import EmbeddingRequest, EmbeddingResponse
+from embedding_schemas import EMBEDDING_QUEUE, EmbeddingRequest, EmbeddingResponse
 from llm_chat import ChatSettings
 from paper_summaries import router as paper_summaries_router
 from papers import router as papers_router
 from rag import router as rag_router
 from storage import connect_rustfs
-
-
-QUEUE = "embeddings.requests"
 
 
 class ArxivImportRequest(BaseModel):
@@ -82,7 +79,7 @@ class EmbeddingRPC:
         try:
             async with asyncio.timeout(3):
                 # aio-pika caches passive declarations on robust channels.
-                queue = await self.channel.declare_queue(QUEUE, durable=True, robust=False)
+                queue = await self.channel.declare_queue(EMBEDDING_QUEUE, durable=True, robust=False)
         except (AMQPException, OSError, TimeoutError) as error:
             raise HTTPException(503, "RabbitMQ is unavailable.") from error
         if not queue.declaration_result.consumer_count:
@@ -103,7 +100,7 @@ class EmbeddingRPC:
                         reply_to=self.replies.name,
                         expiration=self.timeout,
                     ),
-                    routing_key=QUEUE,
+                    routing_key=EMBEDDING_QUEUE,
                 )
                 result = json.loads(await future)
         except TimeoutError as error:
@@ -146,7 +143,7 @@ async def lifespan(app: FastAPI):
             await aio_pika.connect_robust(os.environ["AMQP_URL"], timeout=5)
         )
         channel = await connection.channel(on_return_raises=True)
-        await channel.declare_queue(QUEUE, durable=True)
+        await channel.declare_queue(EMBEDDING_QUEUE, durable=True)
         replies = await channel.declare_queue(f"embeddings.reply.{uuid4().hex}", exclusive=True)
         rpc = EmbeddingRPC(channel, replies, timeout)
         await replies.consume(rpc.on_reply, no_ack=True)

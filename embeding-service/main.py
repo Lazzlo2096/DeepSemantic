@@ -1,13 +1,15 @@
 import asyncio
+import hashlib
 import json
 import logging
 import os
+from contextlib import asynccontextmanager
+from functools import partial
 from threading import Lock
 
 import aio_pika
 
 
-QUEUE = "embeddings.requests"
 MODEL_ID = "BAAI/bge-m3"
 MODEL_REVISION = "5617a9f61b028005a4858fdac845db406aefb181"
 DIMENSIONS = 1024
@@ -64,7 +66,24 @@ def encode(model, texts: list[str], max_tokens: int, batch_size: int):
     }
 
 
-async def main():
+@asynccontextmanager
+async def embedding_backend(provider: str, openrouter_model: str):
+    if provider == "openrouter":
+        import httpx
+        from openrouter_embeddings import embed
+
+        key = os.getenv("OPENROUTER_API_KEY", "").strip()
+        if not key:
+            raise ValueError("OPENROUTER_API_KEY is required for OpenRouter embeddings")
+        logger.info("Using OpenRouter embeddings with %s", openrouter_model)
+        async with httpx.AsyncClient(
+            base_url="https://openrouter.ai/api/v1/",
+            headers={"Authorization": f"Bearer {key}"},
+            timeout=float(os.getenv("EMBEDDING_RPC_TIMEOUT", "60")),
+        ) as client:
+            yield partial(embed, client, openrouter_model)
+        return
+
     device = os.getenv("EMBEDDING_DEVICE", "cpu")
     max_tokens = int(os.getenv("EMBEDDING_MAX_TOKENS", "512"))
     batch_size = int(os.getenv("EMBEDDING_BATCH_SIZE", "8"))
@@ -77,22 +96,41 @@ async def main():
     model = await asyncio.to_thread(load_model, device)
     inference_lock = Lock()
 
-    def infer(body):
-        texts = json.loads(body)["texts"]
+    def infer(texts):
         with inference_lock:
             return encode(model, texts, max_tokens, batch_size)
 
-    async with await aio_pika.connect_robust(os.environ["AMQP_URL"], fail_fast=False) as connection:
+    async def embed_local(texts):
+        return await asyncio.to_thread(infer, texts)
+
+    yield embed_local
+
+
+async def main():
+    provider = os.getenv("EMBEDDING_PROVIDER", "local")
+    if provider not in ("local", "openrouter"):
+        raise ValueError("EMBEDDING_PROVIDER must be local or openrouter")
+    openrouter_model = os.getenv("EMBEDDING_OPENROUTER_MODEL", "baai/bge-m3").strip()
+    queue_name = "embeddings.requests"
+    if provider == "openrouter":
+        if not openrouter_model:
+            raise ValueError("EMBEDDING_OPENROUTER_MODEL is required for OpenRouter embeddings")
+        model_key = hashlib.sha256(openrouter_model.encode()).hexdigest()[:16]
+        queue_name = f"embeddings.requests.openrouter.{model_key}"
+    async with (
+        embedding_backend(provider, openrouter_model) as embed,
+        await aio_pika.connect_robust(os.environ["AMQP_URL"], fail_fast=False) as connection,
+    ):
         channel = await connection.channel()
         await channel.set_qos(prefetch_count=1)
-        queue = await channel.declare_queue(QUEUE, durable=True)
+        queue = await channel.declare_queue(queue_name, durable=True)
 
         async def process(message):
             async with message.process(requeue=True):
                 if not message.reply_to or not message.correlation_id:
                     return
                 try:
-                    response = await asyncio.to_thread(infer, message.body)
+                    response = await embed(json.loads(message.body)["texts"])
                 except Exception:
                     logger.exception("Embedding inference failed")
                     response = {"status": 500, "error": "Embedding inference failed."}
@@ -107,7 +145,7 @@ async def main():
                 )
 
         await queue.consume(process)
-        logger.info("%s is ready and consuming %s", MODEL_ID, QUEUE)
+        logger.info("Embedding provider %s is ready and consuming %s", provider, queue_name)
         await asyncio.Future()
 
 

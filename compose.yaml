@@ -17,6 +17,8 @@ x-llm-environment: &llm-environment
 
 x-embedding-client-environment: &embedding-client-environment
   <<: [*amqp-environment, *postgres-environment]
+  EMBEDDING_PROVIDER: "${EMBEDDING_PROVIDER:-local}"
+  EMBEDDING_OPENROUTER_MODEL: "${EMBEDDING_OPENROUTER_MODEL:-baai/bge-m3}"
   EMBEDDING_RPC_TIMEOUT: "${EMBEDDING_RPC_TIMEOUT:-60}"
   QDRANT_URL: "${QDRANT_URL:-http://qdrant:6333}"
   CHUNK_OVERLAP_PERCENT: "${CHUNK_OVERLAP_PERCENT:-0}"
@@ -117,12 +119,18 @@ services:
 
   embeding-service:
     profiles: [workers]
-    build: ./embeding-service
+    build:
+      context: ./embeding-service
+      target: "${EMBEDDING_PROVIDER:-local}"
     depends_on:
       rebbit:
         condition: service_healthy
     environment:
       <<: *amqp-environment
+      EMBEDDING_PROVIDER: "${EMBEDDING_PROVIDER:-local}"
+      EMBEDDING_OPENROUTER_MODEL: "${EMBEDDING_OPENROUTER_MODEL:-baai/bge-m3}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      EMBEDDING_RPC_TIMEOUT: "${EMBEDDING_RPC_TIMEOUT:-60}"
       EMBEDDING_MAX_TOKENS: "${EMBEDDING_MAX_TOKENS:-512}"
       EMBEDDING_BATCH_SIZE: "${EMBEDDING_BATCH_SIZE:-8}"
       HF_HUB_DOWNLOAD_TIMEOUT: "${HF_HUB_DOWNLOAD_TIMEOUT:-120}"
