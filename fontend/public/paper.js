@@ -2,12 +2,17 @@ import { arxivPath, arxivUrl } from "./arxiv.js";
 import MarkdownIt from "./vendor/markdown-it.mjs";
 
 const markdown = new MarkdownIt({ html: false });
-const articleMarkdown = new MarkdownIt({ html: true }).use(window.texmath, {
+const mathOptions = {
   engine: window.katex,
   delimiters: "dollars",
   katexOptions: { trust: false, throwOnError: false, maxExpand: 500, maxSize: 25 },
-});
-const tableTags = new Set(["caption", "thead", "tbody", "tfoot", "tr", "th", "td"]);
+};
+const articleMarkdown = new MarkdownIt({ html: true }).use(window.texmath, mathOptions);
+const tableMarkdown = new MarkdownIt("zero").use(window.texmath, mathOptions);
+const tableTextTags = new Set(["caption", "th", "td"]);
+const tableTags = new Set([...tableTextTags, "thead", "tbody", "tfoot", "tr"]);
+// The arXiv export can include memoir layout commands before the article heading.
+const layoutPreamble = /^\\isopage\s+(?:\[\d+\]\s+)?\\setlrmargins[^\n]*\n\\checkandfixthelayout\s+(?=# )/;
 const arxivId = new URLSearchParams(location.search).get("id");
 const status = document.querySelector("#status");
 const list = document.querySelector("#paper-chunks");
@@ -24,12 +29,16 @@ function copyTableChildren(source, target) {
       const value = child.getAttribute(attribute);
       if (/^[0-9]{1,4}$/.test(value)) cell.setAttribute(attribute, value);
     }
-    copyTableChildren(child, cell);
+    if (tableTextTags.has(child.localName)) {
+      cell.innerHTML = tableMarkdown.renderInline(child.textContent);
+    } else {
+      copyTableChildren(child, cell);
+    }
     target.append(cell);
   }
 }
 
-// The stored Markdown uses HTML for merged table cells. Copy only table structure and text.
+// Keep the table structure and render formulas in its text without copying the source HTML.
 articleMarkdown.renderer.rules.html_block = (tokens, index) => {
   const raw = tokens[index].content;
   if (!/^\s*<table(?:\s|>)[\s\S]*<\/table>\s*$/i.test(raw)) return markdown.utils.escapeHtml(raw);
@@ -79,7 +88,7 @@ async function loadText(url, available) {
     if (!response.ok) throw new Error(`Text request returned ${response.status}`);
     const source = await response.text();
     if (response.headers.get("Content-Type")?.startsWith("text/markdown")) {
-      result.innerHTML = articleMarkdown.render(source);
+      result.innerHTML = articleMarkdown.render(source.replace(layoutPreamble, ""));
     } else {
       const plain = document.createElement("pre");
       plain.className = "paper-plain-text";
