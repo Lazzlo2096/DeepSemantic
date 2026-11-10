@@ -41,7 +41,8 @@ const ragTraceStatus = document.querySelector("#rag-trace-status");
 const ragModelHistory = document.querySelector("#rag-model-history");
 const ragModelTurns = document.querySelector("#rag-model-turns");
 const ragTraceEmpty = document.querySelector("#rag-trace-empty");
-const ragToolCalls = document.querySelector("#rag-tool-calls");
+const ragUnassignedStep = document.querySelector("#rag-unassigned-step");
+const ragUnassignedCalls = document.querySelector("#rag-unassigned-calls");
 const ragPermalink = document.querySelector("#rag-permalink");
 const scoreFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const searchModes = {
@@ -235,7 +236,9 @@ function showLocation(moveFocus = false) {
   ragResult.hidden = true;
   ragTrace.hidden = true;
   ragTrace.open = false;
-  ragToolCalls.replaceChildren();
+  ragUnassignedStep.hidden = true;
+  ragUnassignedStep.open = false;
+  ragUnassignedCalls.replaceChildren();
   ragModelTurns.replaceChildren();
   ragModelHistory.hidden = true;
 
@@ -453,10 +456,16 @@ function renderModelTurn(turn) {
   }
   if (turn.requested_tools.length) {
     const label = document.createElement("h4");
+    const calls = document.createElement("div");
+    const requested = document.createElement("details");
+    const requestedLabel = document.createElement("summary");
     const text = document.createElement("pre");
-    label.textContent = "Запросы на вызов инструментов";
+    label.textContent = "Вызовы инструментов";
+    calls.className = "paper-list rag-step-calls";
+    requestedLabel.textContent = "Запросы модели (JSON)";
     text.textContent = JSON.stringify(turn.requested_tools, null, 2);
-    body.append(label, text);
+    requested.append(requestedLabel, text);
+    body.append(label, calls, requested);
   }
   details.append(heading, body);
   return details;
@@ -472,9 +481,19 @@ function rememberRagRun(runId) {
 function updateRagTrace(runId, running, calls = [], turns = []) {
   if (ragTrace.hidden) ragTrace.open = running;
   ragPermalink.href = `/?${new URLSearchParams({ mode: "rag", run: runId })}`;
-  ragToolCalls.append(...calls.slice(ragToolCalls.children.length).map(renderToolCall));
   ragModelTurns.append(...turns.slice(ragModelTurns.children.length).map(renderModelTurn));
-  ragModelHistory.hidden = turns.length === 0;
+  // The API returns calls in execution order. Each step executes its requests before the next step.
+  let callOffset = 0;
+  for (const [index, turn] of turns.entries()) {
+    const requestedCount = turn.requested_tools.length;
+    if (requestedCount === 0) continue;
+    const group = ragModelTurns.children[index].querySelector(".rag-step-calls");
+    group.append(...calls.slice(callOffset + group.children.length, callOffset + requestedCount).map(renderToolCall));
+    callOffset += requestedCount;
+  }
+  ragUnassignedCalls.append(...calls.slice(callOffset + ragUnassignedCalls.children.length).map(renderToolCall));
+  ragUnassignedStep.hidden = ragUnassignedCalls.children.length === 0;
+  ragModelHistory.hidden = turns.length === 0 && ragUnassignedStep.hidden;
   ragTraceEmpty.hidden = running || calls.length > 0;
   const status = running && !calls.length ? "Ожидаем первый результат инструмента."
     : `Вызовов инструментов: ${calls.length}${running ? " · поиск продолжается" : ""}`;

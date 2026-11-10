@@ -6,7 +6,7 @@
     <title>Статьи arXiv · DeepSemantic</title>
     <meta name="description" content="Каталог статей arXiv, загруженных в DeepSemantic.">
     <link rel="stylesheet" href="/styles.css?v=2">
-    <script type="module" src="/app.js"></script>
+    <script type="module" src="/app.js?v=2"></script>
   </head>
   <body>
     <header class="topbar">
@@ -111,12 +111,14 @@
             <a id="rag-permalink">Ссылка на запуск</a>
           </div>
           <section id="rag-model-history" aria-labelledby="rag-model-title" hidden>
-            <h3 id="rag-model-title">Сообщения модели</h3>
+            <h3 id="rag-model-title">Шаги модели</h3>
             <div id="rag-model-turns" class="paper-list"></div>
+            <details id="rag-unassigned-step" class="rag-tool" hidden>
+              <summary>Вызовы без сохранённого шага</summary>
+              <div id="rag-unassigned-calls" class="rag-tool-body"></div>
+            </details>
           </section>
-          <h3>Вызовы инструментов</h3>
           <p id="rag-trace-empty" hidden>В этом запуске инструментов не вызывали.</p>
-          <div id="rag-tool-calls" class="paper-list"></div>
         </details>
         <section id="rag-result" class="paper" aria-labelledby="rag-title" hidden>
           <h3 id="rag-title">Ответ по статьям</h3>
