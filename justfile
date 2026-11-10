@@ -23,6 +23,9 @@ up-amd:
     docker compose -f compose.yaml -f compose.amd.yaml up --build --detach
     docker compose -f compose.yaml -f compose.amd.yaml up --build --no-start --no-deps {{workers}}
 
+restart *compose_args:
+    docker compose {{compose_args}} up --build --detach --no-deps --force-recreate --wait api fontend
+
 down:
     docker compose --profile workers down
 
