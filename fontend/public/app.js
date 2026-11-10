@@ -224,7 +224,7 @@ function updateSearchInput(mode) {
 function showLocation(moveFocus = false) {
   const params = new URLSearchParams(location.search);
   const selectedMode = params.get("mode");
-  const mode = Object.hasOwn(searchModes, selectedMode) ? selectedMode : "vector";
+  const mode = Object.hasOwn(searchModes, selectedMode) ? selectedMode : "rag";
   const runId = mode === "rag" ? params.get("run") : null;
   searchMode.value = mode;
   updateSearchInput(mode);

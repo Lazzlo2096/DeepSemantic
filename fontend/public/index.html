@@ -11,8 +11,10 @@
   <body>
     <header class="topbar">
       <div class="shell brand">
-        <span class="brand-mark" aria-hidden="true">DS</span>
-        <span>DeepSemantic</span>
+        <a class="brand-link" href="/">
+          <span class="brand-mark" aria-hidden="true">DS</span>
+          DeepSemantic
+        </a>
         <nav class="topbar-nav" aria-label="Разделы">
           <a class="topbar-link" href="/imports.html">Импорт arXiv</a>
           <a class="topbar-link" href="/workers.html">Воркеры</a>
@@ -29,15 +31,15 @@
           <fieldset class="search-modes">
             <legend>Режим поиска</legend>
             <div class="search-mode-options">
-              <label><input type="radio" name="mode" value="rag"> Поиск по RAG</label>
-              <label><input type="radio" name="mode" value="vector" checked> Векторный поиск по эмбеддингам</label>
+              <label><input type="radio" name="mode" value="rag" checked> Поиск по RAG</label>
+              <label><input type="radio" name="mode" value="vector"> Векторный поиск по эмбеддингам</label>
               <label><input type="radio" name="mode" value="text"> Текстовый поиск</label>
             </div>
           </fieldset>
           <label for="search-query">Запрос</label>
           <div class="search-controls">
-            <input id="search-query" name="query" type="search" required maxlength="1000"
-                   placeholder="Например, как модели запоминают прошлые разговоры">
+            <input id="search-query" name="query" type="search" required
+                   placeholder="Например, что такое фильтрация в этой статье?">
             <button id="search-submit" type="submit">Найти</button>
           </div>
         </form>
