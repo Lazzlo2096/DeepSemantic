@@ -1,5 +1,7 @@
 import { arxivPath, arxivUrl } from "./arxiv.js";
+import MarkdownIt from "./vendor/markdown-it.mjs";
 
+const markdown = new MarkdownIt({ html: false });
 const arxivId = new URLSearchParams(location.search).get("id");
 const status = document.querySelector("#status");
 const list = document.querySelector("#paper-chunks");
@@ -34,7 +36,7 @@ function loadSummary(url, hasText, isHtml) {
     button.disabled = !(hasText || (job && isHtml)) || busy;
     button.textContent = job?.status === "failed" ? "Повторить" : "Суммаризировать";
     if (job?.status === "completed") {
-      result.textContent = job.summary;
+      result.innerHTML = markdown.render(job.summary);
       feedback.textContent = "Готово.";
       button.hidden = true;
       result.hidden = false;
