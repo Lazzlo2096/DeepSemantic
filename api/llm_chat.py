@@ -17,13 +17,15 @@ class ChatSettings:
     model: str
     base_url: str
     api_key: str = field(default="", repr=False)
+    reasoning_effort: str = ""
 
     @classmethod
     def from_env(cls) -> "ChatSettings":
         provider = os.getenv("LLM_PROVIDER", "openrouter").strip().lower()
         if provider == "openrouter":
             return cls(provider, os.getenv("OPENROUTER_MODEL", DEFAULT_OPENROUTER_MODEL),
-                       "https://openrouter.ai/api/v1/", os.getenv("OPENROUTER_API_KEY", "").strip())
+                       "https://openrouter.ai/api/v1/", os.getenv("OPENROUTER_API_KEY", "").strip(),
+                       reasoning_effort=os.getenv("OPENROUTER_REASONING_EFFORT", "").strip())
         if provider == "ollama":
             return cls(provider, os.getenv("OLLAMA_MODEL", "gemma3:4b"),
                        os.getenv("OLLAMA_URL", "http://ollama:11434"))
@@ -39,7 +41,8 @@ class ChatSettings:
         if self.provider == "openrouter":
             if not self.api_key:
                 raise RuntimeError("OPENROUTER_API_KEY is required")
-            payload.update(max_tokens=max_tokens, temperature=0.1, reasoning={"enabled": False})
+            reasoning = {"effort": self.reasoning_effort} if self.reasoning_effort else {"enabled": False}
+            payload.update(max_tokens=max_tokens, temperature=0.1, reasoning=reasoning)
             if schema is not None:
                 payload["response_format"] = {
                     "type": "json_schema", "json_schema": {"name": "rag_answer", "strict": True, "schema": schema},

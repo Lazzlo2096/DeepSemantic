@@ -100,6 +100,8 @@ services:
     environment:
       <<: [*postgres-environment, *rustfs-environment, *llm-environment]
       RUSTFS_ENDPOINT: http://rustfs:9000
+      OPENROUTER_MODEL: "${SUMMARY_OPENROUTER_MODEL:-${OPENROUTER_MODEL:-deepseek/deepseek-v4.1-flash-1017}}"
+      OPENROUTER_REASONING_EFFORT: "${SUMMARY_OPENROUTER_REASONING_EFFORT:-}"
       SUMMARY_CONTEXT_TOKENS: "${SUMMARY_CONTEXT_TOKENS:-49152}"
 
   embeding-service:
