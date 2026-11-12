@@ -164,7 +164,7 @@ async function loadPage(page, moveFocus = false) {
     pageNumber.textContent = `Страница ${page + 1} из ${pageCount}`;
     pagination.hidden = pageCount === 0;
     status.textContent = papers.length
-      ? `Записи ${offset + 1}–${offset + papers.length}`
+      ? `Записи ${offset + 1}–${offset + papers.length} из ${total}`
       : params.has("status") || params.has("date_from") || params.has("date_to") || params.has("has_summary")
         ? "По этим фильтрам статьи не найдены."
         : "В каталоге пока нет статей.";
