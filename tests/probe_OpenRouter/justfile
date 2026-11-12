@@ -1,0 +1,26 @@
+set windows-shell := ["powershell.exe", "-NoProfile", "-Command"]
+
+compose := "docker compose --env-file ../../.env -f compose.yaml"
+
+default:
+    @just --list
+
+# Build the probe image without sending API requests.
+build:
+    {{compose}} build probe
+
+# Validate Compose without printing environment secrets.
+check:
+    {{compose}} config --quiet
+
+# Show the experiment size without sending API requests.
+dry-run:
+    {{compose}} run --build --rm probe --dry-run
+
+# Small paid experiment: 16 chunks, batches 1/8, no concurrency.
+smoke:
+    {{compose}} run --build --rm probe --output /results --chunks 16 --batch-sizes 1 8 --concurrency 1 --repeats 1
+
+# Full paid matrix, or custom probe arguments.
+run *args:
+    {{compose}} run --build --rm probe --output /results {{args}}

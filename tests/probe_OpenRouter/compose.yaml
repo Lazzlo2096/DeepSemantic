@@ -1,0 +1,10 @@
+services:
+  probe:
+    build: .
+    environment:
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      EMBEDDING_OPENROUTER_MODEL: "${EMBEDDING_OPENROUTER_MODEL:-baai/bge-m3}"
+    volumes:
+      - ./results:/results
+      - ./data:/data:ro
+    command: ["--output", "/results"]
