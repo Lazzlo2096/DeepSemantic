@@ -5,6 +5,7 @@ import httpx
 
 
 DEFAULT_OPENROUTER_MODEL = "deepseek/deepseek-v4.1-flash-1017"
+DEFAULT_OPENROUTER_PROVIDER_ORDER = "streamlake,sail-research,together"
 
 
 class ChatResponseError(ValueError):
@@ -18,6 +19,7 @@ class ChatSettings:
     base_url: str
     api_key: str = field(default="", repr=False)
     reasoning_effort: str = ""
+    provider_order: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls, *, openrouter_model_env: str) -> "ChatSettings":
@@ -25,7 +27,12 @@ class ChatSettings:
         if provider == "openrouter":
             return cls(provider, os.getenv(openrouter_model_env, DEFAULT_OPENROUTER_MODEL),
                        "https://openrouter.ai/api/v1/", os.getenv("OPENROUTER_API_KEY", "").strip(),
-                       reasoning_effort=os.getenv("OPENROUTER_REASONING_EFFORT", "").strip())
+                       reasoning_effort=os.getenv("OPENROUTER_REASONING_EFFORT", "").strip(),
+                       provider_order=tuple(
+                           item.strip() for item in os.getenv(
+                               "OPENROUTER_PROVIDER_ORDER", DEFAULT_OPENROUTER_PROVIDER_ORDER,
+                           ).split(",") if item.strip()
+                       ))
         if provider == "ollama":
             return cls(provider, os.getenv("OLLAMA_MODEL", "gemma3:4b"),
                        os.getenv("OLLAMA_URL", "http://ollama:11434"))
@@ -62,8 +69,13 @@ class ChatSettings:
                 payload["response_format"] = {
                     "type": "json_schema", "json_schema": {"name": "rag_answer", "strict": True, "schema": schema},
                 }
+            routing = {}
+            if self.provider_order:
+                routing["order"] = list(self.provider_order)
             if schema is not None or tools:
-                payload["provider"] = {"require_parameters": True}
+                routing["require_parameters"] = True
+            if routing:
+                payload["provider"] = routing
             response = await client.post("chat/completions", json=payload,
                                          headers={"Authorization": f"Bearer {self.api_key}"})
         else:

@@ -13,6 +13,7 @@ x-rustfs-environment: &rustfs-environment
 x-llm-environment: &llm-environment
   LLM_PROVIDER: "${LLM_PROVIDER:-openrouter}"
   OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+  OPENROUTER_PROVIDER_ORDER: "${OPENROUTER_PROVIDER_ORDER-streamlake,sail-research,together}"
   OLLAMA_MODEL: "${OLLAMA_MODEL:-gemma3:4b}"
 
 x-embedding-client-environment: &embedding-client-environment
