@@ -60,6 +60,8 @@ async def experiment(client, args, texts, batch_size, concurrency, repeat, raw):
                 "batch_size": batch_size, "concurrency": concurrency, "repeat": repeat,
                 "batch_index": batch_index, "chunks": len(batch), "status": None,
                 "ok": False, "error": None,
+                "started_utc": datetime.now(timezone.utc).isoformat(),
+                "started_offset_seconds": started - experiment_started,
             }
             try:
                 response = await client.post("embeddings", json={
@@ -71,9 +73,18 @@ async def experiment(client, args, texts, batch_size, concurrency, repeat, raw):
                 })
                 record["status"] = response.status_code
                 if not response.is_success:
-                    # Do not persist response bodies: they may contain input text.
                     record["error"] = f"HTTP {response.status_code}"
                     record["retry_after"] = response.headers.get("retry-after")
+                    record["error_headers"] = {
+                        name: value for name, value in response.headers.items()
+                        if name.startswith("x-ratelimit-") or name in {
+                            "retry-after", "x-request-id", "x-openrouter-request-id", "cf-ray",
+                        }
+                    }
+                    try:
+                        record["response_body"] = response.json()
+                    except ValueError:
+                        record["response_body"] = response.text
                 else:
                     data = response.json()
                     items = sorted(data["data"], key=lambda item: item["index"])
@@ -92,11 +103,12 @@ async def experiment(client, args, texts, batch_size, concurrency, repeat, raw):
             except (httpx.HTTPError, ValueError, KeyError, TypeError, IndexError) as error:
                 record["error"] = type(error).__name__
             record["seconds"] = time.perf_counter() - started
+            record["finished_utc"] = datetime.now(timezone.utc).isoformat()
             records.append(record)
             raw.write(json.dumps(record, ensure_ascii=False) + "\n")
             raw.flush()
 
-    started = time.perf_counter()
+    experiment_started = started = time.perf_counter()
     await asyncio.gather(*(worker() for _ in range(concurrency)))
     elapsed = time.perf_counter() - started
     successful = [record for record in records if record["ok"]]
