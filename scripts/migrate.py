@@ -13,7 +13,6 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = "alpine:3.20"
-CACHES = {"embedding-model-cache", "ollama-model-cache"}
 REQUIRED = {"postgres-data", "qdrant-data", "rustfs-data"}
 
 
@@ -102,7 +101,7 @@ def backup(files, cfg, directory):
     compose(files, "stop", "--timeout", "120", "postgres")
     archived = []
     for key, spec in cfg["volumes"].items():
-        if key == "postgres-data" or key in CACHES or not exists(spec["name"]):
+        if key == "postgres-data" or not exists(spec["name"]):
             continue
         print(f"Archiving {key}", flush=True)
         helper(spec["name"], directory, f"tar czpf /backup/{key}.tar.gz -C /data .")

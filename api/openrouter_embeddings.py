@@ -2,6 +2,9 @@ import logging
 import math
 
 import httpx
+from fastapi import HTTPException
+
+from embedding_schemas import EMBEDDING_OPENROUTER_MODEL, EmbeddingRequest
 
 
 logger = logging.getLogger(__name__)
@@ -49,3 +52,20 @@ def normalize(vector: list[float], dimensions: int) -> list[float]:
     if not math.isfinite(norm) or not norm:
         raise ValueError("Invalid embedding norm")
     return [value / norm for value in vector]
+
+
+class OpenRouterEmbeddings:
+    def __init__(self, client: httpx.AsyncClient, api_key: str):
+        self.client = client
+        self.api_key = api_key
+
+    def check_configured(self):
+        if not self.api_key:
+            raise HTTPException(503, "OPENROUTER_API_KEY is required.")
+
+    async def embed(self, payload: EmbeddingRequest):
+        self.check_configured()
+        result = await embed(self.client, EMBEDDING_OPENROUTER_MODEL, payload.texts)
+        if "error" in result:
+            raise HTTPException(result["status"], result["error"])
+        return result

@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 
-WORKERS = ("arxiv-grabber", "arxiv-text-worker", "embeding-worker", "summary-worker", "embeding-service")
+WORKERS = ("arxiv-grabber", "arxiv-text-worker", "embeding-worker", "summary-worker")
 STARTABLE = {"created", "exited"}
 STOPPABLE = {"running", "restarting", "paused"}
 DOCKER_STATES = STARTABLE | STOPPABLE | {"dead", "removing"}
@@ -34,7 +34,6 @@ class WorkerCommand(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.project = os.environ["DEEPSEMANTIC_COMPOSE_PROJECT"]
-    app.state.external_embedding = os.getenv("EMBEDDING_WORKER_EXTERNAL") == "true"
     app.state.worker_locks = {worker: asyncio.Lock() for worker in WORKERS}
     transport = httpx.AsyncHTTPTransport(uds="/var/run/docker.sock")
     async with httpx.AsyncClient(transport=transport, base_url="http://docker/", timeout=5) as client:
@@ -44,10 +43,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan, openapi_url=None)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1"])
-
-
-def is_external(request: Request, worker: str) -> bool:
-    return worker == "embeding-service" and request.app.state.external_embedding
 
 
 async def docker_client(request: Request) -> httpx.AsyncClient:
@@ -79,14 +74,12 @@ async def containers_by_worker(request: Request) -> dict[str, list[dict]]:
 
     for container in response.json():
         worker = container["Labels"].get("com.docker.compose.service")
-        if worker in groups and not is_external(request, worker):
+        if worker in groups:
             groups[worker].append(container)
     return groups
 
 
 def worker_status(request: Request, worker: str, containers: list[dict]) -> WorkerStatus:
-    if is_external(request, worker):
-        return WorkerStatus(id=worker, state="external")
     if not containers:
         return WorkerStatus(id=worker, state="missing")
 
@@ -116,8 +109,6 @@ async def change_container(client: httpx.AsyncClient, container_id: str, action:
 async def change_worker(request: Request, worker: str, command: WorkerCommand) -> WorkerStatus:
     if worker not in WORKERS:
         raise HTTPException(404, "Воркер не найден.")
-    if is_external(request, worker):
-        raise HTTPException(409, "Воркер запускается вне Docker Compose.")
 
     async with request.app.state.worker_locks[worker]:
         containers = (await containers_by_worker(request))[worker]

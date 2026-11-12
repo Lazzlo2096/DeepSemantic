@@ -12,6 +12,7 @@
 !rag.py
 !rag_history.py
 !llm_chat.py
+!openrouter_embeddings.py
 !worker_control.py
 !storage.py
 !requirements.txt

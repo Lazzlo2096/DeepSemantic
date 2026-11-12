@@ -9,16 +9,5 @@ services:
       - ./fontend/Caddyfile.server:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
 
-  # ollama:
-  #   profiles: [ollama]
-  #
-  # ollama-init:
-  #   profiles: [ollama]
-  #
-  # summary-worker:
-  #   depends_on:
-  #     ollama-init:
-  #       required: false
-
 volumes:
   caddy-data:

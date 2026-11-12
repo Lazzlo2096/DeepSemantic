@@ -10,19 +10,17 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from sqlalchemy import select, text, update
 
 from database import MAX_BIGINT, Chunk, database_session
-from embedding_schemas import EMBEDDING_MODEL_KEY, EMBEDDING_PROVIDER, EmbeddingRequest, Text
+from embedding_schemas import EMBEDDING_MODEL_KEY, EmbeddingRequest, Text
 
 
 router = APIRouter(prefix="/chunks", tags=["chunks"])
-LOCAL_PAPER_COLLECTIONS = {"article": "documents_bge_m3", "summary": "paper_summaries_bge_m3"}
 OPENROUTER_COLLECTION_PREFIXES = {
     "article": "documents_openrouter_",
     "summary": "paper_summaries_openrouter_",
 }
-PAPER_COLLECTIONS = (
-    {kind: f"{prefix}{EMBEDDING_MODEL_KEY}" for kind, prefix in OPENROUTER_COLLECTION_PREFIXES.items()}
-    if EMBEDDING_PROVIDER == "openrouter" else LOCAL_PAPER_COLLECTIONS
-)
+PAPER_COLLECTIONS = {
+    kind: f"{prefix}{EMBEDDING_MODEL_KEY}" for kind, prefix in OPENROUTER_COLLECTION_PREFIXES.items()
+}
 PaperChunkSource = Literal["article", "summary"]
 ChunkId = Annotated[int, Path(ge=1, le=MAX_BIGINT)]
 
@@ -144,7 +142,7 @@ async def query_collection(qdrant: httpx.AsyncClient, collection: str, embedding
 async def find_chunks(request: Request, query: str, limit: int, *, located_only: bool = False) -> list[ChunkSearchResult]:
     require_zero_chunk_overlap()
     state = request.app.state
-    embedding = await state.rpc.embed(EmbeddingRequest(texts=[query]))
+    embedding = await state.embeddings.embed(EmbeddingRequest(texts=[query]))
     collections = tuple(PAPER_COLLECTIONS.values())
     candidate_limit = limit * 3 if located_only else limit
     results = await asyncio.gather(*(
@@ -277,7 +275,7 @@ async def embed_chunk(request: Request, chunk_id: ChunkId):
         payload = EmbeddingRequest(texts=[chunk.text])
     except ValidationError as error:
         raise HTTPException(422, "Stored chunk text does not meet embedding input limits.") from error
-    result = await request.app.state.rpc.embed(payload)
+    result = await request.app.state.embeddings.embed(payload)
     async with database_session(request) as session:
         # Serialize the write with source replacement so it cannot recreate a deleted point.
         if await session.get(Chunk, chunk_id, with_for_update=True) is None:

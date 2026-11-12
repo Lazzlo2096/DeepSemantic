@@ -14,7 +14,7 @@ just run --batch-sizes 8 16 --concurrency 1 2 --repeats 2
 `just --justfile tests/probe_OpenRouter/justfile dry-run`.
 
 Измеряет обычный синхронный `/embeddings` с массивом текстов, не асинхронный Batch API.
-Работает напрямую с OpenRouter, независимо от RabbitMQ и сервисов проекта.
+Работает напрямую с OpenRouter, независимо от сервисов проекта.
 
 Команды из корня репозитория. Ключ и модель берутся из корневого `.env`:
 

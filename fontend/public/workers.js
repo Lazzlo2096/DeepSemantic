@@ -4,7 +4,6 @@ const workerNames = new Map([
   ["arxiv-text-worker", "Извлечение текста arXiv"],
   ["embeding-worker", "Индексация статей"],
   ["summary-worker", "Суммаризация"],
-  ["embeding-service", "Эмбеддинги BGE-M3"],
 ]);
 const statusLabels = new Map([
   ["created", "Готов к запуску"],
@@ -16,7 +15,6 @@ const statusLabels = new Map([
   ["dead", "Ошибка контейнера"],
   ["missing", "Контейнер не создан"],
   ["mixed", "Разные состояния контейнеров"],
-  ["external", "Запускается в Windows"],
 ]);
 
 const template = document.querySelector("#worker-template");

@@ -12,7 +12,6 @@ from sqlalchemy.exc import OperationalError
 from tokenizers import Tokenizer
 
 from chunks import (
-    LOCAL_PAPER_COLLECTIONS,
     OPENROUTER_COLLECTION_PREFIXES,
     PAPER_COLLECTIONS,
     require_zero_chunk_overlap,
@@ -92,7 +91,7 @@ async def replace_source_chunks(state, s3, source, tokenizer: Tokenizer, max_tok
             return 0
 
         existing = (await session.execute(text("""
-            SELECT chunk.id, chunk.text, link.chunk_index, link.source_version
+            SELECT chunk.id, chunk.text, chunk.qdrant_collection, link.chunk_index, link.source_version
             FROM chunks AS chunk JOIN paper_chunks AS link ON link.chunk_id = chunk.id
             WHERE link.arxiv_id = :arxiv_id AND link.source_kind = :source_kind
             ORDER BY link.chunk_index
@@ -116,7 +115,8 @@ async def replace_source_chunks(state, s3, source, tokenizer: Tokenizer, max_tok
             catalog = await state.qdrant.get("/collections")
             catalog.raise_for_status()
             prefix = OPENROUTER_COLLECTION_PREFIXES[source.source_kind]
-            collections = {LOCAL_PAPER_COLLECTIONS[source.source_kind], PAPER_COLLECTIONS[source.source_kind]}
+            collections = {PAPER_COLLECTIONS[source.source_kind]}
+            collections.update(row.qdrant_collection for row in existing if row.qdrant_collection)
             collections.update(
                 entry["name"] for entry in catalog.json()["result"]["collections"]
                 if entry["name"].startswith(prefix)
@@ -156,7 +156,7 @@ async def index_batch(state, batch, collection: str) -> tuple[int, int]:
     chunk_ids = [chunk.id for chunk in batch]
     try:
         payload = EmbeddingRequest(texts=[chunk.text for chunk in batch])
-        result = await state.rpc.embed(payload)
+        result = await state.embeddings.embed(payload)
     except (HTTPException, ValidationError) as error:
         if isinstance(error, HTTPException) and error.status_code != 422:
             raise

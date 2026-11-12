@@ -1,14 +1,11 @@
-import asyncio
 import json
 import os
 from contextlib import AsyncExitStack, asynccontextmanager, closing
 from datetime import date, datetime
 from typing import Annotated, Literal
-from uuid import UUID, uuid4
+from uuid import UUID
 
-import aio_pika
 import httpx
-from aio_pika.exceptions import AMQPException
 from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 from sqlalchemy import text
@@ -16,8 +13,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from chunks import router as chunks_router
 from database import MAX_BIGINT, create_database_engine, database_session
-from embedding_schemas import EMBEDDING_QUEUE, EmbeddingRequest, EmbeddingResponse
+from embedding_schemas import EmbeddingRequest, EmbeddingResponse
 from llm_chat import ChatSettings
+from openrouter_embeddings import OpenRouterEmbeddings
 from paper_summaries import router as paper_summaries_router
 from papers import router as papers_router
 from rag import router as rag_router
@@ -63,64 +61,11 @@ class ArxivImportJob(BaseModel):
         return job_id.hex
 
 
-class EmbeddingRPC:
-    def __init__(self, channel, replies, timeout: float):
-        self.channel = channel
-        self.replies = replies
-        self.timeout = timeout
-        self.pending: dict[str, asyncio.Future] = {}
-
-    async def on_reply(self, message):
-        future = self.pending.get(message.correlation_id)
-        if future is not None and not future.done():
-            future.set_result(message.body)
-
-    async def check_worker(self):
-        try:
-            async with asyncio.timeout(3):
-                # aio-pika caches passive declarations on robust channels.
-                queue = await self.channel.declare_queue(EMBEDDING_QUEUE, durable=True, robust=False)
-        except (AMQPException, OSError, TimeoutError) as error:
-            raise HTTPException(503, "RabbitMQ is unavailable.") from error
-        if not queue.declaration_result.consumer_count:
-            raise HTTPException(503, "No embedding worker is ready.")
-
-    async def embed(self, payload: EmbeddingRequest):
-        await self.check_worker()
-        correlation_id = uuid4().hex
-        future = asyncio.get_running_loop().create_future()
-        self.pending[correlation_id] = future
-        try:
-            async with asyncio.timeout(self.timeout):
-                await self.channel.default_exchange.publish(
-                    aio_pika.Message(
-                        payload.model_dump_json().encode(),
-                        content_type="application/json",
-                        correlation_id=correlation_id,
-                        reply_to=self.replies.name,
-                        expiration=self.timeout,
-                    ),
-                    routing_key=EMBEDDING_QUEUE,
-                )
-                result = json.loads(await future)
-        except TimeoutError as error:
-            raise HTTPException(504, "Embedding worker response timed out.") from error
-        except (AMQPException, OSError) as error:
-            raise HTTPException(503, "RabbitMQ is unavailable.") from error
-        finally:
-            self.pending.pop(correlation_id, None)
-            future.cancel()
-
-        if "error" in result:
-            raise HTTPException(result["status"], result["error"])
-        return result
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    timeout = float(os.getenv("EMBEDDING_RPC_TIMEOUT", "60"))
+    timeout = float(os.getenv("EMBEDDING_TIMEOUT", "60"))
     if not 0 < timeout < float("inf"):
-        raise ValueError("EMBEDDING_RPC_TIMEOUT must be finite and positive")
+        raise ValueError("EMBEDDING_TIMEOUT must be finite and positive")
     async with AsyncExitStack() as stack:
         engine = create_database_engine()
         stack.push_async_callback(engine.dispose)
@@ -135,23 +80,16 @@ async def lifespan(app: FastAPI):
             base_url=chat_settings.base_url,
             timeout=None,
         ))
-        app.state.rag_ollama_options = (
-            {"num_gpu": int(os.getenv("RAG_OLLAMA_GPU_LAYERS", "-1")), "num_predict": -1}
-            if chat_settings.provider == "ollama" else {}
-        )
-        connection = await stack.enter_async_context(
-            await aio_pika.connect_robust(os.environ["AMQP_URL"], timeout=5)
-        )
-        channel = await connection.channel(on_return_raises=True)
-        await channel.declare_queue(EMBEDDING_QUEUE, durable=True)
-        replies = await channel.declare_queue(f"embeddings.reply.{uuid4().hex}", exclusive=True)
-        rpc = EmbeddingRPC(channel, replies, timeout)
-        await replies.consume(rpc.on_reply, no_ack=True)
-        app.state.rpc = rpc
+        api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+        embedding_client = await stack.enter_async_context(httpx.AsyncClient(
+            base_url="https://openrouter.ai/api/v1/", timeout=timeout,
+            headers={"Authorization": f"Bearer {api_key}"},
+        ))
+        app.state.embeddings = OpenRouterEmbeddings(embedding_client, api_key)
         yield
 
 
-app = FastAPI(title="BGE-M3 Embedding Service", lifespan=lifespan)
+app = FastAPI(title="DeepSemantic API", lifespan=lifespan)
 app.include_router(chunks_router)
 app.include_router(paper_summaries_router)
 app.include_router(papers_router)
@@ -165,13 +103,13 @@ async def live():
 
 @app.get("/health")
 async def health(request: Request):
-    await request.app.state.rpc.check_worker()
+    request.app.state.embeddings.check_configured()
     return {"status": "ok"}
 
 
 @app.post("/embeddings", response_model=EmbeddingResponse)
 async def embeddings(payload: EmbeddingRequest, request: Request):
-    return await request.app.state.rpc.embed(payload)
+    return await request.app.state.embeddings.embed(payload)
 
 
 @app.post("/arxiv/imports", response_model=ArxivImportAccepted, status_code=202, tags=["arXiv"])

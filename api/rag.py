@@ -276,7 +276,6 @@ async def collect_sources(request: Request, question: str, run_id: UUID) -> tupl
     for position in count(1):
         assistant = await chat.turn(
             state.chat_client, messages, max_tokens=None, tools=TOOLS,
-            ollama_options=state.rag_ollama_options,
         )
         calls = assistant.get("tool_calls") or []
         if not isinstance(calls, list):
@@ -294,10 +293,7 @@ async def collect_sources(request: Request, question: str, run_id: UUID) -> tupl
                 name = call["function"]["name"]
                 arguments = call["function"]["arguments"]
                 result_message = {"role": "tool"}
-                if chat.provider == "openrouter":
-                    result_message["tool_call_id"] = call["id"]
-                else:
-                    result_message["tool_name"] = name
+                result_message["tool_call_id"] = call["id"]
             except (KeyError, TypeError) as error:
                 raise ChatResponseError("Malformed tool call") from error
             if not isinstance(name, str) or not isinstance(arguments, (str, dict)):
@@ -352,7 +348,7 @@ async def generate_answer(payload: RagQuestion, request: Request, run_id: UUID) 
         assistant = await chat.turn(
             state.chat_client,
             [{"role": "system", "content": ANSWER_INSTRUCTIONS}, {"role": "user", "content": material}],
-            max_tokens=None, ollama_options=state.rag_ollama_options,
+            max_tokens=None,
             schema=GeneratedAnswer.model_json_schema(),
         )
         content = visible_model_content(assistant)
@@ -393,9 +389,7 @@ async def answer_question(payload: RagQuestion, request: Request):
     if not chat.configured:
         raise HTTPException(503, "OPENROUTER_API_KEY is required.")
 
-    reasoning_effort = None
-    if chat.provider == "openrouter":
-        reasoning_effort = chat.reasoning_effort or "disabled"
+    reasoning_effort = chat.reasoning_effort or "disabled"
     run_id = await start_run(
         request, payload.query, payload.run_id,
         model=chat.model, reasoning_effort=reasoning_effort, prompt_version=PROMPT_VERSION,

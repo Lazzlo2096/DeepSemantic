@@ -11,7 +11,6 @@ import psycopg
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from psycopg.rows import dict_row
-from tokenizers import Tokenizer
 
 from llm_chat import ChatResponseError, ChatSettings
 from summary_schema import MARKDOWN_REQUIRED
@@ -23,11 +22,6 @@ HEARTBEAT_SECONDS = 30
 RETRY_DELAY = timedelta(minutes=1)
 POLL_SECONDS = 3
 PROMPT_VERSION = "5"
-MIN_CONTEXT_TOKENS = 2048
-DEFAULT_CONTEXT_TOKENS = 49152
-MAX_CONTEXT_TOKENS = 131072
-CHAT_TEMPLATE_RESERVE = 64
-FINAL_OUTPUT_TOKENS = 3072
 
 FINAL_INSTRUCTIONS = """Ты — научный редактор, который объясняет исследования любознательному программисту.
 
@@ -71,31 +65,14 @@ class Summarizer:
     def __init__(self, client: httpx.AsyncClient, chat: ChatSettings):
         self.client = client
         self.chat = chat
-        self.tokenizer = None
-        if chat.provider == "ollama":
-            self.context_tokens = int(os.getenv("SUMMARY_CONTEXT_TOKENS", str(DEFAULT_CONTEXT_TOKENS)))
-            if not MIN_CONTEXT_TOKENS <= self.context_tokens <= MAX_CONTEXT_TOKENS:
-                raise ValueError(f"SUMMARY_CONTEXT_TOKENS must be between {MIN_CONTEXT_TOKENS} and {MAX_CONTEXT_TOKENS}")
-            self.tokenizer = Tokenizer.from_file("/app/gemma-tokenizer.json")
 
     async def summarize(self, source: str, progress: Callable[[int, int], Awaitable[None]]) -> str:
         prompt = FINAL_INSTRUCTIONS + source
-        ollama_options = {}
-        if self.tokenizer is not None:
-            tokens = self.tokenizer.encode(prompt, add_special_tokens=False)
-            required = len(tokens.ids) + CHAT_TEMPLATE_RESERVE + FINAL_OUTPUT_TOKENS
-            if required > self.context_tokens:
-                raise SummaryInputError(
-                    f"Полный текст с промптом и резервом для ответа требует {required} токенов "
-                    f"при лимите {self.context_tokens}."
-                )
-            ollama_options["num_ctx"] = self.context_tokens
         await progress(0, 1)
-        max_tokens = None if self.chat.provider == "openrouter" else FINAL_OUTPUT_TOKENS
         try:
             summary = await self.chat.complete(
                 self.client, [{"role": "user", "content": prompt}],
-                max_tokens=max_tokens, ollama_options=ollama_options,
+                max_tokens=None,
             )
         except httpx.HTTPStatusError as error:
             message = error.response.text.lower()
@@ -238,7 +215,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     chat = ChatSettings.from_env(openrouter_model_env="SUMMARY_OPENROUTER_MODEL")
     if not chat.configured:
-        raise SystemExit("OPENROUTER_API_KEY is required when LLM_PROVIDER=openrouter")
+        raise SystemExit("OPENROUTER_API_KEY is required")
     s3 = boto3.client(
         "s3", endpoint_url=os.environ["RUSTFS_ENDPOINT"],
         aws_access_key_id=os.environ["RUSTFS_ACCESS_KEY"], aws_secret_access_key=os.environ["RUSTFS_SECRET_KEY"],
