@@ -36,3 +36,11 @@ logs:
 
 ps:
     docker compose --profile workers ps --all
+
+# Ubuntu/server: stop services and save PostgreSQL + persistent volumes.
+backup directory="":
+    python3 scripts/migrate.py backup "{{directory}}"
+
+# Restore only into empty volumes; services remain stopped.
+restore directory:
+    python3 scripts/migrate.py restore "{{directory}}"

@@ -22,7 +22,7 @@ fi
 printf '[bootstrap] Updating APT package lists.\n'
 apt-get update
 printf '[bootstrap] Installing just, Docker Engine, Docker Compose v2 and Buildx.\n'
-DEBIAN_FRONTEND=noninteractive apt-get install -y just docker.io docker-compose-v2 docker-buildx
+DEBIAN_FRONTEND=noninteractive apt-get install -y just docker.io docker-compose-v2 docker-buildx python3
 printf '[bootstrap] Starting Docker and enabling it at boot.\n'
 systemctl enable --now docker.service
 
