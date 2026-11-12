@@ -6,8 +6,8 @@
     <title>Статьи arXiv · DeepSemantic</title>
     <meta name="description" content="Каталог статей arXiv, загруженных в DeepSemantic.">
     <link rel="icon" href="/icon.svg" type="image/svg+xml" sizes="any">
-    <link rel="stylesheet" href="/styles.css?v=4">
-    <script type="module" src="/app.js?v=3"></script>
+    <link rel="stylesheet" href="/styles.css?v=5">
+    <script type="module" src="/app.js?v=4"></script>
   </head>
   <body>
     <header class="topbar">
@@ -47,21 +47,23 @@
       </section>
 
       <section id="catalog" aria-labelledby="results-title">
-        <div class="results-bar">
-          <h2 id="results-title" tabindex="-1">Каталог статей</h2>
-          <p id="status" role="status">Загружаем статьи…</p>
-        </div>
-        <form id="catalog-filters" class="catalog-filters" aria-label="Фильтры каталога">
-          <div class="filter-fields">
-            <label>
+        <div class="results-bar catalog-heading">
+          <div class="catalog-title">
+            <h2 id="results-title" tabindex="-1">Каталог статей</h2>
+            <p id="status" role="status">Загружаем статьи…</p>
+          </div>
+          <label class="catalog-sort">
               Сортировка
-              <select name="sort">
+              <select name="sort" form="catalog-filters">
                 <option value="downloaded_desc">Последние загрузки</option>
                 <option value="submitted_desc">По дате подачи · новые</option>
                 <option value="submitted_asc">По дате подачи · старые</option>
                 <option value="status">По этапу обработки</option>
               </select>
-            </label>
+          </label>
+        </div>
+        <form id="catalog-filters" class="catalog-filters" aria-label="Фильтры каталога">
+          <div class="filter-fields catalog-filter-fields">
             <label>
               Статус
               <select name="status">
@@ -69,27 +71,27 @@
               </select>
             </label>
             <label>
-              Суммаризация
+              Саммари
               <select name="has_summary">
-                <option value="">Все статьи</option>
-                <option value="true">С готовым саммари</option>
-                <option value="false">Без готового саммари</option>
+                <option value="">Все</option>
+                <option value="true">Готово</option>
+                <option value="false">Нет</option>
               </select>
             </label>
-            <label>
-              Дата подачи с (UTC)
-              <input name="date_from" type="date" min="0001-01-01" max="9999-12-31">
-            </label>
-            <label>
-              Дата подачи по (UTC)
-              <input name="date_to" type="date" min="0001-01-01" max="9999-12-31">
-            </label>
+            <fieldset class="filter-date-range">
+              <legend>Дата подачи <span title="Границы периода включены целиком по UTC">UTC</span></legend>
+              <div class="filter-date-inputs">
+                <label><span>От</span><input name="date_from" type="date" min="0001-01-01" max="9999-12-31"></label>
+                <label><span>До</span><input name="date_to" type="date" min="0001-01-01" max="9999-12-31"></label>
+              </div>
+            </fieldset>
           </div>
           <div class="filter-actions">
-            <button type="submit">Применить</button>
-            <button id="clear-filters" type="button">Сбросить</button>
+            <button class="filter-apply" type="submit">Применить</button>
+            <button id="clear-filters" class="filter-reset" type="button" hidden>Сбросить</button>
           </div>
         </form>
+        <div id="active-filters" class="active-filters" role="group" aria-label="Применённые фильтры" hidden></div>
         <button id="retry" type="button" hidden>Повторить загрузку</button>
         <div id="papers" class="paper-list"></div>
         <nav id="pagination" class="pagination" aria-label="Страницы каталога" hidden>

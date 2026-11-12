@@ -21,6 +21,9 @@ const catalogFilters = document.querySelector("#catalog-filters");
 const dateFrom = catalogFilters.elements.namedItem("date_from");
 const dateTo = catalogFilters.elements.namedItem("date_to");
 const statusFilter = catalogFilters.elements.namedItem("status");
+const sortFilter = catalogFilters.elements.namedItem("sort");
+const clearFilters = document.querySelector("#clear-filters");
+const activeFilters = document.querySelector("#active-filters");
 const searchForm = document.querySelector("#search-form");
 const searchMode = searchForm.elements.namedItem("mode");
 const searchQuery = document.querySelector("#search-query");
@@ -217,6 +220,48 @@ function applyFilters() {
   showLocation();
 }
 
+function updateFilterReset() {
+  clearFilters.hidden = ![...new FormData(catalogFilters)].some(([name, value]) =>
+    value && !(name === "sort" && value === "downloaded_desc"));
+}
+
+function renderActiveFilters() {
+  const chips = [];
+  const addChip = (label, names) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.setAttribute("aria-label", `Снять фильтр: ${label}`);
+    const close = document.createElement("span");
+    close.textContent = "×";
+    close.setAttribute("aria-hidden", "true");
+    button.append(close);
+    button.addEventListener("click", () => {
+      const url = new URL(location.href);
+      for (const name of names) url.searchParams.delete(name);
+      url.searchParams.delete("page");
+      updateUrl(url);
+      showLocation(true);
+    });
+    chips.push(button);
+  };
+  const stage = appliedFilters.get("status");
+  if (stage) addChip(`Статус: ${stageLabels.get(stage) ?? stage}`, ["status"]);
+  const summary = appliedFilters.get("has_summary");
+  if (summary) addChip(`Саммари: ${summary === "true" ? "готово" : "нет"}`, ["has_summary"]);
+  const from = appliedFilters.get("date_from");
+  const to = appliedFilters.get("date_to");
+  const formatDate = (date) => dateFormat.format(new Date(`${date}T00:00:00Z`));
+  if (from || to) {
+    const range = from && to ? `${formatDate(from)} — ${formatDate(to)}`
+      : from ? `от ${formatDate(from)}` : `до ${formatDate(to)}`;
+    addChip(`Дата подачи: ${range}`, ["date_from", "date_to"]);
+  }
+  activeFilters.replaceChildren(...chips);
+  activeFilters.hidden = chips.length === 0;
+  updateFilterReset();
+}
+
 function updateSearchInput(mode) {
   searchQuery.placeholder = searchModes[mode].placeholder;
   if (mode === "rag") searchQuery.removeAttribute("maxlength");
@@ -264,6 +309,7 @@ function showLocation(moveFocus = false) {
     if (field.value) appliedFilters.set(name, field.value);
   }
 
+  renderActiveFilters();
   const requestedIndex = Number(params.get("page")) - 1;
   const validPage = requestedIndex >= 0 && Number.isInteger(requestedIndex)
     && Number.isSafeInteger(requestedIndex * PAGE_SIZE);
@@ -692,7 +738,18 @@ function goToPage(page) {
 previous.addEventListener("click", () => goToPage(currentPage - 1));
 next.addEventListener("click", () => goToPage(currentPage + 1));
 retry.addEventListener("click", () => loadPage(requestedPage, true));
-catalogFilters.addEventListener("input", () => dateTo.setCustomValidity(""));
+catalogFilters.addEventListener("input", () => {
+  dateTo.setCustomValidity("");
+  updateFilterReset();
+});
+sortFilter.addEventListener("change", () => {
+  const url = new URL(location.href);
+  if (sortFilter.value === "downloaded_desc") url.searchParams.delete("sort");
+  else url.searchParams.set("sort", sortFilter.value);
+  url.searchParams.delete("page");
+  updateUrl(url);
+  showLocation();
+});
 catalogFilters.addEventListener("submit", (event) => {
   event.preventDefault();
   if (dateFrom.value && dateTo.value && dateFrom.value > dateTo.value) {
@@ -702,7 +759,7 @@ catalogFilters.addEventListener("submit", (event) => {
   }
   applyFilters();
 });
-document.querySelector("#clear-filters").addEventListener("click", () => {
+clearFilters.addEventListener("click", () => {
   catalogFilters.reset();
   dateTo.setCustomValidity("");
   applyFilters();
