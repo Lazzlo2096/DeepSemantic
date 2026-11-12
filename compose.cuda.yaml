@@ -7,5 +7,5 @@ services:
     environment:
       EMBEDDING_DEVICE: "cuda:0"
 
-  ollama:
-    gpus: all
+  # ollama:
+  #   gpus: all

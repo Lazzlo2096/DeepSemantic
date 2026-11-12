@@ -20,8 +20,9 @@ up-gpu:
     docker compose -f compose.yaml -f compose.cuda.yaml up --build --no-start --no-deps {{container_workers}}
 
 up-amd:
-    docker compose -f compose.yaml -f compose.amd.yaml run --rm --no-deps --entrypoint ollama ollama-init list # Выводит список доступных моделей. Just не продолжит если ничего не найдёт
-    docker compose stop ollama embeding-service # Ещё раз останавливаем, на всякий случай, чтобы можно было после just up запустить just-up-amd
+    # docker compose -f compose.yaml -f compose.amd.yaml run --rm --no-deps --entrypoint ollama ollama-init list
+    # docker compose stop ollama
+    docker compose stop embeding-service
     docker compose -f compose.yaml -f compose.amd.yaml up --build --detach
     docker compose -f compose.yaml -f compose.amd.yaml up --build --no-start --no-deps {{workers}}
 

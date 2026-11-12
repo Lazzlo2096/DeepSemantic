@@ -5,13 +5,13 @@ services:
     environment:
       EMBEDDING_WORKER_EXTERNAL: "true"
 
-  ollama:
-    profiles: [container-inference]
-
-  ollama-init:
-    depends_on: !reset {}
-    environment:
-      OLLAMA_HOST: *host-ollama
+  # ollama:
+  #   profiles: [container-inference]
+  #
+  # ollama-init:
+  #   depends_on: !reset {}
+  #   environment:
+  #     OLLAMA_HOST: *host-ollama
 
   api:
     environment:

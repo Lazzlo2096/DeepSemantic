@@ -107,8 +107,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      ollama-init:
-        condition: service_completed_successfully
+      # ollama-init:
+      #   condition: service_completed_successfully
       rustfs:
         condition: service_healthy
     environment:
@@ -138,20 +138,21 @@ services:
     volumes:
       - embedding-model-cache:/var/cache/huggingface
 
-  ollama:
-    extends:
-      file: ./ollama/compose.yaml
-      service: ollama
-
-  ollama-init:
-    extends:
-      file: ./ollama/compose.yaml
-      service: ollama-init
-    environment:
-      LLM_PROVIDER: "${LLM_PROVIDER:-openrouter}"
-    depends_on:
-      ollama:
-        condition: service_healthy
+  # Ollama is temporarily disabled; uncomment to enable local generation.
+  # ollama:
+  #   extends:
+  #     file: ./ollama/compose.yaml
+  #     service: ollama
+  #
+  # ollama-init:
+  #   extends:
+  #     file: ./ollama/compose.yaml
+  #     service: ollama-init
+  #   environment:
+  #     LLM_PROVIDER: "${LLM_PROVIDER:-openrouter}"
+  #   depends_on:
+  #     ollama:
+  #       condition: service_healthy
 
   rebbit:
     image: rabbitmq:4.2-management-alpine
