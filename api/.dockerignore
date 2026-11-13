@@ -11,6 +11,7 @@
 !summary_schema.py
 !rag.py
 !rag_history.py
+!rag_model.py
 !llm_chat.py
 !openrouter_embeddings.py
 !worker_control.py

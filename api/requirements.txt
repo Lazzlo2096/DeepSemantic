@@ -4,3 +4,7 @@ boto3>=1.36,<2
 httpx>=0.28,<1
 psycopg[binary]>=3.2,<4
 SQLAlchemy[asyncio]>=2.0,<3
+langchain==1.5.0
+langgraph==1.2.21
+langchain-openrouter==0.2.9
+openrouter==0.11.46

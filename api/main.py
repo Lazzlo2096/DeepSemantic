@@ -19,6 +19,7 @@ from openrouter_embeddings import OpenRouterEmbeddings
 from paper_summaries import router as paper_summaries_router
 from papers import router as papers_router
 from rag import router as rag_router
+from rag_model import create_rag_model
 from storage import connect_rustfs
 
 
@@ -80,6 +81,7 @@ async def lifespan(app: FastAPI):
             base_url=chat_settings.base_url,
             timeout=None,
         ))
+        app.state.rag_model = create_rag_model(chat_settings, app.state.chat_client) if chat_settings.configured else None
         api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
         embedding_client = await stack.enter_async_context(httpx.AsyncClient(
             base_url="https://openrouter.ai/api/v1/", timeout=timeout,

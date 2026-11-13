@@ -1,5 +1,46 @@
 # DeepSemantic
 
+## RAG на LangChain и LangGraph
+
+`POST /rag/answer` выполняет граф из `api/rag.py`. LangChain использует
+`ChatOpenRouter` для вызовов модели и `StructuredTool` для инструментов поиска
+и чтения. LangGraph управляет состоянием запроса и переходами:
+
+```text
+Начало → research
+research → tools → research                         (есть вызовы инструментов)
+research → answer → Конец                           (поиск завершён, есть источники)
+research → insufficient_evidence → Конец            (поиск завершён, источников нет)
+```
+
+На этапе `research` модель получает `RESEARCH_INSTRUCTIONS`, вопрос и накопленную
+историю поиска. Доступны `search_vectors`, `search_text` и `read_document`.
+Инструменты выполняются последовательно, чтобы сохранялся порядок ID источников
+и шагов в интерфейсе. Векторный поиск обращается к индексам статей и заранее
+созданных суммаризаций в Qdrant; буквальный поиск выполняется в PostgreSQL.
+
+После завершения поиска узел `answer` делает отдельный вызов с
+`ANSWER_INSTRUCTIONS`, исходным вопросом, шагами поиска и собранными источниками.
+Ответ запрашивается через `with_structured_output` в формате JSON Schema;
+API дополнительно проверяет полноту JSON и ссылки на существующие источники.
+Если источников нет, вызов генерации пропускается. Граф ограничен 1000 шагами;
+при достижении лимита запуск завершается ошибкой.
+
+Модель, reasoning и порядок провайдеров задаются прежними переменными
+`RAG_OPENROUTER_MODEL`, `RAG_OPENROUTER_REASONING_EFFORT` и
+`OPENROUTER_PROVIDER_ORDER`. При пустом reasoning отправляется `effort: "none"`.
+История модели и инструментов сохраняется в прежних таблицах; доступны прежние
+ответы API и `GET /rag/runs/{run_id}`. История служит журналом, автоматического
+возобновления графа с сохранённого шага нет. Воркер суммаризации статей работает
+отдельно от RAG.
+
+Проверка без ключей OpenRouter и работающих хранилищ (Python 3.11+):
+
+```sh
+python -m pip install -r api/requirements.txt -r summary-worker/requirements.txt
+python -m unittest discover -s tests -v
+```
+
 ## Развёртывание на Ubuntu
 
 Выполни на сервере от имени `root`.
