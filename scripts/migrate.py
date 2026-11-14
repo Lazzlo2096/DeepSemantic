@@ -79,7 +79,8 @@ def check_config(cfg):
 
 
 def backup(files, cfg, directory):
-    for key in REQUIRED:
+    required = REQUIRED | ({"temporal-postgres-data"} if "temporal" in cfg["services"] else set())
+    for key in required:
         if not exists(cfg["volumes"][key]["name"]):
             raise ValueError(f"Source volume is missing: {key}")
     postgres = compose(files, "ps", "--status", "running", "-q", "postgres",

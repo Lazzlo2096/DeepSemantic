@@ -1,56 +1,24 @@
-import argparse
 import asyncio
 import logging
-import os
 
 import httpx
-from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy import delete, insert, text
-from sqlalchemy.exc import OperationalError
 from tokenizers import Tokenizer
 
 from chunks import (
     OPENROUTER_COLLECTION_PREFIXES,
     PAPER_COLLECTIONS,
-    require_zero_chunk_overlap,
     save_chunk_embedding_references,
     upsert_chunk_embeddings,
 )
 from database import Chunk
 from embedding_schemas import EmbeddingRequest
-from main import app, lifespan
 from paper_chunking import split_document
 
 
 BATCH_SIZE = 8
-POLL_INTERVAL_SECONDS = 15
-INDEX_LOCK = text("SELECT pg_try_advisory_lock(hashtext('deepsemantic.paper-embeddings'))")
-INDEX_UNLOCK = text("SELECT pg_advisory_unlock(hashtext('deepsemantic.paper-embeddings'))")
-PENDING_SOURCES = text("""
-    SELECT source.*
-    FROM paper_chunk_sources AS source
-    WHERE NOT EXISTS (
-        SELECT 1 FROM paper_chunks AS link
-        WHERE link.arxiv_id = source.arxiv_id AND link.source_kind = source.source_kind
-          AND link.chunk_index = 0 AND link.source_version = source.source_version
-          AND link.source_start IS NOT NULL
-    )
-    ORDER BY source.arxiv_id, source.source_kind
-""")
-PENDING_CHUNKS = text("""
-    SELECT chunk.id, chunk.text
-    FROM chunks AS chunk
-    JOIN current_paper_chunks AS link ON link.chunk_id = chunk.id
-    WHERE link.source_kind = :source_kind
-      AND (chunk.qdrant_collection IS DISTINCT FROM :collection OR chunk.qdrant_point_id IS DISTINCT FROM chunk.id)
-      AND chunk.id > :after_id AND chunk.id <= :last_id
-    ORDER BY chunk.id
-    LIMIT :batch_size
-""")
-
-
 def read_article(s3, bucket: str, key: str) -> str:
     with s3.get_object(Bucket=bucket, Key=key)["Body"] as body:
         return body.read().decode("utf-8-sig")
@@ -176,79 +144,6 @@ async def index_batch(state, batch, collection: str) -> tuple[int, int]:
     return len(chunk_ids), 0
 
 
-async def index_pending_chunks(state, s3, tokenizer: Tokenizer, max_tokens: int) -> int:
-    async with state.db_engine.connect() as lock_connection:
-        locked = await lock_connection.scalar(INDEX_LOCK)
-        await lock_connection.commit()
-        if not locked:
-            raise RuntimeError("Paper indexing is already running.")
-        try:
-            async with state.db_sessions.begin() as session:
-                sources = (await session.execute(PENDING_SOURCES)).all()
-            source_errors = 0
-            for source in sources:
-                try:
-                    count = await replace_source_chunks(state, s3, source, tokenizer, max_tokens)
-                except (BotoCoreError, ClientError, OSError, ValueError) as error:
-                    logging.warning("Could not chunk %s for %s: %s", source.source_kind, source.arxiv_id, error)
-                    source_errors += 1
-                    continue
-                if count:
-                    logging.info("Prepared %d %s chunks for %s", count, source.source_kind, source.arxiv_id)
-
-            async with state.db_sessions.begin() as session:
-                last_id = await session.scalar(text("SELECT coalesce(max(id), 0) FROM chunks"))
-
-            saved = failed = 0
-            for source_kind, collection in PAPER_COLLECTIONS.items():
-                after_id = 0
-                while after_id < last_id:
-                    async with state.db_sessions.begin() as session:
-                        batch = (await session.execute(PENDING_CHUNKS, {
-                            "source_kind": source_kind, "collection": collection, "after_id": after_id,
-                            "last_id": last_id, "batch_size": BATCH_SIZE,
-                        })).all()
-                    if not batch:
-                        break
-                    batch_saved, batch_failed = await index_batch(state, batch, collection)
-                    saved += batch_saved
-                    failed += batch_failed
-                    after_id = batch[-1].id
-                    logging.info("Indexed %d chunks, %d failed (through %s chunk %d)", saved, failed, source_kind, after_id)
-
-            logging.info("Finished: %d chunks indexed, %d rejected, %d source errors", saved, failed, source_errors)
-            return int(failed + source_errors > 0)
-        finally:
-            await lock_connection.execute(INDEX_UNLOCK)
-
-
-async def main(watch: bool = False) -> int:
-    require_zero_chunk_overlap()
-    max_tokens = int(os.getenv("EMBEDDING_MAX_TOKENS", "512"))
-    if not 3 <= max_tokens <= 8192:
-        raise ValueError("EMBEDDING_MAX_TOKENS must be between 3 and 8192")
-    tokenizer = Tokenizer.from_file("bge-m3-tokenizer.json")
-    async with lifespan(app):
-        s3 = app.state.rustfs
-        if s3 is None:
-            raise RuntimeError("RUSTFS_ENDPOINT is required for paper indexing.")
-        if not watch:
-            return await index_pending_chunks(app.state, s3, tokenizer, max_tokens)
-        while True:
-            try:
-                await index_pending_chunks(app.state, s3, tokenizer, max_tokens)
-            except (HTTPException, httpx.HTTPError, OperationalError, RuntimeError) as error:
-                logging.warning("Paper indexing will retry in %d seconds: %s", POLL_INTERVAL_SECONDS, error)
-            await asyncio.sleep(POLL_INTERVAL_SECONDS)
-
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Index chunks of arXiv papers.")
-    parser.add_argument("--watch", action="store_true", help="Keep checking for new pending chunks")
-    args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    try:
-        raise SystemExit(asyncio.run(main(args.watch)))
-    except (HTTPException, httpx.HTTPError, OperationalError, RuntimeError) as error:
-        logging.error("Paper indexing stopped: %s", error)
-        raise SystemExit(1) from error
+    from processing.worker import run
+    asyncio.run(run("index"))

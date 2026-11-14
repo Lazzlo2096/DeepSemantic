@@ -29,7 +29,11 @@ JOB_FIELDS = """
     id, arxiv_id, status, parts_completed, parts_total, model,
     prompt_version, summary, last_error, finished_at
 """
-SELECT_JOB = text(f"SELECT {JOB_FIELDS} FROM paper_summaries WHERE arxiv_id = :arxiv_id")
+SELECT_JOB = text(f"""
+    SELECT {JOB_FIELDS} FROM paper_summaries WHERE arxiv_id = :arxiv_id
+      AND source_version = (SELECT jsonb_build_array(bucket, text_object_key)::text
+                            FROM arxiv_papers WHERE arxiv_id = :arxiv_id AND status = 'texted')
+""")
 
 
 @router.get("/{arxiv_id:path}/summary", response_model=SummaryJob | None)
@@ -55,13 +59,17 @@ async def create_paper_summary(request: Request, response: Response, arxiv_id: A
             raise HTTPException(409, MARKDOWN_REQUIRED)
 
         job = (await session.execute(text(f"""
-            INSERT INTO paper_summaries (arxiv_id) VALUES (:arxiv_id)
+            INSERT INTO paper_summaries (arxiv_id, source_version)
+            SELECT arxiv_id, jsonb_build_array(bucket, text_object_key)::text FROM arxiv_papers
+            WHERE arxiv_id = :arxiv_id AND status = 'texted'
             ON CONFLICT (arxiv_id) DO UPDATE
             SET id = EXCLUDED.id, status = 'queued', attempts = 0,
                 available_at = now(), created_at = now(), finished_at = NULL,
                 parts_completed = 0, parts_total = 0, last_error = NULL,
-                model = NULL, prompt_version = NULL
+                model = NULL, prompt_version = NULL, summary = NULL, lease_until = NULL,
+                source_version = EXCLUDED.source_version
             WHERE paper_summaries.status = 'failed'
+               OR paper_summaries.source_version IS DISTINCT FROM EXCLUDED.source_version
             RETURNING {JOB_FIELDS}
         """), params)).mappings().one_or_none()
         if job is None:

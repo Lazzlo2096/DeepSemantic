@@ -1,0 +1,2 @@
+temporalio==1.36.1
+tokenizers==0.22.2

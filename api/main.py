@@ -143,9 +143,7 @@ async def control_arxiv_import(job_id: UUID, action: Literal["pause", "resume"],
     if action == "pause":
         statement = """
             UPDATE arxiv_imports
-            SET status = (CASE WHEN lease_until > now() THEN 'pausing' ELSE 'paused' END)::arxiv_import_status,
-                lease_until = CASE WHEN lease_until > now() THEN lease_until END,
-                claim_id = CASE WHEN lease_until > now() THEN claim_id END
+            SET status = (CASE WHEN status IN ('running', 'pausing') THEN 'pausing' ELSE 'paused' END)::arxiv_import_status
             WHERE id = :id AND status IN ('queued', 'running', 'pausing', 'paused')
             RETURNING status
         """
@@ -153,7 +151,7 @@ async def control_arxiv_import(job_id: UUID, action: Literal["pause", "resume"],
         statement = """
             UPDATE arxiv_imports
             SET status = 'queued', available_at = CASE WHEN status = 'paused' THEN now() ELSE available_at END
-            WHERE id = :id AND status IN ('paused', 'queued')
+            WHERE id = :id AND status IN ('paused', 'pausing', 'queued')
             RETURNING status
         """
     async with database_session(request) as session:

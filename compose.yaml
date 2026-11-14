@@ -19,6 +19,35 @@ x-embedding-client-environment: &embedding-client-environment
   QDRANT_URL: "${QDRANT_URL:-http://qdrant:6333}"
   CHUNK_OVERLAP_PERCENT: "${CHUNK_OVERLAP_PERCENT:-0}"
 
+x-processing-environment: &processing-environment
+  <<: [*embedding-client-environment, *llm-environment, *rustfs-environment]
+  TEMPORAL_ADDRESS: temporal:7233
+  TEMPORAL_NAMESPACE: default
+  RUSTFS_ENDPOINT: http://rustfs:9000
+  RUSTFS_BUCKET: "${RUSTFS_BUCKET:-arxiv-papers}"
+  ARXIV_SOURCE_FORMAT: "${ARXIV_SOURCE_FORMAT:-html}"
+  SUMMARY_OPENROUTER_MODEL: "${SUMMARY_OPENROUTER_MODEL:-${RAG_OPENROUTER_MODEL:-deepseek/deepseek-v4.1-flash-1017}}"
+  SUMMARY_REASONING_EFFORT: "${SUMMARY_OPENROUTER_REASONING_EFFORT:-}"
+  EMBEDDING_MAX_TOKENS: "${EMBEDDING_MAX_TOKENS:-512}"
+
+x-processing-service: &processing-service
+  image: deepsemantic-processing:local
+  build:
+    context: .
+    dockerfile: temporal/Dockerfile
+  restart: unless-stopped
+  stop_grace_period: 45s
+  environment: *processing-environment
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+    temporal:
+      condition: service_healthy
+    rustfs:
+      condition: service_healthy
+    qdrant:
+      condition: service_started
+
 services:
   tg-bot:
     profiles: [tg-bot]
@@ -106,41 +135,73 @@ services:
       start_period: 30s
       retries: 6
 
+  temporal-dispatcher:
+    <<: *processing-service
+    command: ["python", "-m", "processing.dispatcher"]
+
   embeding-worker:
+    <<: *processing-service
     profiles: [workers]
-    build:
-      context: ./api
-      target: embeding-worker
-    command: ["python", "-m", "paper_embeddings", "--watch"]
-    restart: unless-stopped
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-      qdrant:
-        condition: service_started
-      rustfs:
-        condition: service_healthy
-    environment:
-      <<: [*embedding-client-environment, *rustfs-environment]
-      RUSTFS_ENDPOINT: http://rustfs:9000
-      EMBEDDING_MAX_TOKENS: "${EMBEDDING_MAX_TOKENS:-512}"
+    command: ["python", "-m", "processing.worker", "index"]
 
   summary-worker:
+    <<: *processing-service
     profiles: [workers]
-    build:
-      context: .
-      dockerfile: summary-worker/Dockerfile
+    command: ["python", "-m", "processing.worker", "summary"]
+
+  temporal-postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-deepsemantic}"
+      POSTGRES_DB: temporal
+    volumes:
+      - temporal-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U temporal -d temporal"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  temporal:
+    image: temporalio/auto-setup:1.29.1
     restart: unless-stopped
     depends_on:
-      migrate:
-        condition: service_completed_successfully
-      rustfs:
+      temporal-postgres:
         condition: service_healthy
     environment:
-      <<: [*postgres-environment, *rustfs-environment, *llm-environment]
-      RUSTFS_ENDPOINT: http://rustfs:9000
-      SUMMARY_OPENROUTER_MODEL: "${SUMMARY_OPENROUTER_MODEL:-${RAG_OPENROUTER_MODEL:-deepseek/deepseek-v4.1-flash-1017}}"
-      OPENROUTER_REASONING_EFFORT: "${SUMMARY_OPENROUTER_REASONING_EFFORT:-}"
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: "${POSTGRES_PASSWORD:-deepsemantic}"
+      POSTGRES_SEEDS: temporal-postgres
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+      SKIP_ADD_CUSTOM_SEARCH_ATTRIBUTES: "true"
+      DEFAULT_NAMESPACE: default
+      DEFAULT_NAMESPACE_RETENTION: 30d
+      BIND_ON_IP: 0.0.0.0
+      TEMPORAL_ADDRESS: 127.0.0.1:7233
+    ports:
+      - "127.0.0.1:${TEMPORAL_PORT:-7233}:7233"
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "namespace", "describe", "--namespace", "default", "--address", "127.0.0.1:7233"]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 12
+
+  temporal-ui:
+    image: temporalio/ui:2.34.0
+    restart: unless-stopped
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    ports:
+      - "127.0.0.1:${TEMPORAL_UI_PORT:-8088}:8080"
 
   qdrant:
     image: qdrant/qdrant:v1.20.0
@@ -199,34 +260,14 @@ services:
       retries: 12
 
   arxiv-grabber:
+    <<: *processing-service
     profiles: [workers]
-    build: ./arxiv-grabber
-    command: ["--worker"]
-    restart: unless-stopped
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-      rustfs:
-        condition: service_healthy
-    environment:
-      <<: [*postgres-environment, *rustfs-environment]
-      RUSTFS_ENDPOINT: http://rustfs:9000
-      RUSTFS_BUCKET: "${RUSTFS_BUCKET:-arxiv-papers}"
-      ARXIV_SOURCE_FORMAT: "${ARXIV_SOURCE_FORMAT:-html}"
+    command: ["python", "-m", "processing.worker", "import"]
 
   arxiv-text-worker:
+    <<: *processing-service
     profiles: [workers]
-    build: ./arxiv-grabber
-    entrypoint: ["python", "text_worker.py"]
-    restart: unless-stopped
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-      rustfs:
-        condition: service_healthy
-    environment:
-      <<: [*postgres-environment, *rustfs-environment]
-      RUSTFS_ENDPOINT: http://rustfs:9000
+    command: ["python", "-m", "processing.worker", "text"]
 
   loki:
     image: grafana/loki:3.7.0
@@ -288,6 +329,7 @@ volumes:
     name: "${COMPOSE_PROJECT_NAME}_studio-data"
   qdrant-data:
   postgres-data:
+  temporal-postgres-data:
   pgadmin-data:
   rustfs-data:
   loki-data:

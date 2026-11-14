@@ -1,0 +1,89 @@
+# Isolated integration infrastructure. No published ports or application volumes.
+name: deepsemantic-temporal-test
+x-db: &db
+  POSTGRES_DB: deepsemantic_test
+  POSTGRES_USER: test
+  POSTGRES_PASSWORD: test
+x-runtime: &runtime
+  <<: *db
+  TEMPORAL_ADDRESS: temporal:7233
+  RUSTFS_ENDPOINT: http://rustfs:9000
+  RUSTFS_ACCESS_KEY: test-access-key
+  RUSTFS_SECRET_KEY: test-secret-key
+  RUSTFS_BUCKET: papers
+  QDRANT_URL: http://qdrant:6333
+  OPENROUTER_API_KEY: test-key-never-sent
+  SUMMARY_OPENROUTER_MODEL: test-model
+  SUMMARY_REASONING_EFFORT: ""
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment: *db
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U test -d deepsemantic_test"]
+      interval: 1s
+      timeout: 3s
+      retries: 60
+    tmpfs: [/var/lib/postgresql/data]
+  temporal-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: test
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U temporal"]
+      interval: 1s
+      timeout: 3s
+      retries: 60
+    tmpfs: [/var/lib/postgresql/data]
+  temporal:
+    image: temporalio/auto-setup:1.29.1
+    depends_on:
+      temporal-postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: test
+      POSTGRES_SEEDS: temporal-postgres
+      SKIP_ADD_CUSTOM_SEARCH_ATTRIBUTES: "true"
+      BIND_ON_IP: 0.0.0.0
+      TEMPORAL_ADDRESS: 127.0.0.1:7233
+    healthcheck:
+      test: [CMD, temporal, operator, namespace, describe, --namespace, default, --address, "127.0.0.1:7233"]
+      interval: 2s
+      timeout: 5s
+      start_period: 30s
+      retries: 60
+  qdrant:
+    image: qdrant/qdrant:v1.20.0
+  rustfs:
+    image: rustfs/rustfs:1.0.4
+    user: "0:0"
+    command: [/data]
+    environment:
+      RUSTFS_ACCESS_KEY: test-access-key
+      RUSTFS_SECRET_KEY: test-secret-key
+    healthcheck:
+      test: [CMD, curl, -fsS, "http://127.0.0.1:9000/health/ready"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+    tmpfs: [/data]
+  migrate:
+    build: ../../postgres/migrations
+    environment: *db
+    depends_on:
+      postgres:
+        condition: service_healthy
+  tests:
+    image: deepsemantic-processing:local
+    environment:
+      <<: *runtime
+      PYTHONPATH: /workspace/api:/app
+    volumes:
+      - ../..:/workspace:ro
+    working_dir: /workspace
+    command: [python, -m, unittest, discover, -s, tests, -v]

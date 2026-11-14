@@ -1,0 +1,11 @@
+*
+!api/
+!api/*.py
+!api/processing/
+!api/processing/*.py
+!api/requirements.txt
+!arxiv-grabber/
+!arxiv-grabber/*.py
+!arxiv-grabber/requirements.txt
+!temporal/
+!temporal/requirements.txt

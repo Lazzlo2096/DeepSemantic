@@ -46,6 +46,9 @@ logs:
 ps:
     docker compose --profile workers --profile langsmith-studio --profile tg-bot ps --all
 
+temporal-test:
+    python tests/temporal/run.py
+
 # Ubuntu/server: stop services and save PostgreSQL + persistent volumes.
 backup directory="":
     python3 scripts/migrate.py backup "{{directory}}"

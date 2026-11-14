@@ -1,5 +1,13 @@
 # DeepSemantic
 
+## Фоновые процессы на Temporal
+
+Импорт arXiv, извлечение Markdown, суммаризация и индексация выполняются через
+Temporal. Существующие API и страница «Воркеры» сохранены. Dispatcher надёжно
+передаёт запросы из PostgreSQL, а Temporal управляет выполнением и повторами.
+[Запуск, обновление со старых воркеров, повтор заданий и проверки](temporal/README.md).
+[Temporal UI](http://127.0.0.1:8088) доступен после запуска Compose.
+
 ## RAG на LangChain и LangGraph
 
 `POST /rag/answer` выполняет граф из `api/rag.py`. LangChain использует
@@ -37,7 +45,7 @@ API дополнительно проверяет полноту JSON и ссы�
 Проверка без ключей OpenRouter и работающих хранилищ (Python 3.11+):
 
 ```sh
-python -m pip install -r api/requirements.txt -r summary-worker/requirements.txt
+python -m pip install -r api/requirements.txt -r arxiv-grabber/requirements.txt -r temporal/requirements.txt
 python -m unittest discover -s tests -v
 ```
 
@@ -133,7 +141,7 @@ just backup
 
 Команда останавливает приложение и воркеры, создаёт `postgres.dump` через `pg_dump -Fc`,
 затем останавливает PostgreSQL и архивирует остальные существующие volumes: Qdrant,
-RustFS (файлы статей), Grafana, Loki, pgAdmin, Alloy и сертификаты Caddy.
+RustFS (файлы статей), PostgreSQL Temporal, Grafana, Loki, pgAdmin, Alloy и сертификаты Caddy.
 Сервисы остаются остановленными, чтобы данные не изменились после копирования.
 При ошибке они также автоматически не запускаются; неполная копия не имеет `manifest.json`.
 Если перенос откладывается, запусти `just up-server`; перед переносом создай новую копию.
