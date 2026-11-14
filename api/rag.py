@@ -304,6 +304,7 @@ class RagContext:
     request: Request
     run_id: UUID
     model: ChatOpenRouter
+    record_history: bool = True
 
 
 async def research_node(state: RagState, runtime: Runtime[RagContext]) -> dict:
@@ -312,11 +313,12 @@ async def research_node(state: RagState, runtime: Runtime[RagContext]) -> dict:
     check_model_response(assistant, research=True)
     calls = model_tool_calls(assistant)
     position = state["position"] + 1
-    await save_model_turn(context.request, context.run_id, RagModelTurn(
-        position=position, phase="research", content=visible_model_content(assistant),
-        requested_tools=[{"name": call["name"], "arguments": call["args"]} for call in calls],
-        reasoning=visible_reasoning(assistant), reasoning_available=reasoning_available(assistant),
-    ))
+    if context.record_history:
+        await save_model_turn(context.request, context.run_id, RagModelTurn(
+            position=position, phase="research", content=visible_model_content(assistant),
+            requested_tools=[{"name": call["name"], "arguments": call["args"]} for call in calls],
+            reasoning=visible_reasoning(assistant), reasoning_available=reasoning_available(assistant),
+        ))
     return {"messages": [assistant], "position": position}
 
 
@@ -354,10 +356,11 @@ async def tools_node(state: RagState, runtime: Runtime[RagContext]) -> dict:
         except HTTPException as error:
             result = {"error": error.detail}
         finally:
-            await save_tool_call(context.request, context.run_id, RagToolCall(
-                position=len(search_steps) + 1, tool_name=name,
-                arguments=arguments, result=result, duration_ms=round((perf_counter() - started) * 1000),
-            ))
+            if context.record_history:
+                await save_tool_call(context.request, context.run_id, RagToolCall(
+                    position=len(search_steps) + 1, tool_name=name,
+                    arguments=arguments, result=result, duration_ms=round((perf_counter() - started) * 1000),
+                ))
         returned = result.get("matches", [result] if "source_id" in result else [])
         search_steps.append({
             "tool_name": name, "source_ids": [item["source_id"] for item in returned], "error": "error" in result,
@@ -387,10 +390,11 @@ async def answer_node(state: RagState, runtime: Runtime[RagContext]) -> dict:
     assistant = output["raw"]
     check_model_response(assistant)
     content = visible_model_content(assistant)
-    await save_model_turn(context.request, context.run_id, RagModelTurn(
-        position=state["position"] + 1, phase="answer", content=content, requested_tools=[],
-        reasoning=visible_reasoning(assistant), reasoning_available=reasoning_available(assistant),
-    ))
+    if context.record_history:
+        await save_model_turn(context.request, context.run_id, RagModelTurn(
+            position=state["position"] + 1, phase="answer", content=content, requested_tools=[],
+            reasoning=visible_reasoning(assistant), reasoning_available=reasoning_available(assistant),
+        ))
     if content is None:
         raise ChatResponseError("Empty response")
     # Validate the full JSON, including its closing delimiter. LangChain's parser
@@ -414,17 +418,28 @@ def insufficient_evidence_node(state: RagState, runtime: Runtime[RagContext]) ->
     )}
 
 
-def build_rag_graph():
-    graph = StateGraph(RagState, context_schema=RagContext)
-    graph.add_node("research", research_node)
-    graph.add_node("tools", tools_node)
-    graph.add_node("answer", answer_node)
-    graph.add_node("insufficient_evidence", insufficient_evidence_node)
-    graph.add_edge(START, "research")
+RAG_NODES = {
+    "research": research_node,
+    "tools": tools_node,
+    "answer": answer_node,
+    "insufficient_evidence": insufficient_evidence_node,
+}
+
+
+def add_rag_edges(graph: StateGraph, entry: str = START) -> StateGraph:
+    graph.add_edge(entry, "research")
     graph.add_conditional_edges("research", route_research)
     graph.add_edge("tools", "research")
     graph.add_edge("answer", END)
     graph.add_edge("insufficient_evidence", END)
+    return graph
+
+
+def build_rag_graph():
+    graph = StateGraph(RagState, context_schema=RagContext)
+    for name, node in RAG_NODES.items():
+        graph.add_node(name, node)
+    add_rag_edges(graph)
     return graph.compile()
 
 

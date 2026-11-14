@@ -67,6 +67,37 @@ services:
       start_period: 10m
       retries: 3
 
+  langsmith-studio:
+    profiles: [langsmith-studio]
+    build:
+      context: .
+      dockerfile: langsmith-studio/Dockerfile
+    ports:
+      - "127.0.0.1:${LANGSMITH_STUDIO_PORT:-${STUDIO_PORT:-2024}}:2024"
+    environment:
+      <<: [*embedding-client-environment, *llm-environment, *rustfs-environment]
+      RUSTFS_ENDPOINT: http://rustfs:9000
+      RAG_OPENROUTER_MODEL: "${RAG_OPENROUTER_MODEL:-deepseek/deepseek-v4.1-flash-1017}"
+      OPENROUTER_REASONING_EFFORT: "${RAG_OPENROUTER_REASONING_EFFORT:-}"
+      LANGSMITH_TRACING: "false"
+      LANGCHAIN_TRACING_V2: "false"
+      LANGGRAPH_CLI_NO_ANALYTICS: "1"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      qdrant:
+        condition: service_started
+      rustfs:
+        condition: service_healthy
+    volumes:
+      - langsmith-studio-data:/app/langsmith-studio/.langgraph_api
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:2024/ok', timeout=4).close()"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 6
+
   embeding-worker:
     profiles: [workers]
     build:
@@ -244,6 +275,9 @@ networks:
     internal: true
 
 volumes:
+  langsmith-studio-data:
+    # Retain the existing Studio history volume after the service rename.
+    name: "${COMPOSE_PROJECT_NAME}_studio-data"
   qdrant-data:
   postgres-data:
   pgadmin-data:

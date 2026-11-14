@@ -41,6 +41,62 @@ python -m pip install -r api/requirements.txt -r summary-worker/requirements.txt
 python -m unittest discover -s tests -v
 ```
 
+## LangSmith Studio
+
+Запусти локальный Agent Server с графом RAG:
+
+```sh
+just langsmith-studio-up
+# Или без just:
+docker compose --profile langsmith-studio up --build --detach --wait langsmith-studio
+```
+
+Открой [Studio с подключением к DeepSemantic](https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024)
+и выбери граф `rag`. Если браузер запрашивает доступ к локальной сети, разреши
+его для Studio. В Graph mode введи вопрос в поле `question`, например:
+
+```json
+{"question": "Какие методы уменьшают расход памяти при обучении нейросетей?"}
+```
+
+На схеме видны `prepare`, `research`, `tools`, `answer` и
+`insufficient_evidence`. `prepare` начинает новый вопрос с чистой историей поиска.
+Остальные узлы и переходы общие с API. Можно ставить остановки перед узлами,
+изучать сообщения и источники, затем продолжать выполнение.
+
+Agent Server доступен на [localhost:2024](http://127.0.0.1:2024),
+его API описан на [странице docs](http://127.0.0.1:2024/docs).
+Порт задаётся через `LANGSMITH_STUDIO_PORT` в `.env`; при смене порта обнови `baseUrl`
+в ссылке Studio. Схема доступна без ключа OpenRouter. Для выполнения вопросов
+используются существующий `OPENROUTER_API_KEY`, настройки RAG и хранилища проекта.
+
+Studio работает через `langgraph dev` внутри Docker: это сервер для разработки
+и отладки, доступный только на `127.0.0.1`. Лицензионный ключ для этого режима
+не требуется. Трассировка в облачный LangSmith и аналитика CLI отключены.
+История и checkpoints Studio сохраняются локально в volume `langsmith-studio-data`;
+они сохраняются при обычном перезапуске контейнера. Сайт продолжает вести
+свой журнал `/rag/runs`: запуски с сайта и запуски из Studio — отдельные истории.
+Ключи, HTTP-клиенты и соединения с БД не записываются в checkpoints.
+
+Если Docker запущен на удалённом сервере, открой на своём компьютере SSH-туннель:
+
+```sh
+ssh -N -L 2024:127.0.0.1:2024 user@server
+```
+
+Затем используй ту же ссылку Studio с `baseUrl=http://127.0.0.1:2024`.
+
+```sh
+just langsmith-studio-logs  # журнал Agent Server
+just langsmith-studio-down # остановить Studio, сохранив историю
+```
+
+Сервис `langsmith-studio` собирается отдельным `langsmith-studio/Dockerfile`.
+Существующий Docker volume с историей сохраняется под прежним физическим именем.
+Адаптер находится в `langsmith-studio/studio.py`, регистрация графа и CORS — в
+`langsmith-studio/langgraph.json`. Для тестирования адаптера достаточно обычных зависимостей
+API и команды `python -m unittest discover -s tests -v`.
+
 ## Развёртывание на Ubuntu
 
 Выполни на сервере от имени `root`.

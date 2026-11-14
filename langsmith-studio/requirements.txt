@@ -1,0 +1,4 @@
+-r ../api/requirements.txt
+langgraph-cli[inmem]==0.4.43
+langgraph-api==0.18.0
+langgraph-runtime-inmem==0.38.0

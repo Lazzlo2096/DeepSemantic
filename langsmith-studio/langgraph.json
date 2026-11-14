@@ -1,0 +1,17 @@
+{
+  "$schema": "https://langgra.ph/schema.json",
+  "dependencies": ["../api", "."],
+  "graphs": {
+    "rag": "./studio.py:graph"
+  },
+  "http": {
+    "app": "./studio_http.py:app",
+    "middleware_order": "middleware_first",
+    "cors": {
+      "allow_origins": ["https://smith.langchain.com", "http://localhost:2024", "http://127.0.0.1:2024"],
+      "allow_methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      "allow_headers": ["*"],
+      "allow_credentials": true
+    }
+  }
+}

@@ -1,0 +1,9 @@
+*
+!api/
+!api/*.py
+!api/requirements.txt
+!langsmith-studio/
+!langsmith-studio/*.py
+!langsmith-studio/requirements.txt
+!langsmith-studio/langgraph.json
+!langsmith-studio/Dockerfile
