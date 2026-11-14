@@ -18,7 +18,17 @@ restart *compose_args:
     docker compose {{compose_args}} up --build --detach --remove-orphans --no-deps --force-recreate --wait api fontend
 
 down:
-    docker compose --profile workers --profile langsmith-studio down
+    docker compose --profile workers --profile langsmith-studio --profile tg-bot down
+
+# Telegram bot (polling).
+tg-bot-up:
+    docker compose --profile tg-bot up --build --detach tg-bot
+
+tg-bot-down:
+    docker compose --profile tg-bot stop tg-bot
+
+tg-bot-logs:
+    docker compose --profile tg-bot logs --follow tg-bot
 
 # Local Agent Server for LangSmith Studio (https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024).
 langsmith-studio-up:
@@ -31,10 +41,10 @@ langsmith-studio-logs:
     docker compose --profile langsmith-studio logs --follow langsmith-studio
 
 logs:
-    docker compose --profile workers logs --follow
+    docker compose --profile workers --profile tg-bot logs --follow
 
 ps:
-    docker compose --profile workers --profile langsmith-studio ps --all
+    docker compose --profile workers --profile langsmith-studio --profile tg-bot ps --all
 
 # Ubuntu/server: stop services and save PostgreSQL + persistent volumes.
 backup directory="":

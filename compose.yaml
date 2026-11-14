@@ -20,6 +20,14 @@ x-embedding-client-environment: &embedding-client-environment
   CHUNK_OVERLAP_PERCENT: "${CHUNK_OVERLAP_PERCENT:-0}"
 
 services:
+  tg-bot:
+    profiles: [tg-bot]
+    build: ./tg_bot
+    restart: unless-stopped
+    env_file:
+      - path: ./tg_bot/.env
+        required: false
+
   fontend:
     image: caddy:2-alpine
     depends_on:
