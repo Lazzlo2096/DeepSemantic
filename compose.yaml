@@ -14,7 +14,7 @@ x-llm-environment: &llm-environment
 x-embedding-client-environment: &embedding-client-environment
   <<: *postgres-environment
   EMBEDDING_OPENROUTER_MODEL: "${EMBEDDING_OPENROUTER_MODEL:-baai/bge-m3}"
-  OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+  EMBEDDING_BASE_URL: "${EMBEDDING_BASE_URL:-http://deepkaravan:8000/api/v1/}"
   EMBEDDING_TIMEOUT: "${EMBEDDING_TIMEOUT:-60}"
   QDRANT_URL: "${QDRANT_URL:-http://qdrant:6333}"
   CHUNK_OVERLAP_PERCENT: "${CHUNK_OVERLAP_PERCENT:-0}"
@@ -39,6 +39,8 @@ x-processing-service: &processing-service
   stop_grace_period: 45s
   environment: *processing-environment
   depends_on:
+    deepkaravan:
+      condition: service_started
     migrate:
       condition: service_completed_successfully
     temporal:
@@ -49,6 +51,27 @@ x-processing-service: &processing-service
       condition: service_started
 
 services:
+  deepkaravan:
+    build:
+      context: ./DeepKaravan
+      target: cpu
+    env_file:
+      - path: ./DeepKaravan/.env
+        required: false
+    environment:
+      INFERENCE_DEVICE: cpu
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 45s
+    volumes:
+      - deepkaravan-model-cache:/cache/huggingface
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3).close()"]
+      interval: 10s
+      timeout: 5s
+      start_period: 600s
+      retries: 3
+
   tg-bot:
     profiles: [tg-bot]
     build: ./tg_bot
@@ -85,6 +108,8 @@ services:
   api:
     build: ./api
     depends_on:
+      deepkaravan:
+        condition: service_started
       migrate:
         condition: service_completed_successfully
       qdrant:
@@ -120,6 +145,8 @@ services:
       LANGCHAIN_TRACING_V2: "false"
       LANGGRAPH_CLI_NO_ANALYTICS: "1"
     depends_on:
+      deepkaravan:
+        condition: service_started
       migrate:
         condition: service_completed_successfully
       qdrant:
@@ -324,6 +351,7 @@ networks:
     internal: true
 
 volumes:
+  deepkaravan-model-cache:
   langsmith-studio-data:
     # Retain the existing Studio history volume after the service rename.
     name: "${COMPOSE_PROJECT_NAME}_studio-data"

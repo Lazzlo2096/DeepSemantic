@@ -19,16 +19,16 @@ async def embed(client: httpx.AsyncClient, model: str, texts: list[str]) -> dict
         })
         response.raise_for_status()
     except httpx.TimeoutException:
-        return {"status": 504, "error": "OpenRouter embedding request timed out."}
+        return {"status": 504, "error": "DeepKaravan embedding request timed out."}
     except httpx.RequestError as error:
-        logger.warning("OpenRouter embeddings connection failed: %s", type(error).__name__)
-        return {"status": 503, "error": "OpenRouter embeddings are unavailable."}
+        logger.warning("DeepKaravan embeddings connection failed: %s", type(error).__name__)
+        return {"status": 503, "error": "DeepKaravan embeddings are unavailable."}
     except httpx.HTTPStatusError as error:
         status = error.response.status_code
-        logger.warning("OpenRouter embeddings returned HTTP %d", status)
+        logger.warning("DeepKaravan embeddings returned HTTP %d", status)
         if status in (400, 413, 422):
-            return {"status": 422, "error": "OpenRouter rejected the embedding input."}
-        return {"status": 503, "error": "OpenRouter embeddings are unavailable."}
+            return {"status": 422, "error": "DeepKaravan rejected the embedding input."}
+        return {"status": 503, "error": "DeepKaravan embeddings are unavailable."}
 
     try:
         items = sorted(response.json()["data"], key=lambda item: item["index"])
@@ -39,9 +39,10 @@ async def embed(client: httpx.AsyncClient, model: str, texts: list[str]) -> dict
             raise ValueError("Unexpected embedding dimension")
         embeddings = [normalize(item["embedding"], dimensions) for item in items]
     except (IndexError, KeyError, TypeError, ValueError, OverflowError) as error:
-        logger.warning("Invalid OpenRouter embeddings response: %s", type(error).__name__)
-        return {"status": 502, "error": "OpenRouter returned invalid embeddings."}
+        logger.warning("Invalid DeepKaravan embeddings response: %s", type(error).__name__)
+        return {"status": 502, "error": "DeepKaravan returned invalid embeddings."}
 
+    # Preserve the existing storage identity when switching the compatible endpoint.
     return {"model": model, "revision": "openrouter", "dimensions": dimensions, "embeddings": embeddings}
 
 
@@ -55,16 +56,10 @@ def normalize(vector: list[float], dimensions: int) -> list[float]:
 
 
 class OpenRouterEmbeddings:
-    def __init__(self, client: httpx.AsyncClient, api_key: str):
+    def __init__(self, client: httpx.AsyncClient):
         self.client = client
-        self.api_key = api_key
-
-    def check_configured(self):
-        if not self.api_key:
-            raise HTTPException(503, "OPENROUTER_API_KEY is required.")
 
     async def embed(self, payload: EmbeddingRequest):
-        self.check_configured()
         result = await embed(self.client, EMBEDDING_OPENROUTER_MODEL, payload.texts)
         if "error" in result:
             raise HTTPException(result["status"], result["error"])

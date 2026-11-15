@@ -86,12 +86,10 @@ async def lifespan(app: FastAPI):
             timeout=None,
         ))
         app.state.rag_model = create_rag_model(chat_settings, app.state.chat_client) if chat_settings.configured else None
-        api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
         embedding_client = await stack.enter_async_context(httpx.AsyncClient(
-            base_url="https://openrouter.ai/api/v1/", timeout=timeout,
-            headers={"Authorization": f"Bearer {api_key}"},
+            base_url=os.getenv("EMBEDDING_BASE_URL", "http://deepkaravan:8000/api/v1/"), timeout=timeout,
         ))
-        app.state.embeddings = OpenRouterEmbeddings(embedding_client, api_key)
+        app.state.embeddings = OpenRouterEmbeddings(embedding_client)
         yield
 
 
@@ -109,7 +107,6 @@ async def live():
 
 @app.get("/health")
 async def health(request: Request):
-    request.app.state.embeddings.check_configured()
     return {"status": "ok"}
 
 

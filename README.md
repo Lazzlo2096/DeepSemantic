@@ -118,7 +118,9 @@ chmod +x ./bootstrap.sh
 ./bootstrap.sh
 ```
 
-После установки укажи в `.env` ключ `OPENROUTER_API_KEY` и выбери модели `RAG_OPENROUTER_MODEL` и `SUMMARY_OPENROUTER_MODEL`. Для эмбеддингов используется `EMBEDDING_OPENROUTER_MODEL=baai/bge-m3`. API и воркер индексации обращаются к OpenRouter напрямую; таймаут запросов задаёт `EMBEDDING_TIMEOUT` (60 секунд). Запускай и останавливай проект из каталога `DeepSemantic`.
+После установки укажи в `.env` ключ `OPENROUTER_API_KEY` для RAG и суммаризации и выбери модели `RAG_OPENROUTER_MODEL` и `SUMMARY_OPENROUTER_MODEL`. Эмбеддинги `EMBEDDING_OPENROUTER_MODEL=baai/bge-m3` API и воркер индексации получают из локального DeepKaravan без API-ключа. Адрес задаёт `EMBEDDING_BASE_URL` (по умолчанию `http://deepkaravan:8000/api/v1/`), таймаут — `EMBEDDING_TIMEOUT` (60 секунд). Запускай и останавливай проект из каталога `DeepSemantic`.
+
+Перед первым запуском выполни `git submodule update --init --recursive`. Основной Compose собирает DeepKaravan из сабмодуля и запускает на CPU в общей сети без публикации дополнительного порта. Настройки очереди и инференса можно задать в `DeepKaravan/.env`; устройство в основном стеке закреплено как `cpu`. Модель загружается при первом запуске и сохраняется в томе `deepkaravan-model-cache`. DeepKaravan поддерживает только эмбеддинги; RAG и суммаризация продолжают обращаться к OpenRouter. При запуске API вне Docker задай `EMBEDDING_BASE_URL` с доступным адресом DeepKaravan.
 
 ```sh
 just up-server # запустить проект

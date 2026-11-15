@@ -30,23 +30,22 @@ class ApiLifecycleTests(unittest.TestCase):
         }):
             with TestClient(app) as client:
                 self.assertEqual(client.get("/health/live").status_code, 200)
-                self.assertEqual(client.get("/health").status_code, 503)
-                self.assertEqual(client.post("/embeddings", json={"texts": ["hello"]}).status_code, 503)
+                self.assertEqual(client.get("/health").status_code, 200)
+                self.assertEqual(str(app.state.embeddings.client.base_url), "http://deepkaravan:8000/api/v1/")
                 self.assertEqual(client.post("/embeddings", json={"texts": []}).status_code, 422)
 
 
 class OpenRouterTests(unittest.IsolatedAsyncioTestCase):
     def client(self, handler):
         return httpx.AsyncClient(
-            base_url="https://openrouter.ai/api/v1/",
-            headers={"Authorization": "Bearer test-key"},
+            base_url="http://deepkaravan:8000/api/v1/",
             transport=httpx.MockTransport(handler),
         )
 
     async def test_embeddings_preserve_order_and_normalize(self):
         def handler(request):
-            self.assertEqual(str(request.url), "https://openrouter.ai/api/v1/embeddings")
-            self.assertEqual(request.headers["Authorization"], "Bearer test-key")
+            self.assertEqual(str(request.url), "http://deepkaravan:8000/api/v1/embeddings")
+            self.assertNotIn("authorization", request.headers)
             self.assertEqual(json.loads(request.content)["input"], ["first", "second"])
             dimension = 1024 if EMBEDDING_OPENROUTER_MODEL == "baai/bge-m3" else 3
             return httpx.Response(200, json={"data": [
@@ -55,7 +54,7 @@ class OpenRouterTests(unittest.IsolatedAsyncioTestCase):
             ]})
 
         async with self.client(handler) as client:
-            result = await OpenRouterEmbeddings(client, "test-key").embed(
+            result = await OpenRouterEmbeddings(client).embed(
                 EmbeddingRequest(texts=["first", "second"]),
             )
         self.assertEqual(result["revision"], "openrouter")
@@ -73,17 +72,8 @@ class OpenRouterTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(status=status, body=body):
                 async with self.client(lambda _: httpx.Response(status, json=body)) as client:
                     with self.assertRaises(HTTPException) as raised:
-                        await OpenRouterEmbeddings(client, "test-key").embed(EmbeddingRequest(texts=["text"]))
+                        await OpenRouterEmbeddings(client).embed(EmbeddingRequest(texts=["text"]))
                 self.assertEqual(raised.exception.status_code, expected)
-
-    async def test_missing_key_never_calls_provider(self):
-        def handler(_):
-            self.fail("Unconfigured embeddings must not send requests")
-
-        async with self.client(handler) as client:
-            with self.assertRaises(HTTPException) as raised:
-                await OpenRouterEmbeddings(client, "").embed(EmbeddingRequest(texts=["text"]))
-        self.assertEqual(raised.exception.status_code, 503)
 
     async def test_embedding_transport_failures(self):
         for error_type, expected in [(httpx.ReadTimeout, 504), (httpx.ConnectError, 503)]:
@@ -92,7 +82,7 @@ class OpenRouterTests(unittest.IsolatedAsyncioTestCase):
 
             async with self.client(handler) as client:
                 with self.assertRaises(HTTPException) as raised:
-                    await OpenRouterEmbeddings(client, "test-key").embed(EmbeddingRequest(texts=["text"]))
+                    await OpenRouterEmbeddings(client).embed(EmbeddingRequest(texts=["text"]))
             self.assertEqual(raised.exception.status_code, expected)
 
     async def test_chat_tools_and_structured_output(self):

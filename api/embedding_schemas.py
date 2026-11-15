@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, StringConstraints
 
 EMBEDDING_OPENROUTER_MODEL = os.getenv("EMBEDDING_OPENROUTER_MODEL", "baai/bge-m3").strip()
 if not EMBEDDING_OPENROUTER_MODEL:
-    raise ValueError("EMBEDDING_OPENROUTER_MODEL is required for OpenRouter embeddings")
+    raise ValueError("EMBEDDING_OPENROUTER_MODEL is required for DeepKaravan embeddings")
 EMBEDDING_MODEL_KEY = hashlib.sha256(EMBEDDING_OPENROUTER_MODEL.encode()).hexdigest()[:16]
 
 
