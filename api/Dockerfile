@@ -12,6 +12,7 @@ COPY main.py database.py chunks.py papers.py embedding_schemas.py paper_chunking
 
 COPY processing/__init__.py processing/config.py ./processing/
 COPY pipeline.py .
+COPY paper_index_status.py .
 
 FROM base AS worker-control
 COPY worker_control.py .

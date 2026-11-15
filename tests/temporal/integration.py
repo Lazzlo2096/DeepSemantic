@@ -124,6 +124,10 @@ class NativeStateTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(response.status_code, 202, response.text)
                 self.assertEqual(response.json()['status'], 'deferred')
                 self.assertIsNone(await repository.get_summary(arxiv_id))
+                paper_response = await api.get(f'/papers/{arxiv_id}')
+                self.assertEqual(paper_response.status_code, 200, paper_response.text)
+                self.assertEqual(paper_response.json()['article_index']['status'], 'completed')
+                self.assertEqual(paper_response.json()['summary_index']['status'], 'pending')
             summarizer.assert_not_awaited()
             response = await api.put('/pipeline/settings', json={'summary_mode': 'enabled'})
             self.assertEqual(response.status_code, 200, response.text)
@@ -153,16 +157,29 @@ class NativeStateTests(unittest.IsolatedAsyncioTestCase):
             async with repository.connection() as db:
                 chunk = await (await db.execute("""SELECT chunk_id FROM current_paper_chunks
                     WHERE arxiv_id = %s AND source_kind = 'summary' LIMIT 1""", (arxiv_id,))).fetchone()
-                await db.execute('UPDATE chunks SET qdrant_point_id = NULL WHERE id = %s', (chunk['chunk_id'],))
             response = await app.state.qdrant.post(f'/collections/{PAPER_COLLECTIONS["summary"]}/points/delete?wait=true',
                 json={'points': [chunk['chunk_id']]})
             response.raise_for_status()
+            paper_response = await api.get(f'/papers/{arxiv_id}')
+            self.assertEqual(paper_response.json()['article_index']['status'], 'completed')
+            self.assertEqual(paper_response.json()['summary_index']['status'], 'pending')
+            # Only after proving the chip detects a missing point with intact SQL
+            # references, mark the reference missing so reconciliation repairs it.
+            async with repository.connection() as db:
+                await db.execute('UPDATE chunks SET qdrant_point_id = NULL WHERE id = %s', (chunk['chunk_id'],))
             await api.put('/pipeline/settings', json={'summary_mode': 'enabled'})
             await wait_indexed(arxiv_id)
             self.assertEqual(summarizer.await_count, calls_before)
             response = await app.state.qdrant.post(f'/collections/{PAPER_COLLECTIONS["summary"]}/points',
                 json={'ids': [chunk['chunk_id']]})
             self.assertEqual(len(response.json()['result']), 1)
+            paper_response = await api.get(f'/papers/{arxiv_id}')
+            self.assertEqual(paper_response.json()['summary_index']['status'], 'completed')
+            papers_response = await api.get('/papers?limit=100')
+            self.assertEqual(papers_response.status_code, 200, papers_response.text)
+            listed = next(paper for paper in papers_response.json() if paper['arxiv_id'] == arxiv_id)
+            self.assertEqual(listed['article_index']['status'], 'completed')
+            self.assertEqual(listed['summary_index']['status'], 'completed')
             # Repeating enable and scanning an already complete catalog is free.
             await api.put('/pipeline/settings', json={'summary_mode': 'enabled'})
             await asyncio.sleep(1)

@@ -7,10 +7,11 @@ from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Text, cast, column, func, select, table, text, true
 
 from database import MAX_BIGINT, ArxivPaper, PaperStatus, database_session
+from paper_index_status import PaperIndexStatus, paper_index_statuses
 
 
 router = APIRouter(prefix="/papers", tags=["papers"])
@@ -32,6 +33,8 @@ class PaperResponse(BaseModel):
     submitted_at: datetime
     downloaded_at: datetime
     status: PaperStatus
+    article_index: PaperIndexStatus = Field(default_factory=PaperIndexStatus)
+    summary_index: PaperIndexStatus = Field(default_factory=PaperIndexStatus)
 
 
 class PaperListItem(PaperResponse):
@@ -140,7 +143,9 @@ async def list_papers(
     async with database_session(request) as session:
         rows = (await session.execute(statement)).mappings().all()
         response.headers["X-Total-Count"] = str(rows[0]["total_count"])
-        return [row for row in rows if row["arxiv_id"] is not None]
+    papers = [dict(row) for row in rows if row["arxiv_id"] is not None]
+    indexes = await paper_index_statuses(request, [paper["arxiv_id"] for paper in papers])
+    return [{**paper, **indexes[paper["arxiv_id"]]} for paper in papers]
 
 
 @router.get("/{arxiv_id:path}/chunks", response_model=list[PaperChunkResponse])
@@ -164,7 +169,7 @@ async def list_paper_chunks(request: Request, arxiv_id: ArxivId):
 
 @router.get("/{arxiv_id:path}/text", response_class=StreamingResponse)
 async def get_paper_text(request: Request, arxiv_id: ArxivId):
-    paper = await get_paper(request, arxiv_id)
+    paper = await get_paper_record(request, arxiv_id)
     key = paper.text_object_key
     media_type = TEXT_MEDIA_TYPES.get(PurePosixPath(key).suffix.lower()) if key else None
     if media_type is None:
@@ -174,7 +179,7 @@ async def get_paper_text(request: Request, arxiv_id: ArxivId):
 
 @router.get("/{arxiv_id:path}/html", response_class=StreamingResponse)
 async def download_paper_html(request: Request, arxiv_id: ArxivId):
-    paper = await get_paper(request, arxiv_id)
+    paper = await get_paper_record(request, arxiv_id)
     source = PurePosixPath(paper.object_key)
     if source.suffix.lower() != ".html":
         raise HTTPException(404, "Paper HTML not found.")
@@ -183,6 +188,12 @@ async def download_paper_html(request: Request, arxiv_id: ArxivId):
 
 @router.get("/{arxiv_id:path}", response_model=PaperResponse)
 async def get_paper(request: Request, arxiv_id: ArxivId):
+    paper = await get_paper_record(request, arxiv_id)
+    indexes = await paper_index_statuses(request, [arxiv_id])
+    return {**PaperResponse.model_validate(paper).model_dump(), **indexes[arxiv_id]}
+
+
+async def get_paper_record(request, arxiv_id):
     async with database_session(request) as session:
         paper = await session.get(ArxivPaper, arxiv_id)
     if paper is None:

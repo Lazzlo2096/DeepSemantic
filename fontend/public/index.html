@@ -6,8 +6,8 @@
     <title>Статьи arXiv · DeepSemantic</title>
     <meta name="description" content="Каталог статей arXiv, загруженных в DeepSemantic.">
     <link rel="icon" href="/icon.svg" type="image/svg+xml" sizes="any">
-    <link rel="stylesheet" href="/styles.css?v=5">
-    <script type="module" src="/app.js?v=4"></script>
+    <link rel="stylesheet" href="/styles.css?v=6">
+    <script type="module" src="/app.js?v=5"></script>
   </head>
   <body>
     <header class="topbar">
@@ -70,10 +70,10 @@
               </select>
             </label>
             <label>
-              Саммари
+              Текст саммари
               <select name="has_summary">
                 <option value="">Все</option>
-                <option value="true">Готово</option>
+                <option value="true">Создан</option>
                 <option value="false">Нет</option>
               </select>
             </label>
@@ -143,6 +143,7 @@
           <span class="paper-id"></span>
           <time class="paper-date" title="Дата подачи в UTC"></time>
           <span class="paper-stage"></span>
+          <span class="paper-stage paper-index-status"></span>
           <span class="paper-stage paper-summary-status"></span>
         </div>
         <h3>

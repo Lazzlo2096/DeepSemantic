@@ -1,4 +1,5 @@
 import { arxivPath, arxivUrl } from "./arxiv.js";
+import { renderPaperIndexes } from "./paper-index.js?v=1";
 import MarkdownIt from "./vendor/markdown-it.mjs";
 
 const markdown = new MarkdownIt({ html: false });
@@ -191,6 +192,7 @@ async function loadPaper(id) {
     }
 
     const [paper, chunks] = await Promise.all([paperResponse.json(), chunksResponse.json()]);
+    renderPaperIndexes(document, paper);
     const title = paper.title || paper.arxiv_id;
     document.title = `${title} · DeepSemantic`;
     document.querySelector("#paper-title").textContent = title;

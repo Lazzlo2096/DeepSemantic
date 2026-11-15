@@ -1,4 +1,5 @@
 import { arxivUrl } from "./arxiv.js";
+import { renderPaperIndexes } from "./paper-index.js?v=1";
 
 const PAGE_SIZE = 12;
 const stageLabels = new Map([
@@ -106,10 +107,10 @@ function renderPaper(paper) {
   date.textContent = dateFormat.format(new Date(paper.submitted_at));
   stage.dataset.stage = paper.status ?? "";
   stage.textContent = stageLabels.get(paper.status) ?? "Статус неизвестен";
-  const summaryStatus = card.querySelector(".paper-summary-status");
-  const summaryReady = paper.has_summary === true;
-  summaryStatus.dataset.ready = String(summaryReady);
-  summaryStatus.textContent = summaryReady ? "Суммаризация готова" : "Суммаризация не готова";
+  stage.title = paper.status === "texted"
+    ? "Markdown статьи сохранён. Готовность чанков и эмбеддингов показана отдельно."
+    : "HTML скачан. Извлечение текста, чанки и эмбеддинги проверяются отдельно.";
+  renderPaperIndexes(card, paper);
   card.querySelector(".paper-authors").textContent = paper.authors.join(", ");
   card.querySelector(".paper-abstract").textContent = paper.abstract || "Аннотация отсутствует.";
   return card;
@@ -131,7 +132,7 @@ async function loadPage(page, moveFocus = false) {
     const params = new URLSearchParams(appliedFilters);
     params.set("limit", PAGE_SIZE);
     params.set("offset", offset);
-    const response = await fetch(`/api/papers?${params}`, { signal: request.signal });
+    const response = await fetch(`/api/papers?${params}`, { signal: request.signal, cache: "no-store" });
     if (request.signal.aborted) return;
     if (response.status === 422) {
       status.textContent = "Проверь диапазон дат и примени фильтры снова.";
@@ -247,7 +248,7 @@ function renderActiveFilters() {
   const stage = appliedFilters.get("status");
   if (stage) addChip(`Статус: ${stageLabels.get(stage) ?? stage}`, ["status"]);
   const summary = appliedFilters.get("has_summary");
-  if (summary) addChip(`Саммари: ${summary === "true" ? "готово" : "нет"}`, ["has_summary"]);
+  if (summary) addChip(`Текст саммари: ${summary === "true" ? "создан" : "нет"}`, ["has_summary"]);
   const from = appliedFilters.get("date_from");
   const to = appliedFilters.get("date_to");
   const formatDate = (date) => dateFormat.format(new Date(`${date}T00:00:00Z`));
