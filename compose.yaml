@@ -55,14 +55,17 @@ x-processing-service: &processing-service
 services:
   deepkaravan:
     profiles: [deepkaravan]
+    extends:
+      file: compose.deepkaravan.${DEEPKARAVAN_INFERENCE_DEVICE:-cpu}.yaml
+      service: deepkaravan
     build:
       context: ./DeepKaravan
-      target: cpu
+      target: ${DEEPKARAVAN_INFERENCE_DEVICE:-cpu}
     env_file:
       - path: ./DeepKaravan/.env
         required: false
     environment:
-      INFERENCE_DEVICE: cpu
+      INFERENCE_DEVICE: ${DEEPKARAVAN_INFERENCE_DEVICE:-cpu}
     restart: unless-stopped
     init: true
     stop_grace_period: 45s

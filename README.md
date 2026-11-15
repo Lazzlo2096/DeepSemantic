@@ -140,6 +140,30 @@ just down      # остановить проект
 
 При обновлении существующего стека `just up` / `just up-server` удаляет контейнеры сервисов, исключённых из Compose. Данные в старых томах сохраняются. Все очереди Temporal обслуживает один `temporal-orchestrator`, запускаемый автоматически. Отдельные контейнеры `arxiv-grabber`, `arxiv-text-worker`, `embeding-worker` и `summary-worker` удалены; повторная обработка запускается через Temporal. Старые резервные копии восстанавливай на соответствующей им ревизии проекта, затем обновляй код.
 
+## Устройство DeepKaravan: CPU или AMD WSL
+
+Режим локального инференса выбирается в `.env` проекта DeepSemantic:
+
+```dotenv
+EMBEDDING_PROVIDER=deepkaravan
+DEEPKARAVAN_INFERENCE_DEVICE=amd-wsl
+```
+
+Для CPU укажите `DEEPKARAVAN_INFERENCE_DEVICE=cpu`. Основной `compose.yaml`
+автоматически наследует настройки устройства через `extends` из
+`compose.deepkaravan.<устройство>.yaml`. Переменные `COMPOSE_FILE` и
+`COMPOSE_PATH_SEPARATOR` не нужны. Шаблон `.env.example` по умолчанию использует CPU.
+Переменная определяет и стадию сборки образа, и `INFERENCE_DEVICE` внутри
+контейнера; override AMD WSL передаёт `/dev/dxg`, библиотеки `/usr/lib/wsl/lib`
+и выделяет 1 ГБ shared memory. Сохраняется общий том кеша модели.
+
+После изменения выполните `just up` для пересборки и пересоздания контейнера.
+`just up-server` и обычный `docker compose up -d --build` также учитывают
+выбранное устройство. Подключать файл устройства вручную не нужно.
+Для AMD WSL нужны Docker Desktop с WSL2 и подходящий AMD-драйвер;
+подробности — в [DeepKaravan/README.md](DeepKaravan/README.md#windows--docker-desktop--amd-wsl).
+Автоматического переключения AMD → CPU нет.
+
 ## Перенос на другой сервер
 
 На Ubuntu доступны `just backup` и `just restore`. Нужен Python 3, который устанавливает

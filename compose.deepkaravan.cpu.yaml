@@ -1,0 +1,3 @@
+# CPU needs no GPU devices or host libraries.
+services:
+  deepkaravan: {}
