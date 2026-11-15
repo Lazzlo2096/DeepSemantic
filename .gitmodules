@@ -1,0 +1,3 @@
+[submodule "DeepKaravan"]
+	path = DeepKaravan
+	url = https://github.com/Lazzlo2096/DeepKaravan.git
