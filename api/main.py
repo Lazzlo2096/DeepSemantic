@@ -47,6 +47,14 @@ class ArxivImportAccepted(BaseModel):
     id: str
 
 
+class ArxivImportResult(BaseModel):
+    articles_found: int | None = None
+    pdf_available: int = 0
+    pdf_reused: int = 0
+    pdf_failures: int = 0
+    html_unavailable: int = 0
+
+
 class ArxivImportJob(BaseModel):
     id: UUID
     date_from: date
@@ -60,7 +68,7 @@ class ArxivImportJob(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     processed_articles: int | None
-    result: dict[str, int] | None
+    result: ArxivImportResult | None
 
     @field_serializer("id")
     def serialize_id(self, job_id: UUID) -> str:

@@ -9,4 +9,4 @@ RUN python -m pip install --no-cache-dir -r /tmp/api-requirements.txt -r /tmp/te
 COPY api /app/api
 ADD --checksum=sha256:21106b6d7dab2952c1d496fb21d5dc9db75c28ed361a05f5020bbba27810dd08 --chmod=644 https://huggingface.co/BAAI/bge-m3/resolve/5617a9f61b028005a4858fdac845db406aefb181/tokenizer.json /app/bge-m3-tokenizer.json
 USER app
-CMD ["python", "-m", "processing.dispatcher"]
+CMD ["python", "-m", "processing.worker", "all"]

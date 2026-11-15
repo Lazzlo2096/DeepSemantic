@@ -35,7 +35,7 @@ class ComposeProfileTests(unittest.TestCase):
             command += ["-f", str(ROOT / "compose.server.yaml")]
         if extras:
             # Explicit --profile replaces COMPOSE_PROFILES, as in the just recipes.
-            command += ["--profile", provider, "--profile", "workers", "--profile", "langsmith-studio"]
+            command += ["--profile", provider, "--profile", "langsmith-studio"]
         command += ["config", "--format", "json"]
         result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True, check=True)
         return json.loads(result.stdout)
@@ -54,6 +54,14 @@ class ComposeProfileTests(unittest.TestCase):
                 with self.subTest(server=server, extras=extras):
                     config = self.config("openrouter", server=server, extras=extras)
                     self.assertNotIn("deepkaravan", list(config["services"]))
-                    names = ("api", "embeding-worker", "summary-worker", "langsmith-studio") if extras else ("api",)
+                    names = ("api", "temporal-orchestrator", "langsmith-studio") if extras else ("api", "temporal-orchestrator")
                     for name in names:
                         self.assertEqual(config["services"][name]["environment"]["EMBEDDING_PROVIDER"], "openrouter")
+
+    def test_orchestrator_runs_all_queues_without_separate_worker_services(self):
+        for server in (False, True):
+            config = self.config("deepkaravan", server=server, extras=True)
+            self.assertEqual(config["services"]["temporal-orchestrator"]["command"],
+                             ["python", "-m", "processing.worker", "all"])
+            self.assertFalse({"arxiv-grabber", "arxiv-text-worker", "embeding-worker", "summary-worker"}
+                             & config["services"].keys())

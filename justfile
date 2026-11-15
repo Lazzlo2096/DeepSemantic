@@ -1,26 +1,27 @@
 set windows-shell := ["powershell.exe", "-NoProfile", "-Command"]
 set dotenv-load := true
 
-workers := "arxiv-grabber arxiv-text-worker embeding-worker summary-worker"
 embedding_provider := env_var_or_default("EMBEDDING_PROVIDER", "deepkaravan")
 
 default:
     @just --list
 
 build:
-    docker compose --profile {{embedding_provider}} --profile workers build
+    docker compose --profile {{embedding_provider}} build
 
 up *compose_args:
     docker compose --profile {{embedding_provider}} {{compose_args}} up --build --detach --remove-orphans
-    docker compose {{compose_args}} up --build --no-start --no-deps {{workers}}
 
 up-server: (up "-f" "compose.yaml" "-f" "compose.server.yaml")
 
 restart *compose_args:
     docker compose --profile {{embedding_provider}} {{compose_args}} up --build --detach --remove-orphans --no-deps --force-recreate --wait api fontend
 
+stop:
+    docker compose --profile langsmith-studio --profile tg-bot --profile deepkaravan stop
+
 down:
-    docker compose --profile workers --profile langsmith-studio --profile tg-bot --profile deepkaravan down
+    docker compose --profile langsmith-studio --profile tg-bot --profile deepkaravan down
 
 # Telegram bot (polling).
 tg-bot-up:
@@ -43,10 +44,10 @@ langsmith-studio-logs:
     docker compose --profile langsmith-studio logs --follow langsmith-studio
 
 logs:
-    docker compose --profile workers --profile tg-bot --profile deepkaravan logs --follow
+    docker compose --profile tg-bot --profile deepkaravan logs --follow
 
 ps:
-    docker compose --profile workers --profile langsmith-studio --profile tg-bot --profile deepkaravan ps --all
+    docker compose --profile langsmith-studio --profile tg-bot --profile deepkaravan ps --all
 
 temporal-test:
     python tests/temporal/run.py

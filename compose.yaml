@@ -37,7 +37,7 @@ x-processing-service: &processing-service
     context: .
     dockerfile: temporal/Dockerfile
   restart: unless-stopped
-  stop_grace_period: 45s
+  stop_grace_period: 180s
   environment: *processing-environment
   depends_on:
     deepkaravan:
@@ -169,17 +169,7 @@ services:
 
   temporal-orchestrator:
     <<: *processing-service
-    command: ["python", "-m", "processing.worker", "pipeline"]
-
-  embeding-worker:
-    <<: *processing-service
-    profiles: [workers]
-    command: ["python", "-m", "processing.worker", "index"]
-
-  summary-worker:
-    <<: *processing-service
-    profiles: [workers]
-    command: ["python", "-m", "processing.worker", "summary"]
+    command: ["python", "-m", "processing.worker", "all"]
 
   temporal-postgres:
     image: postgres:17-alpine
@@ -290,16 +280,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 12
-
-  arxiv-grabber:
-    <<: *processing-service
-    profiles: [workers]
-    command: ["python", "-m", "processing.worker", "import"]
-
-  arxiv-text-worker:
-    <<: *processing-service
-    profiles: [workers]
-    command: ["python", "-m", "processing.worker", "text"]
 
   loki:
     image: grafana/loki:3.7.0

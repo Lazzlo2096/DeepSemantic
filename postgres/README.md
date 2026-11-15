@@ -68,7 +68,7 @@ SELECT arxiv_catalog_result(DATE '2026-11-02', DATE '2026-11-03', 'arxiv-papers'
 - `GET /chunks/{chunk_id}/embedding` возвращает сохранённый в Qdrant эмбеддинг как JSON-массив. Если чанк или его точка отсутствует, API возвращает `404`.
 - `POST /chunks/{chunk_id}/embedding` строит эмбеддинг и записывает его в коллекцию источника для выбранного провайдера и модели с ID чанка в качестве ID точки. После подтверждения записи в Qdrant сервис заполняет `qdrant_collection` и `qdrant_point_id` в PostgreSQL и возвращает вектор как JSON-массив. Повторный запрос с той же моделью обновляет ту же точку. Для отсутствующего чанка возвращается `404`, при превышении лимитов модели — `422`.
 
-После включения на странице «Воркеры» сервис `embeding-worker` получает задания
+Обработчик индексации внутри `temporal-orchestrator` получает задания
 индексации из Temporal. Код подготовки чанков и записи эмбеддингов находится
 в `api/processing/paper_embeddings.py`. Источниками служат извлечённый текст статьи
 из RustFS и актуальная суммаризация из PostgreSQL. Эмбеддинги текста статьи и
@@ -76,15 +76,15 @@ SELECT arxiv_catalog_result(DATE '2026-11-02', DATE '2026-11-03', 'arxiv-papers'
 эмбеддинги суммаризаций — в `paper_summaries_openrouter_<ключ модели>`.
 Поиск по смыслу запрашивает обе коллекции.
 
-Воркер также можно включить из корня проекта:
+Оркестратор автоматически запускается через `just up`. Отдельный запуск:
 
 ```sh
-docker compose up -d embeding-worker
+docker compose up -d temporal-orchestrator
 ```
 
 Temporal выполняет индексацию пакетами по восемь чанков и сохраняет прогресс.
 После подтверждения записи в Qdrant ссылки сохраняются в PostgreSQL. Ошибки и
-попытки видны в Temporal UI и `docker compose logs -f embeding-worker`.
+попытки видны в Temporal UI и `docker compose logs -f temporal-orchestrator`.
 [Повтор заданий и восстановление индекса](../temporal/README.md#повтор-и-восстановление-индекса).
 
 

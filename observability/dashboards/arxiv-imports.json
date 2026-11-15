@@ -53,7 +53,7 @@
                       "spec": {
                         "direction": "backward",
                         "editorMode": "code",
-                        "expr": "{service_name=~\"arxiv-grabber|api\"}\n| json\n| event=\"arxiv_import.insert\"\n| import_id != \"\"",
+                        "expr": "{service_name=~\"temporal-orchestrator|arxiv-grabber|api\"}\n| json\n| event=\"arxiv_import.insert\"\n| import_id != \"\"",
                         "queryType": "range"
                       }
                     },
@@ -127,7 +127,7 @@
                       "spec": {
                         "direction": "backward",
                         "editorMode": "code",
-                        "expr": "{service_name=~\"arxiv-grabber|arxiv-text-worker|api|embeding-worker\"}\n| json\n| import_id != \"\"\n| import_id=\"${latest_import_id:raw}\"",
+                        "expr": "{service_name=~\"temporal-orchestrator|arxiv-grabber|arxiv-text-worker|api|embeding-worker\"}\n| json\n| import_id != \"\"\n| import_id=\"${latest_import_id:raw}\"",
                         "queryType": "range"
                       }
                     },
@@ -200,7 +200,7 @@
                       "spec": {
                         "direction": "backward",
                         "editorMode": "code",
-                        "expr": "{service_name=~\"arxiv-grabber|arxiv-text-worker\"}\n|= `\"arxiv_papers\"`\n| json event=\"event\", arxiv_id=\"arxiv_id\", old_status=\"changes.status.old\", new_status=\"changes.status.new\"\n| event=~\"arxiv_papers[.](insert|update)\"\n| new_status=~\"downloaded|texting|texted\"",
+                        "expr": "{service_name=~\"temporal-orchestrator|arxiv-grabber|arxiv-text-worker\"}\n|= `\"arxiv_papers\"`\n| json event=\"event\", arxiv_id=\"arxiv_id\", old_status=\"changes.status.old\", new_status=\"changes.status.new\"\n| event=~\"arxiv_papers[.](insert|update)\"\n| new_status=~\"downloaded|texting|texted\"",
                         "queryType": "range"
                       }
                     },
@@ -267,7 +267,7 @@
                       "spec": {
                         "direction": "backward",
                         "editorMode": "code",
-                        "expr": "{service_name=\"summary-worker\"}",
+                        "expr": "{service_name=~\"temporal-orchestrator|summary-worker\"}",
                         "queryType": "range"
                       }
                     },
@@ -435,7 +435,7 @@
                   "params": [
                     {
                       "key": "query",
-                      "value": "{service_name=~\"arxiv-grabber|api\"} | json event=\"event\", import_id=\"import_id\" | event=\"arxiv_import.insert\" | import_id != \"\" | line_format \"{{.import_id}}\""
+                      "value": "{service_name=~\"temporal-orchestrator|arxiv-grabber|api\"} | json event=\"event\", import_id=\"import_id\" | event=\"arxiv_import.insert\" | import_id != \"\" | line_format \"{{.import_id}}\""
                     },
                     {
                       "key": "direction",

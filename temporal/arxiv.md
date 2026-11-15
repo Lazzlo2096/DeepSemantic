@@ -2,9 +2,9 @@
 
 ## Запуск через API
 
-Из корня проекта запустите `just up`, затем включите скачивание, извлечение текста и суммаризацию на странице «Воркеры». Чтобы обновить миграции и API и сразу запустить воркер, выполните `docker compose up -d --build migrate api arxiv-grabber arxiv-text-worker summary-worker`.
+Из корня проекта запустите `just up`: скачивание, извлечение Markdown, суммаризация и индексация автоматически запускаются внутри `temporal-orchestrator`. Веткой саммари управляйте на странице «Воркеры» или через `PUT /pipeline/settings`. Для обновления миграций, API и обработки выполните `docker compose up -d --build migrate api temporal-orchestrator`.
 
-Перед применением миграций `0019_drop_arxiv_import_result` или `0027_arxiv_import_attempts` дождитесь окончания текущего импорта и выполните `docker compose stop api arxiv-grabber`. Затем запустите миграции и новые версии сервисов командой выше.
+Перед применением миграций `0019_drop_arxiv_import_result` или `0027_arxiv_import_attempts` дождитесь окончания текущего импорта и выполните `docker compose stop api temporal-orchestrator`. Затем запустите миграции и новые версии сервисов командой выше.
 
 ```powershell
 $body = @{

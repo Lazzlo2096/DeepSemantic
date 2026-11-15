@@ -2,7 +2,7 @@
 
 `just up` запускает Grafana Alloy, Loki и Grafana. Для уже запущенного стека можно отдельно выполнить `docker compose up -d loki alloy grafana`.
 
-Alloy читает логи `arxiv-grabber`, `arxiv-text-worker`, `embeding-worker`, `api` и `summary-worker` из текущего проекта Docker Compose. Loki хранит их семь дней в томе `loki-data`. Alloy сохраняет позиции чтения в томе `alloy-data`, а настройки Grafana хранятся в томе `grafana-data`.
+Все обработчики теперь работают в одном контейнере `temporal-orchestrator`. Alloy читает его логи и сохраняет совместимость с историческими логами `arxiv-grabber`, `arxiv-text-worker`, `embeding-worker`, `api` и `summary-worker` из текущего проекта Docker Compose. Loki хранит их семь дней в томе `loki-data`. Alloy сохраняет позиции чтения в томе `alloy-data`, а настройки Grafana хранятся в томе `grafana-data`.
 
 Дашборд [«Импорт статей arXiv»](http://127.0.0.1:3000/d/ad792cc) загружается из `observability/dashboards/arxiv-imports.json` при запуске Grafana, в том числе с пустым томом `grafana-data`. Переменная `latest_import_id` через источник `Loki HTTP` выбирает последнее событие `arxiv_import.insert` в диапазоне дашборда. Для изменения дашборда правь JSON в репозитории.
 
@@ -11,13 +11,13 @@ Alloy читает логи `arxiv-grabber`, `arxiv-text-worker`, `embeding-work
 Запрос LogQL для общего потока:
 
 ```logql
-{service_name=~"arxiv-grabber|arxiv-text-worker|embeding-worker|api|summary-worker"}
+{service_name=~"temporal-orchestrator|arxiv-grabber|arxiv-text-worker|embeding-worker|api|summary-worker"}
 ```
 
 Переходы статуса статьи можно найти по полям JSON:
 
 ```logql
-{service_name=~"arxiv-grabber|arxiv-text-worker"}
+{service_name=~"temporal-orchestrator|arxiv-grabber|arxiv-text-worker"}
 | json
 | event=~"arxiv_papers[.](insert|update)"
 | table="arxiv_papers"
@@ -28,12 +28,12 @@ Alloy читает логи `arxiv-grabber`, `arxiv-text-worker`, `embeding-work
 
 Панель **«Статусы статей arXiv»** на дашборде **«Импорт статей arXiv»** показывает имя сервиса и полную JSON-строку события для всех статей за выбранный период.
 
-Панель **«Логи summary-worker»** показывает строки лога суммаризации за выбранный период. Запрос для Explore — `{service_name="summary-worker"}`.
+Панель **«Логи summary-worker»** показывает строки лога суммаризации за выбранный период. Запрос для Explore — `{service_name=~"temporal-orchestrator|summary-worker"}`.
 
 Чтобы увидеть вставки и обновления `arxiv_imports`, в **Explore → Loki** переключи редактор на **Code**, выбери диапазон времени и нажми **Run query** после ввода запроса.
 
 ```logql
-{service_name=~"arxiv-grabber|api"}
+{service_name=~"temporal-orchestrator|arxiv-grabber|api"}
 |= `"arxiv_imports"`
 | json
 | table="arxiv_imports"
@@ -44,7 +44,7 @@ Alloy читает логи `arxiv-grabber`, `arxiv-text-worker`, `embeding-work
 Для задания импорта используй его ID из ответа `POST /arxiv/imports`. Чтобы отфильтровать запрос выше, добавь `| import_id="…"`. Чтобы увидеть и другие события задания, выполни такой запрос:
 
 ```logql
-{service_name=~"arxiv-grabber|arxiv-text-worker|api"}
+{service_name=~"temporal-orchestrator|arxiv-grabber|arxiv-text-worker|api"}
 | json
 | import_id="4411913797a7461a864a0581086d4765"
 ```

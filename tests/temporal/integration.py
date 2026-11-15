@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import httpx
-from temporalio.worker import Worker
 from tokenizers import Tokenizer
 
 from main import app, lifespan
@@ -15,7 +14,7 @@ import paper_repository as repository
 from processing.activities import Activities
 from processing.arxiv import Article
 from processing.config import temporal_client
-from processing.worker import worker_bindings
+from processing.worker import processing_workers
 from embedding_schemas import EMBEDDING_OPENROUTER_MODEL
 from chunks import PAPER_COLLECTIONS
 from processing.config import paper_workflow_id, pipeline_settings
@@ -62,9 +61,7 @@ class NativeStateTests(unittest.IsolatedAsyncioTestCase):
             identity = 'import:' + response.json()['id']
             await self.client.get_workflow_handle(identity).signal('set_paused', True)
             activities = Activities(app.state, Tokenizer.from_file('/app/bge-m3-tokenizer.json'), 512, self.client)
-            for kind in ['pipeline', 'import', 'text', 'summary', 'index']:
-                await self.stack.enter_async_context(Worker(self.client, **worker_bindings(activities, kind),
-                    graceful_shutdown_timeout=timedelta(seconds=1)))
+            await self.stack.enter_async_context(processing_workers(self.client, activities, shutdown_seconds=1))
             await asyncio.sleep(.5)
             handle = self.client.get_workflow_handle(identity)
             self.assertTrue((await handle.query('progress'))['paused'])
@@ -97,9 +94,7 @@ class NativeStateTests(unittest.IsolatedAsyncioTestCase):
                         'embeddings': [[1., 0., 0.] for _ in payload.texts]}
         app.state.embeddings = Embeddings()
         activities = Activities(app.state, Tokenizer.from_file('/app/bge-m3-tokenizer.json'), 512, self.client)
-        for kind in ['pipeline', 'import', 'text', 'summary', 'index']:
-            await self.stack.enter_async_context(Worker(self.client, **worker_bindings(activities, kind),
-                graceful_shutdown_timeout=timedelta(seconds=1)))
+        await self.stack.enter_async_context(processing_workers(self.client, activities, shutdown_seconds=1))
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as api:
             response = await api.put('/pipeline/settings', json={'summary_mode': 'deferred'})
             self.assertEqual(response.status_code, 200, response.text)

@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import timedelta
 import logging
 import os
@@ -27,10 +28,25 @@ def worker_bindings(activities, kind):
             "workflows": PIPELINE_WORKFLOWS if kind == 'pipeline' else [], "activities": methods[kind]}
 
 
-async def run(kind):
+@asynccontextmanager
+async def processing_workers(client, activities, kind="all", *, concurrency=1, shutdown_seconds=30):
+    kinds = ["pipeline", *QUEUES] if kind == "all" else [kind]
+    async with AsyncExitStack() as stack:
+        for queue_kind in kinds:
+            bindings = worker_bindings(activities, queue_kind)
+            await stack.enter_async_context(Worker(
+                client, **bindings,
+                max_concurrent_activities=1 if queue_kind == "import" else concurrency,
+                graceful_shutdown_timeout=timedelta(seconds=shutdown_seconds),
+            ))
+            logging.info("Temporal worker ready: %s", bindings["task_queue"])
+        yield
+
+
+async def run(kind="all"):
     max_tokens = int(os.getenv("EMBEDDING_MAX_TOKENS", "512"))
     tokenizer = None
-    if kind == "index":
+    if kind in ("index", "all"):
         require_zero_chunk_overlap()
         if not 3 <= max_tokens <= 8192:
             raise ValueError("EMBEDDING_MAX_TOKENS must be between 3 and 8192")
@@ -45,18 +61,13 @@ async def run(kind):
             pass
     async with lifespan(app):
         activities = Activities(app.state, tokenizer, max_tokens, client)
-        bindings = worker_bindings(activities, kind)
-        async with Worker(
-            client, **bindings,
-            max_concurrent_activities=int(os.getenv("TEMPORAL_ACTIVITY_CONCURRENCY", "1")),
-            graceful_shutdown_timeout=timedelta(seconds=30),
-        ):
-            logging.info("Temporal worker ready: %s", bindings["task_queue"])
+        async with processing_workers(client, activities, kind,
+                concurrency=int(os.getenv("TEMPORAL_ACTIVITY_CONCURRENCY", "1"))):
             await stopped.wait()
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser()
-    parser.add_argument("kind", choices=[*QUEUES, "pipeline"])
+    parser.add_argument("kind", nargs="?", default="all", choices=[*QUEUES, "pipeline", "all"])
     asyncio.run(run(parser.parse_args().kind))
