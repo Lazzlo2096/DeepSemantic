@@ -7,8 +7,9 @@ from sqlalchemy import text
 
 from database import ArxivPaper, PaperSummaryStatus, database_session
 from papers import ArxivId
-from summary_schema import MARKDOWN_REQUIRED
 
+
+MARKDOWN_REQUIRED = "Для суммаризации нужен полный текст в Markdown. Импортируйте статью в режиме HTML."
 
 router = APIRouter(prefix="/papers", tags=["papers"])
 
