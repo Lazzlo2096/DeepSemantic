@@ -20,7 +20,7 @@ from processing.db import connect_database
 from chunks import PAPER_COLLECTIONS
 from embedding_schemas import EMBEDDING_OPENROUTER_MODEL
 from llm_chat import ChatSettings
-from paper_embeddings import BATCH_SIZE, index_batch, replace_source_chunks
+from processing.paper_embeddings import BATCH_SIZE, index_batch, replace_source_chunks
 from processing.config import CHUNKER_VERSION, SUMMARY_PROMPT_VERSION
 from processing.db import connection
 from processing.summarizer import Summarizer, SummaryInputError
