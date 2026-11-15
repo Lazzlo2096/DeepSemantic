@@ -1,9 +1,10 @@
+import asyncio
 import json
 import os
 from contextlib import AsyncExitStack, asynccontextmanager, closing
 from datetime import date, datetime
 from typing import Annotated, Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -21,11 +22,14 @@ from papers import router as papers_router
 from rag import router as rag_router
 from rag_model import create_rag_model
 from storage import connect_rustfs
+from processing.config import pipeline_settings
+import temporal_runtime
 
 
 class ArxivImportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    request_id: UUID | None = None
     date_from: date
     date_to: date
     bucket: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
@@ -48,10 +52,10 @@ class ArxivImportJob(BaseModel):
     date_to: date
     bucket: str
     query: str
-    status: Literal["queued", "running", "pausing", "paused", "completed", "failed"]
+    status: Literal["queued", "running", "pausing", "paused", "completed", "failed", "unknown"]
     attempts: int
     created_at: datetime
-    available_at: datetime
+    available_at: datetime | None = None
     started_at: datetime | None
     finished_at: datetime | None
     processed_articles: int | None
@@ -114,77 +118,66 @@ async def embeddings(payload: EmbeddingRequest, request: Request):
     return await request.app.state.embeddings.embed(payload)
 
 
+def import_payload(row):
+    return {"id": str(row["id"]), "date_from": str(row["date_from"]), "date_to": str(row["date_to"]),
+            "bucket": row["bucket"], "query": row["query"], "source_format": os.getenv("ARXIV_SOURCE_FORMAT", "html"),
+            "settings": pipeline_settings()}
+
+
 @app.post("/arxiv/imports", response_model=ArxivImportAccepted, status_code=202, tags=["arXiv"])
 async def enqueue_arxiv_import(payload: ArxivImportRequest, request: Request):
-    parameters = payload.model_dump()
-    if payload.bucket is None:
-        parameters["bucket"] = os.getenv("RUSTFS_BUCKET", "arxiv-papers")
+    job_id = payload.request_id or uuid4()
+    params = {"id": job_id, "date_from": payload.date_from, "date_to": payload.date_to,
+              "bucket": payload.bucket or os.getenv("RUSTFS_BUCKET", "arxiv-papers"), "query": payload.query,
+              "workflow_id": f"import:{job_id.hex}"}
+    # This is an immutable request catalog, not a job queue. It is never polled by workers.
     async with database_session(request) as session:
-        job_id, row = (await session.execute(
-            text("""
-                INSERT INTO arxiv_imports AS job (date_from, date_to, bucket, query)
-                VALUES (:date_from, :date_to, :bucket, :query)
-                RETURNING id, to_jsonb(job)
-            """),
-            parameters,
-        )).one()
-    print(json.dumps({
-        "event": "arxiv_import.insert",
-        "table": "arxiv_imports",
-        "operation": "insert",
-        "import_id": job_id.hex,
-        "row": row,
-    }), flush=True)
+        await session.execute(text("""
+            INSERT INTO arxiv_imports (id, date_from, date_to, bucket, query, workflow_id)
+            VALUES (:id, :date_from, :date_to, :bucket, :query, :workflow_id) ON CONFLICT DO NOTHING
+        """), params)
+        row = (await session.execute(text("SELECT * FROM arxiv_imports WHERE id = :id"), params)).mappings().one()
+        if any(row[key] != params[key] for key in ("date_from", "date_to", "bucket", "query")):
+            raise HTTPException(409, "request_id already belongs to a different import.")
+    await temporal_runtime.start(request, "ImportWorkflow", import_payload(row), row["workflow_id"])
+    print(json.dumps({"event": "arxiv_import.insert", "table": "arxiv_imports", "operation": "insert",
+                      "import_id": job_id.hex, "row": dict(row)}, default=str), flush=True)
     return ArxivImportAccepted(id=job_id.hex)
 
 
 @app.post("/arxiv/imports/{job_id}/{action}", tags=["arXiv"])
 async def control_arxiv_import(job_id: UUID, action: Literal["pause", "resume"], request: Request):
-    if action == "pause":
-        statement = """
-            UPDATE arxiv_imports
-            SET status = (CASE WHEN status IN ('running', 'pausing') THEN 'pausing' ELSE 'paused' END)::arxiv_import_status
-            WHERE id = :id AND status IN ('queued', 'running', 'pausing', 'paused')
-            RETURNING status
-        """
-    else:
-        statement = """
-            UPDATE arxiv_imports
-            SET status = 'queued', available_at = CASE WHEN status = 'paused' THEN now() ELSE available_at END
-            WHERE id = :id AND status IN ('paused', 'pausing', 'queued')
-            RETURNING status
-        """
     async with database_session(request) as session:
-        status = (await session.execute(text(statement), {"id": job_id})).scalar_one_or_none()
-        if status is None:
-            exists = (await session.execute(text("SELECT 1 FROM arxiv_imports WHERE id = :id"), {"id": job_id})).scalar()
-            if exists is None:
-                raise HTTPException(404, "Задание импорта не найдено.")
-            raise HTTPException(409, "Команда недоступна для текущего статуса задания.")
-    print(json.dumps({
-        "event": "arxiv_import.control", "import_id": job_id.hex, "action": action, "status": status,
-    }), flush=True)
-    return {"status": status}
+        row = (await session.execute(text("SELECT * FROM arxiv_imports WHERE id = :id"), {"id": job_id})).mappings().one_or_none()
+    if row is None:
+        raise HTTPException(404, "Задание импорта не найдено.")
+    runtime = await temporal_runtime.describe(request, row["workflow_id"])
+    if runtime is None or (runtime["status"] == "failed" and action == "resume"):
+        if action != "resume":
+            raise HTTPException(409, "История Temporal отсутствует; можно заново запустить сохранённый запрос.")
+        await temporal_runtime.start(request, "ImportWorkflow", import_payload(row), row["workflow_id"])
+        return {"status": "queued"}
+    if runtime["status"] in ("completed", "failed"):
+        raise HTTPException(409, "Команда недоступна для завершённого задания.")
+    await temporal_runtime.signal_pause(request, row["workflow_id"], action == "pause")
+    return {"status": "pausing" if action == "pause" else "running"}
 
 
 @app.get("/arxiv/imports", response_model=list[ArxivImportJob], tags=["arXiv"])
-async def list_arxiv_imports(
-    request: Request,
+async def list_arxiv_imports(request: Request,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
-    offset: Annotated[int, Query(ge=0, le=MAX_BIGINT)] = 0,
-):
+    offset: Annotated[int, Query(ge=0, le=MAX_BIGINT)] = 0):
     async with database_session(request) as session:
-        rows = await session.execute(
-            text("""
-                SELECT job.id, job.date_from, job.date_to, job.bucket, job.query, job.status, job.attempts,
-                       job.created_at, job.available_at, job.started_at, job.finished_at, stats.processed_articles,
-                       jsonb_strip_nulls(to_jsonb(stats) - 'processed_articles') AS result
-                FROM (
-                    SELECT * FROM arxiv_imports ORDER BY created_at DESC, id DESC LIMIT :limit OFFSET :offset
-                ) AS job
-                LEFT JOIN LATERAL arxiv_import_result(job.id) AS stats ON true
-                ORDER BY job.created_at DESC, job.id DESC
-            """),
-            {"limit": limit, "offset": offset},
-        )
-        return rows.mappings().all()
+        rows = (await session.execute(text("""
+            SELECT * FROM arxiv_imports ORDER BY created_at DESC, id DESC LIMIT :limit OFFSET :offset
+        """), {"limit": limit, "offset": offset})).mappings().all()
+    async def present(row):
+        runtime = await temporal_runtime.describe(request, row["workflow_id"])
+        progress = runtime["progress"] if runtime else {}
+        result = {key: progress.get(key, 0) for key in ("articles_found", "pdf_available", "pdf_reused", "pdf_failures", "html_unavailable")}
+        return {**row, "status": runtime["status"] if runtime else "unknown",
+                "attempts": progress.get("attempts", 0), "available_at": None,
+                "started_at": runtime["started_at"] if runtime else None,
+                "finished_at": runtime["finished_at"] if runtime else None,
+                "processed_articles": progress.get("processed_articles"), "result": result if progress else None}
+    return await asyncio.gather(*(present(row) for row in rows))

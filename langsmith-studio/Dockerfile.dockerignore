@@ -7,3 +7,6 @@
 !langsmith-studio/requirements.txt
 !langsmith-studio/langgraph.json
 !langsmith-studio/Dockerfile
+!api/processing/
+!api/processing/__init__.py
+!api/processing/config.py

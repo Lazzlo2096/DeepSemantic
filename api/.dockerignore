@@ -15,3 +15,8 @@
 !worker_control.py
 !storage.py
 !requirements.txt
+!paper_repository.py
+!temporal_runtime.py
+!processing/
+!processing/__init__.py
+!processing/config.py

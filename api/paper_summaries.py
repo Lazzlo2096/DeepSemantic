@@ -1,21 +1,23 @@
 from datetime import datetime
-from uuid import UUID
+from uuid import UUID, NAMESPACE_URL, uuid5
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
-from sqlalchemy import text
 
-from database import ArxivPaper, PaperSummaryStatus, database_session
+from database import PaperSummaryStatus
 from papers import ArxivId
-
+import paper_repository as repository
+from processing.config import pipeline_settings, summary_generation, summary_workflow_id
+import temporal_runtime
 
 MARKDOWN_REQUIRED = "Для суммаризации нужен полный текст в Markdown. Импортируйте статью в режиме HTML."
-
 router = APIRouter(prefix="/papers", tags=["papers"])
+
 
 class SummaryJob(BaseModel):
     id: UUID
     arxiv_id: str
+    workflow_id: str | None = None
     status: PaperSummaryStatus
     parts_completed: int
     parts_total: int
@@ -26,55 +28,48 @@ class SummaryJob(BaseModel):
     finished_at: datetime | None
 
 
-JOB_FIELDS = """
-    id, arxiv_id, status, parts_completed, parts_total, model,
-    prompt_version, summary, last_error, finished_at
-"""
-SELECT_JOB = text(f"""
-    SELECT {JOB_FIELDS} FROM paper_summaries WHERE arxiv_id = :arxiv_id
-      AND source_version = (SELECT jsonb_build_array(bucket, text_object_key)::text
-                            FROM arxiv_papers WHERE arxiv_id = :arxiv_id AND status = 'texted')
-""")
-
-
-@router.get("/{arxiv_id:path}/summary", response_model=SummaryJob | None)
-async def get_paper_summary(request: Request, arxiv_id: ArxivId):
-    async with database_session(request) as session:
-        if await session.get(ArxivPaper, arxiv_id) is None:
-            raise HTTPException(404, "Paper not found.")
-        return (await session.execute(SELECT_JOB, {"arxiv_id": arxiv_id})).mappings().one_or_none()
-
-
-@router.post("/{arxiv_id:path}/summary", status_code=202, response_model=SummaryJob, responses={200: {"model": SummaryJob}})
-async def create_paper_summary(request: Request, response: Response, arxiv_id: ArxivId):
-    async with database_session(request) as session:
-        paper = await session.get(ArxivPaper, arxiv_id)
-        if paper is None:
-            raise HTTPException(404, "Paper not found.")
-        params = {"arxiv_id": arxiv_id}
-        if paper.status != "texted" or not paper.text_object_key or not paper.text_object_key.lower().endswith(".md"):
-            job = (await session.execute(SELECT_JOB, params)).mappings().one_or_none()
-            if job is not None and job["status"] == "completed":
-                response.status_code = 200
-                return job
-            raise HTTPException(409, MARKDOWN_REQUIRED)
-
-        job = (await session.execute(text(f"""
-            INSERT INTO paper_summaries (arxiv_id, source_version)
-            SELECT arxiv_id, jsonb_build_array(bucket, text_object_key)::text FROM arxiv_papers
-            WHERE arxiv_id = :arxiv_id AND status = 'texted'
-            ON CONFLICT (arxiv_id) DO UPDATE
-            SET id = EXCLUDED.id, status = 'queued', attempts = 0,
-                available_at = now(), created_at = now(), finished_at = NULL,
-                parts_completed = 0, parts_total = 0, last_error = NULL,
-                model = NULL, prompt_version = NULL, summary = NULL, lease_until = NULL,
-                source_version = EXCLUDED.source_version
-            WHERE paper_summaries.status = 'failed'
-               OR paper_summaries.source_version IS DISTINCT FROM EXCLUDED.source_version
-            RETURNING {JOB_FIELDS}
-        """), params)).mappings().one_or_none()
-        if job is None:
-            job = (await session.execute(SELECT_JOB, params)).mappings().one()
-        if job["status"] == "completed":
+async def summary_response(request, arxiv_id, response=None, create=False):
+    paper = await repository.get_paper(arxiv_id)
+    if paper is None:
+        raise HTTPException(404, "Paper not found.")
+    cached = await repository.get_summary(arxiv_id)
+    if cached:
+        if response is not None:
             response.status_code = 200
-        return job
+        return {**cached, "status": "completed", "parts_completed": 1, "parts_total": 1,
+                "last_error": None, "finished_at": cached["generated_at"]}
+    if not paper["text_object_key"] or not paper["text_object_key"].lower().endswith('.md'):
+        if create:
+            raise HTTPException(409, MARKDOWN_REQUIRED)
+        return None
+    settings = pipeline_settings()
+    identity = summary_workflow_id(paper, settings)
+    if create:
+        await temporal_runtime.start(request, 'SummaryWorkflow', {'paper': {
+            key: paper[key] for key in ('arxiv_id', 'bucket', 'object_key', 'text_object_key', 'source_version', 'markdown_version')
+        }, 'settings': settings}, identity)
+    runtime = await temporal_runtime.describe(request, identity)
+    if runtime is None:
+        return None
+    status = runtime['status']
+    if status == 'completed':
+        cached = await repository.get_summary(arxiv_id)
+        if cached:
+            return {**cached, 'status': 'completed', 'parts_completed': 1, 'parts_total': 1,
+                    'last_error': None, 'finished_at': cached['generated_at']}
+        status = 'failed'
+    return {'id': uuid5(NAMESPACE_URL, f"{arxiv_id}:{summary_generation(paper, settings)}"),
+            'arxiv_id': arxiv_id, 'workflow_id': identity, 'status': status,
+            'parts_completed': runtime['progress'].get('parts_completed', 0), 'parts_total': 1,
+            'model': settings['summary']['model'], 'prompt_version': settings['summary']['prompt_version'],
+            'summary': None, 'last_error': runtime['last_error'], 'finished_at': runtime['finished_at']}
+
+
+@router.get('/{arxiv_id:path}/summary', response_model=SummaryJob | None)
+async def get_paper_summary(request: Request, arxiv_id: ArxivId):
+    return await summary_response(request, arxiv_id)
+
+
+@router.post('/{arxiv_id:path}/summary', status_code=202, response_model=SummaryJob, responses={200: {'model': SummaryJob}})
+async def create_paper_summary(request: Request, response: Response, arxiv_id: ArxivId):
+    return await summary_response(request, arxiv_id, response, create=True)

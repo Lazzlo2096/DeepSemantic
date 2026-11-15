@@ -8,3 +8,4 @@ langchain==1.5.0
 langgraph==1.2.21
 langchain-openrouter==0.2.9
 openrouter==0.11.46
+temporalio==1.36.1

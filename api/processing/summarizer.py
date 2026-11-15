@@ -39,10 +39,6 @@ class SummaryInputError(SummaryError):
     pass
 
 
-class LeaseLost(Exception):
-    pass
-
-
 class Summarizer:
     def __init__(self, client: httpx.AsyncClient, chat: ChatSettings):
         self.client = client

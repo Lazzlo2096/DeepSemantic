@@ -1,22 +1,15 @@
-import argparse
-import json
-import logging
-import os
 import re
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from tempfile import TemporaryFile
-from uuid import UUID
 from xml.etree import ElementTree
 
 import requests
-from botocore.exceptions import BotoCoreError, ClientError
+from botocore.exceptions import ClientError
 
 from processing.html_text import article_body, html_unavailable
-from processing.db import connect_database
-from storage import connect_rustfs
 
 
 ARXIV_API = "https://export.arxiv.org/api/query"
@@ -34,55 +27,6 @@ class Article:
     authors: list[str]
     abstract: str
     submitted_at: datetime
-
-
-@dataclass
-class ImportResult:
-    articles_found: int = 0
-    pdf_reused: int = 0
-    pdf_available: int = 0
-    pdf_failures: int = 0
-    html_unavailable: int = 0
-    last_error: str | None = None
-
-    def counters(self) -> dict[str, int]:
-        counters = asdict(self)
-        del counters["last_error"]
-        return counters
-
-
-@dataclass(frozen=True)
-class ImportJob:
-    id: UUID
-
-
-def log_import_event(event: str, job: ImportJob | None, **fields) -> None:
-    if job is not None:
-        fields["import_id"] = job.id.hex
-    print(json.dumps({"event": event, **fields}), flush=True)
-
-
-def log_import_update(job_id: UUID, previous: dict, current: dict) -> None:
-    changes = {
-        column: {"old": previous[column], "new": value}
-        for column, value in current.items()
-        if previous[column] != value
-    }
-    if changes:
-        log_import_event("arxiv_import.update", None, table="arxiv_imports", operation="update",
-                         import_id=job_id.hex, changes=changes)
-
-
-def log_status_change(arxiv_id: str, change: tuple[str | None, str] | None, job: ImportJob | None) -> None:
-    if change is None:
-        return
-    old_status, new_status = change
-    if old_status != new_status:
-        operation = "insert" if old_status is None else "update"
-        log_import_event(
-            f"arxiv_papers.{operation}", job, table="arxiv_papers", operation=operation,
-            arxiv_id=arxiv_id, changes={"status": {"old": old_status, "new": new_status}},
-        )
 
 
 class ArxivClient:
@@ -229,115 +173,3 @@ def store_source(arxiv: ArxivClient, s3, bucket: str, arxiv_id: str,
     return s3.head_object(Bucket=bucket, Key=object_key), False
 
 
-def save_paper(db, article: Article, bucket: str, object_key: str, downloaded_at: datetime,
-               job: ImportJob | None) -> None:
-    with db.transaction():
-        previous = db.execute(
-            "SELECT status FROM arxiv_papers WHERE arxiv_id = %s FOR NO KEY UPDATE",
-            (article.arxiv_id,),
-        ).fetchone()
-        paper = db.execute(
-            """
-            INSERT INTO arxiv_papers AS paper
-                (arxiv_id, bucket, object_key, title, authors, abstract,
-                 submitted_at, downloaded_at, arxiv_import_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (arxiv_id)
-            DO UPDATE SET bucket = EXCLUDED.bucket,
-                          object_key = EXCLUDED.object_key,
-                          title = EXCLUDED.title,
-                          authors = EXCLUDED.authors,
-                          abstract = EXCLUDED.abstract,
-                          submitted_at = EXCLUDED.submitted_at,
-                          downloaded_at = EXCLUDED.downloaded_at,
-                          arxiv_import_id = EXCLUDED.arxiv_import_id,
-                          text_object_key = NULL,
-                          lease_until = NULL,
-                          text_available_at = now(),
-                          status = 'downloaded'
-            WHERE (paper.bucket, paper.object_key, paper.downloaded_at) IS DISTINCT FROM
-                  (EXCLUDED.bucket, EXCLUDED.object_key, EXCLUDED.downloaded_at)
-              AND (paper.bucket = EXCLUDED.bucket
-                   OR EXCLUDED.downloaded_at > paper.downloaded_at
-                   OR (EXCLUDED.downloaded_at = paper.downloaded_at AND EXCLUDED.bucket < paper.bucket))
-            RETURNING status
-            """,
-            (article.arxiv_id, bucket, object_key, article.title, article.authors,
-             article.abstract, article.submitted_at, downloaded_at, job.id if job else None),
-        ).fetchone()
-    if paper is not None:
-        log_status_change(article.arxiv_id, (previous[0] if previous else None, paper[0]), job)
-
-
-def process_article(db, arxiv, s3, article: Article, bucket: str, source_format: str,
-                    result: ImportResult, job: ImportJob | None, check_lease: Callable[[], None]) -> None:
-    object_key = f"arxiv/{article.arxiv_id}.{source_format}"
-    try:
-        stored = store_source(arxiv, s3, bucket, article.arxiv_id, object_key, source_format)
-    except (requests.RequestException, BotoCoreError, ClientError, OSError, ValueError) as error:
-        result.last_error = f"Could not save {source_format.upper()} for {article.arxiv_id}: {error}"
-        log_import_event("arxiv.paper_failed", job, arxiv_id=article.arxiv_id,
-                         level="error", stage=source_format, error=result.last_error)
-        result.pdf_failures += 1
-        return
-
-    if stored is None:
-        result.html_unavailable += 1
-        log_import_event("arxiv.paper_skipped", job, arxiv_id=article.arxiv_id, reason="html_unavailable")
-        return
-
-    source, reused = stored
-    check_lease()
-    save_paper(db, article, bucket, object_key, source["LastModified"], job)
-    result.pdf_available += 1
-    result.pdf_reused += int(reused)
-    logging.info("%s -> s3://%s/%s", article.arxiv_id, bucket, object_key)
-
-
-def import_articles(date_from, date_to, bucket, query, source_format) -> ImportResult:
-    """One-off CLI import. Background execution uses processing.activities."""
-    result = ImportResult()
-    with connect_database() as db, requests.Session() as session:
-        arxiv = ArxivClient(session)
-        s3 = connect_rustfs()
-        try:
-            ensure_bucket(s3, bucket)
-            def count_page(size):
-                result.articles_found += size
-            for article in arxiv.articles(date_from, date_to, query, count_page):
-                process_article(db, arxiv, s3, article, bucket, source_format, result, None, lambda: None)
-        finally:
-            s3.close()
-    return result
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Download arXiv papers by submission date (UTC).")
-    parser.add_argument("--worker", action="store_true", help="Run the Temporal import worker")
-    parser.add_argument("--from", dest="date_from", type=date.fromisoformat)
-    parser.add_argument("--to", dest="date_to", type=date.fromisoformat)
-    parser.add_argument("--bucket")
-    parser.add_argument("--query", help="Optional arXiv filter, e.g. cat:cs.AI")
-    args = parser.parse_args()
-
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    source_format = os.getenv("ARXIV_SOURCE_FORMAT", "html").strip().lower()
-    if source_format not in {"pdf", "html"}:
-        parser.error("ARXIV_SOURCE_FORMAT must be pdf or html")
-    default_bucket = os.getenv("RUSTFS_BUCKET", "arxiv-papers")
-    if args.worker:
-        if any(value is not None for value in (args.date_from, args.date_to, args.bucket, args.query)):
-            parser.error("--worker cannot be combined with import options")
-        parser.error("Use docker compose up -d arxiv-grabber to start the Temporal worker")
-
-    if args.date_from is None or args.date_to is None:
-        parser.error("--from and --to are required for a direct import")
-    if args.date_from > args.date_to:
-        parser.error("--from must be on or before --to")
-    bucket = args.bucket if args.bucket is not None else default_bucket
-    result = import_articles(args.date_from, args.date_to, bucket, args.query or "", source_format)
-    return int(result.last_error is not None)
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

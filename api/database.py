@@ -1,11 +1,12 @@
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Literal, get_args
+from typing import Literal
 
 from fastapi import HTTPException, Request
-from sqlalchemy import BigInteger, DateTime, Identity, Text, func
-from sqlalchemy.dialects.postgresql import ARRAY, ENUM
+from sqlalchemy import BigInteger, DateTime, Identity, Text, case, func
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.engine import URL
 from sqlalchemy.exc import OperationalError, TimeoutError as PoolTimeout
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -13,9 +14,8 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 MAX_BIGINT = 2**63 - 1
-PaperStatus = Literal["downloaded", "texting", "texted"]
+PaperStatus = Literal["downloaded", "texted"]
 PaperSummaryStatus = Literal["queued", "running", "completed", "failed"]
-PAPER_SUMMARY_STATUS_TYPE = ENUM(*get_args(PaperSummaryStatus), name="paper_summary_status", create_type=False)
 
 
 class Base(DeclarativeBase):
@@ -44,10 +44,16 @@ class ArxivPaper(Base):
     abstract: Mapped[str] = mapped_column(Text)
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     downloaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    status: Mapped[PaperStatus] = mapped_column(
-        ENUM(*get_args(PaperStatus), name="arxiv_paper_status", create_type=False),
-        server_default="downloaded",
-    )
+    @hybrid_property
+    def status(self):
+        """Artifact availability for the catalog; not an execution state column."""
+        return "texted" if self.text_object_key else "downloaded"
+
+    @status.inplace.expression
+    @classmethod
+    def _status_expression(cls):
+        return case((cls.text_object_key.is_not(None), "texted"), else_="downloaded")
+
 
 
 @asynccontextmanager

@@ -3,7 +3,6 @@ import { arxivUrl } from "./arxiv.js";
 const PAGE_SIZE = 12;
 const stageLabels = new Map([
   ["downloaded", "Исходник скачан"],
-  ["texting", "Извлекается текст"],
   ["texted", "Текст извлечён"],
 ]);
 const dateFormat = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeZone: "UTC" });

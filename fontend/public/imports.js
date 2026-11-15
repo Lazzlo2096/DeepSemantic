@@ -8,6 +8,7 @@ const statusLabels = new Map([
   ["paused", "На паузе"],
   ["completed", "Завершено"],
   ["failed", "Ошибка"],
+  ["unknown", "История Temporal недоступна"],
 ]);
 const dateTimeFormat = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" });
 const form = document.querySelector("#import-form");
@@ -25,6 +26,7 @@ const next = document.querySelector("#imports-next");
 const pageNumber = document.querySelector("#imports-page");
 
 let currentPage = 0;
+let requestIdentity = crypto.randomUUID();
 let listRequest;
 const pendingActions = new Set();
 
@@ -46,14 +48,14 @@ function renderJob(job) {
   stage.dataset.stage = job.status;
   stage.textContent = statusLabels.get(job.status);
   const button = row.querySelector(".import-action");
-  if (["queued", "running", "paused"].includes(job.status)) {
-    const action = job.status === "paused" ? "resume" : "pause";
+  if (["queued", "running", "paused", "failed", "unknown"].includes(job.status)) {
+    const action = ["paused", "failed", "unknown"].includes(job.status) ? "resume" : "pause";
     button.hidden = false;
     button.disabled = pendingActions.has(job.id);
-    button.textContent = action === "pause" ? "Приостановить" : "Продолжить";
+    button.textContent = action === "pause" ? "Приостановить" : job.status === "failed" ? "Повторить" : job.status === "unknown" ? "Запустить" : "Продолжить";
     button.addEventListener("click", () => changeImport(job.id, action, button));
   }
-  row.querySelector(".import-attempts").textContent = `Попыток: ${job.attempts}`;
+  row.querySelector(".import-attempts").textContent = `Макс. попыток операции: ${job.attempts}`;
   const timing = row.querySelector(".import-timing");
   if (job.finished_at) {
     timing.textContent = `Завершение ${formatTime(job.finished_at)}`;
@@ -131,11 +133,12 @@ async function loadImports(page = currentPage) {
   }
 }
 
-form.addEventListener("input", () => dateTo.setCustomValidity(""));
+form.addEventListener("input", () => { dateTo.setCustomValidity(""); requestIdentity = crypto.randomUUID(); });
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (submit.disabled) return;
   const payload = Object.fromEntries(new FormData(form));
+  payload.request_id = requestIdentity;
   if (payload.date_from > payload.date_to) {
     dateTo.setCustomValidity("Дата окончания должна быть не раньше даты начала.");
     dateTo.reportValidity();
@@ -157,6 +160,7 @@ form.addEventListener("submit", async (event) => {
     }
     if (!response.ok) throw new Error(`Import request returned ${response.status}`);
     const job = await response.json();
+    requestIdentity = crypto.randomUUID();
     feedback.textContent = `Задание ${job.id} создано.`;
     loadImports(0);
   } catch {

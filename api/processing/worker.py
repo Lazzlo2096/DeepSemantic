@@ -11,8 +11,19 @@ from tokenizers import Tokenizer
 from chunks import require_zero_chunk_overlap
 from main import app, lifespan
 from processing.activities import Activities
-from processing.config import QUEUES, temporal_client
-from processing.workflows import ProcessingWorkflow
+from processing.config import PIPELINE_QUEUE, QUEUES, temporal_client
+from processing.workflows import PIPELINE_WORKFLOWS
+
+
+def worker_bindings(activities, kind):
+    methods = {
+        "import": [activities.discover_import, activities.manifest_page, activities.download_paper],
+        "text": [activities.extract], "summary": [activities.summarize],
+        "index": [activities.prepare_index, activities.index_batch_activity],
+        "pipeline": [activities.paper_context, activities.dependency_result, activities.catalog_page],
+    }
+    return {"task_queue": PIPELINE_QUEUE if kind == 'pipeline' else QUEUES[kind],
+            "workflows": PIPELINE_WORKFLOWS if kind == 'pipeline' else [], "activities": methods[kind]}
 
 
 async def run(kind):
@@ -32,24 +43,19 @@ async def run(kind):
         except NotImplementedError:
             pass
     async with lifespan(app):
-        activities = Activities(app.state, tokenizer, max_tokens)
-        methods = {
-            "import": [activities.import_control, activities.import_discover, activities.import_step],
-            "text": [activities.process_text], "summary": [activities.process_summary],
-            "index": [activities.prepare_index, activities.index_batch_activity],
-        }
+        activities = Activities(app.state, tokenizer, max_tokens, client)
+        bindings = worker_bindings(activities, kind)
         async with Worker(
-            client, task_queue=QUEUES[kind], workflows=[ProcessingWorkflow],
-            activities=[activities.finish_job, *methods[kind]],
+            client, **bindings,
             max_concurrent_activities=int(os.getenv("TEMPORAL_ACTIVITY_CONCURRENCY", "1")),
             graceful_shutdown_timeout=timedelta(seconds=30),
         ):
-            logging.info("Temporal worker ready: %s", QUEUES[kind])
+            logging.info("Temporal worker ready: %s", bindings["task_queue"])
             await stopped.wait()
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser()
-    parser.add_argument("kind", choices=QUEUES)
+    parser.add_argument("kind", choices=[*QUEUES, "pipeline"])
     asyncio.run(run(parser.parse_args().kind))

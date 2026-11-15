@@ -92,7 +92,7 @@ services:
     ports:
       - "127.0.0.1:${EMBEDDING_PORT:-8000}:8000"
     environment:
-      <<: [*embedding-client-environment, *llm-environment, *rustfs-environment]
+      <<: *processing-environment
       RUSTFS_ENDPOINT: http://rustfs:9000
       RAG_OPENROUTER_MODEL: "${RAG_OPENROUTER_MODEL:-deepseek/deepseek-v4.1-flash-1017}"
       OPENROUTER_REASONING_EFFORT: "${RAG_OPENROUTER_REASONING_EFFORT:-}"
@@ -135,9 +135,9 @@ services:
       start_period: 30s
       retries: 6
 
-  temporal-dispatcher:
+  temporal-orchestrator:
     <<: *processing-service
-    command: ["python", "-m", "processing.dispatcher"]
+    command: ["python", "-m", "processing.worker", "pipeline"]
 
   embeding-worker:
     <<: *processing-service

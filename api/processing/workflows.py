@@ -1,67 +1,174 @@
-"""Workflow code contains no database, HTTP, filesystem or model calls."""
-
+"""The only owner of pipeline status, pause, progress, retries and transitions."""
+import asyncio
 from datetime import timedelta
 
 from temporalio import workflow
-from temporalio.common import RetryPolicy
-from temporalio.exceptions import ActivityError
-
+from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
+from temporalio.exceptions import ActivityError, ApplicationError, ChildWorkflowError, WorkflowAlreadyStartedError
+from processing.config import PIPELINE_QUEUE, QUEUES, fingerprint, paper_workflow_id, summary_workflow_id
 
 RETRY = RetryPolicy(initial_interval=timedelta(seconds=10), maximum_interval=timedelta(minutes=2), maximum_attempts=3)
 
 
-async def execute(name: str, payload: dict, *, minutes: int = 10):
-    return await workflow.execute_activity(
-        name, payload, start_to_close_timeout=timedelta(minutes=minutes),
-        heartbeat_timeout=timedelta(seconds=60), retry_policy=RETRY,
-    )
+async def execute(name, payload, queue=PIPELINE_QUEUE, minutes=10):
+    return await workflow.execute_activity(name, payload, task_queue=queue,
+        start_to_close_timeout=timedelta(minutes=minutes), heartbeat_timeout=timedelta(seconds=60), retry_policy=RETRY)
 
 
-async def finish(payload: dict, status: str, error: str | None = None):
-    # A storage outage must not discard the terminal status projection.
-    await workflow.execute_activity(
-        "finish_job", {**payload, "status": status, "error": error},
-        start_to_close_timeout=timedelta(seconds=30),
-        retry_policy=RetryPolicy(maximum_interval=timedelta(minutes=1)),
-    )
+async def child(name, payload, identity, wait=True):
+    try:
+        handle = await workflow.start_child_workflow(name, payload, id=identity, task_queue=PIPELINE_QUEUE,
+            id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
+            parent_close_policy=workflow.ParentClosePolicy.ABANDON, memo={"workflow_type": name, "input": payload})
+        return await handle if wait else None
+    except (ChildWorkflowError, WorkflowAlreadyStartedError) as error:
+        cause = error.cause if isinstance(error, ChildWorkflowError) else error
+        if not isinstance(cause, WorkflowAlreadyStartedError):
+            raise
+        if not wait:
+            return None
+        # A concurrent import/manual request can own this exact artifact already.
+        # Its outcome is obtained from Temporal, never from a SQL job row.
+        while True:
+            result = await execute("dependency_result", {"id": identity})
+            if result["done"]:
+                if result.get("error"):
+                    raise ApplicationError(f"Dependency {identity} ended with {result['error']}")
+                return result.get("result")
+            await workflow.sleep(timedelta(seconds=10))
 
 
 @workflow.defn
-class ProcessingWorkflow:
+class ImportWorkflow:
+    @workflow.init
+    def __init__(self, p: dict):
+        self.paused = p.get("paused", False)
+        self.state = p.get("progress") or {
+            "attempts": 1, "processed_articles": 0, "articles_found": None,
+            "pdf_available": 0, "pdf_reused": 0, "pdf_failures": 0, "html_unavailable": 0,
+        }
+
+    @workflow.signal
+    def set_paused(self, value: bool):
+        self.paused = value
+
+    @workflow.query
+    def progress(self):
+        return {**self.state, "paused": self.paused}
+
     @workflow.run
-    async def run(self, payload: dict):
-        try:
-            kind = payload["kind"]
-            if kind == "import":
-                for _ in range(100):
-                    state = await execute("import_control", payload)
-                    if state == "paused":
-                        await workflow.sleep(timedelta(seconds=10))
-                        continue
-                    if state == "terminal":
-                        await finish(payload, "completed")
-                        return
-                    if not await execute("import_discover", payload, minutes=120):
-                        continue
-                    if not await execute("import_step", payload):
-                        await finish(payload, "completed")
-                        return
-                workflow.continue_as_new(payload)
-            elif kind == "index":
-                cursor = payload.get("cursor", 0)
-                if not payload.get("prepared"):
-                    if not await execute("prepare_index", payload):
-                        await finish(payload, "superseded")
-                        return
-                for _ in range(100):
-                    cursor = await execute("index_batch", {**payload, "cursor": cursor})
-                    if cursor is None:
-                        await finish(payload, "completed")
-                        return
-                workflow.continue_as_new({**payload, "prepared": True, "cursor": cursor})
-            else:
-                current = await execute(f"process_{kind}", payload, minutes=45 if kind == "summary" else 10)
-                await finish(payload, "completed" if current else "superseded")
-        except ActivityError as error:
-            await finish(payload, "failed", str(error.cause or error)[:2000])
-            raise
+    async def run(self, p: dict):
+        await workflow.wait_condition(lambda: not self.paused)
+        manifest = p.get("manifest") or await execute("discover_import", p, QUEUES["import"], minutes=120)
+        self.state["articles_found"] = manifest["count"]
+        cursor = p.get("cursor", 0)
+        for _ in range(4):
+            items = await execute("manifest_page", {"manifest": manifest, "cursor": cursor}, QUEUES["import"])
+            if not items:
+                if self.state["pdf_failures"]:
+                    raise ApplicationError(f"{self.state['pdf_failures']} source downloads failed")
+                return self.progress()
+            for article in items:
+                await workflow.wait_condition(lambda: not self.paused)
+                try:
+                    result = await execute("download_paper", {**p, "article": article}, QUEUES["import"])
+                    self.state["attempts"] = max(self.state["attempts"], result["attempt"])
+                    if result["outcome"] == "unavailable":
+                        self.state["html_unavailable"] += 1
+                    else:
+                        self.state["pdf_available"] += 1
+                        self.state["pdf_reused"] += int(result["outcome"] == "reused")
+                        paper = result["paper"]
+                        await child("PaperWorkflow", {"paper": paper, "settings": p["settings"]},
+                                    paper_workflow_id(paper, p["settings"]), wait=False)
+                except ActivityError:
+                    self.state["pdf_failures"] += 1
+                    self.state["attempts"] = max(self.state["attempts"], 3)
+                cursor += 1
+                self.state["processed_articles"] += 1
+        workflow.continue_as_new({**p, "manifest": manifest, "cursor": cursor,
+                                  "progress": self.state, "paused": self.paused})
+
+
+@workflow.defn
+class PaperWorkflow:
+    @workflow.run
+    async def run(self, p: dict):
+        paper = p.get("paper") or await execute("paper_context", p)
+        if paper is None or not paper["object_key"].lower().endswith(".html"):
+            return {"status": "superseded"}
+        if not paper["text_object_key"]:
+            paper = await execute("extract_markdown", {"paper": paper}, QUEUES["text"])
+        if paper is None:
+            return {"status": "superseded"}
+        source = {"arxiv_id": paper["arxiv_id"], "source_kind": "article", "source_version": paper["markdown_version"]}
+        async def index_article():
+            return await child("IndexWorkflow", {"source": source, "settings": p["settings"]},
+                               "index:" + fingerprint([source, p["settings"]["index"]]))
+        async def summarize():
+            return await child("SummaryWorkflow", {"paper": paper, "settings": p["settings"]},
+                               summary_workflow_id(paper, p["settings"]))
+        results = await asyncio.gather(index_article(), summarize(), return_exceptions=True)
+        errors = [str(item) for item in results if isinstance(item, BaseException)]
+        if errors:
+            raise ApplicationError("; ".join(errors))
+        return {"status": "completed"}
+
+
+@workflow.defn
+class SummaryWorkflow:
+    def __init__(self):
+        self.phase = "queued"
+
+    @workflow.query
+    def progress(self):
+        return {"phase": self.phase, "parts_completed": int(self.phase != "generating"), "parts_total": 1}
+
+    @workflow.run
+    async def run(self, p: dict):
+        self.phase = "generating"
+        source = await execute("summarize_markdown", p, QUEUES["summary"], minutes=45)
+        if source is None:
+            return {"status": "superseded"}
+        self.phase = "indexing"
+        await child("IndexWorkflow", {"source": source, "settings": p["settings"]},
+                    "index:" + fingerprint([source, p["settings"]["index"]]))
+        self.phase = "completed"
+        return {"status": "completed"}
+
+
+@workflow.defn
+class IndexWorkflow:
+    @workflow.run
+    async def run(self, p: dict):
+        prepared = p.get("prepared") or await execute("prepare_index", p, QUEUES["index"])
+        if prepared is None:
+            return {"status": "superseded"}
+        cursor = p.get("cursor", 0)
+        for _ in range(100):
+            batch = await execute("index_batch", {**p, "generation": prepared["generation"], "cursor": cursor}, QUEUES["index"])
+            if batch is None:
+                return {"status": "completed"}
+            cursor = batch["cursor"]
+        workflow.continue_as_new({**p, "prepared": prepared, "cursor": cursor})
+
+
+@workflow.defn
+class ReprocessCatalogWorkflow:
+    @workflow.run
+    async def run(self, p: dict):
+        after = p.get("after", "")
+        for _ in range(2):
+            rows = await execute("catalog_page", {"after": after})
+            if not rows:
+                return
+            for row in rows:
+                paper = await execute("paper_context", row)
+                if paper:
+                    await child("PaperWorkflow", {"paper": paper, "settings": p["settings"]},
+                                paper_workflow_id(paper, p["settings"]), wait=False)
+                after = row["arxiv_id"]
+        workflow.continue_as_new({**p, "after": after})
+
+
+PIPELINE_WORKFLOWS = [ImportWorkflow, PaperWorkflow, SummaryWorkflow, IndexWorkflow, ReprocessCatalogWorkflow]
