@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / "api"))
 
 from embedding_schemas import EMBEDDING_OPENROUTER_MODEL, EmbeddingRequest
 from llm_chat import ChatResponseError, ChatSettings
-from embeddings import Embeddings
+from embedding_service import Embeddings
 from embeddings_config import EmbeddingSettings
 from processing.summarizer import Summarizer
 

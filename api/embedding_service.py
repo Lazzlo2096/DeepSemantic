@@ -1,3 +1,4 @@
+"""Shared embeddings service hiding provider selection and HTTP transport."""
 import logging
 import math
 from contextlib import asynccontextmanager

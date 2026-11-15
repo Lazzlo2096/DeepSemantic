@@ -16,7 +16,7 @@ from chunks import router as chunks_router
 from database import MAX_BIGINT, create_database_engine, database_session
 from embedding_schemas import EmbeddingRequest, EmbeddingResponse
 from llm_chat import ChatSettings
-from embeddings import create_embeddings
+from embedding_service import create_embeddings
 from paper_summaries import router as paper_summaries_router
 from papers import router as papers_router
 from rag import router as rag_router

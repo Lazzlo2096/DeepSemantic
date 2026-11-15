@@ -10,7 +10,7 @@ from fastapi import HTTPException
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "api"))
 
-from embeddings import create_embeddings
+from embedding_service import create_embeddings
 from embeddings_config import EmbeddingSettings
 from embedding_schemas import EmbeddingRequest
 
