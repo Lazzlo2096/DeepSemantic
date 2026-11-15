@@ -16,7 +16,7 @@ from chunks import router as chunks_router
 from database import MAX_BIGINT, create_database_engine, database_session
 from embedding_schemas import EmbeddingRequest, EmbeddingResponse
 from llm_chat import ChatSettings
-from openrouter_embeddings import OpenRouterEmbeddings
+from embeddings import create_embeddings
 from paper_summaries import router as paper_summaries_router
 from papers import router as papers_router
 from rag import router as rag_router
@@ -68,9 +68,6 @@ class ArxivImportJob(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    timeout = float(os.getenv("EMBEDDING_TIMEOUT", "60"))
-    if not 0 < timeout < float("inf"):
-        raise ValueError("EMBEDDING_TIMEOUT must be finite and positive")
     async with AsyncExitStack() as stack:
         engine = create_database_engine()
         stack.push_async_callback(engine.dispose)
@@ -86,10 +83,7 @@ async def lifespan(app: FastAPI):
             timeout=None,
         ))
         app.state.rag_model = create_rag_model(chat_settings, app.state.chat_client) if chat_settings.configured else None
-        embedding_client = await stack.enter_async_context(httpx.AsyncClient(
-            base_url=os.getenv("EMBEDDING_BASE_URL", "http://deepkaravan:8000/api/v1/"), timeout=timeout,
-        ))
-        app.state.embeddings = OpenRouterEmbeddings(embedding_client)
+        app.state.embeddings = await stack.enter_async_context(create_embeddings())
         yield
 
 
@@ -107,6 +101,7 @@ async def live():
 
 @app.get("/health")
 async def health(request: Request):
+    request.app.state.embeddings.check_configured()
     return {"status": "ok"}
 
 

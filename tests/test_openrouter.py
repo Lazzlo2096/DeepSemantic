@@ -16,7 +16,8 @@ sys.path.insert(0, str(ROOT / "api"))
 
 from embedding_schemas import EMBEDDING_OPENROUTER_MODEL, EmbeddingRequest
 from llm_chat import ChatResponseError, ChatSettings
-from openrouter_embeddings import OpenRouterEmbeddings
+from embeddings import Embeddings
+from embeddings_config import EmbeddingSettings
 from processing.summarizer import Summarizer
 
 
@@ -26,6 +27,7 @@ class ApiLifecycleTests(unittest.TestCase):
 
         with patch.dict("os.environ", {
             "OPENROUTER_API_KEY": "", "RUSTFS_ENDPOINT": "",
+            "EMBEDDING_PROVIDER": "deepkaravan", "EMBEDDING_BASE_URL": "",
             "POSTGRES_DB": "test", "POSTGRES_USER": "test", "POSTGRES_PASSWORD": "test",
         }):
             with TestClient(app) as client:
@@ -54,7 +56,7 @@ class OpenRouterTests(unittest.IsolatedAsyncioTestCase):
             ]})
 
         async with self.client(handler) as client:
-            result = await OpenRouterEmbeddings(client).embed(
+            result = await Embeddings(client, EmbeddingSettings("deepkaravan", str(client.base_url), 60)).embed(
                 EmbeddingRequest(texts=["first", "second"]),
             )
         self.assertEqual(result["revision"], "openrouter")
@@ -72,7 +74,7 @@ class OpenRouterTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(status=status, body=body):
                 async with self.client(lambda _: httpx.Response(status, json=body)) as client:
                     with self.assertRaises(HTTPException) as raised:
-                        await OpenRouterEmbeddings(client).embed(EmbeddingRequest(texts=["text"]))
+                        await Embeddings(client, EmbeddingSettings("deepkaravan", str(client.base_url), 60)).embed(EmbeddingRequest(texts=["text"]))
                 self.assertEqual(raised.exception.status_code, expected)
 
     async def test_embedding_transport_failures(self):
@@ -82,7 +84,7 @@ class OpenRouterTests(unittest.IsolatedAsyncioTestCase):
 
             async with self.client(handler) as client:
                 with self.assertRaises(HTTPException) as raised:
-                    await OpenRouterEmbeddings(client).embed(EmbeddingRequest(texts=["text"]))
+                    await Embeddings(client, EmbeddingSettings("deepkaravan", str(client.base_url), 60)).embed(EmbeddingRequest(texts=["text"]))
             self.assertEqual(raised.exception.status_code, expected)
 
     async def test_chat_tools_and_structured_output(self):

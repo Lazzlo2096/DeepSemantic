@@ -6,7 +6,7 @@
 
 На Ubuntu запусти `sudo bash bootstrap.sh` из корня проекта. Запись DNS для `deep-semantic.com` должна указывать на публичный адрес сервера, а TCP-порты 80 и 443 должны быть свободны и доступны из интернета. Caddy выпустит и будет обновлять сертификат автоматически. [Каталог на сервере](https://deep-semantic.com)
 
-Укажи в `.env` ключ `OPENROUTER_API_KEY` и выбери модели `RAG_OPENROUTER_MODEL` и `SUMMARY_OPENROUTER_MODEL`. Затем запусти `sudo just up-server`. Генерация выполняется через OpenRouter, эмбеддинги — через локальный контейнер DeepKaravan без API-ключа.
+Укажи в `.env` ключ `OPENROUTER_API_KEY` и выбери модели `RAG_OPENROUTER_MODEL` и `SUMMARY_OPENROUTER_MODEL`. Затем запусти `sudo just up-server`. Генерация выполняется через OpenRouter. Для эмбеддингов `EMBEDDING_PROVIDER=deepkaravan` выбирает локальный контейнер без API-ключа, `EMBEDDING_PROVIDER=openrouter` — OpenRouter с ключом `OPENROUTER_API_KEY`. Оставь `EMBEDDING_BASE_URL` пустым для автоматического выбора адреса.
 
 Управление воркерами доступно без пароля через публичную страницу. [Воркеры на сервере](https://deep-semantic.com/workers.html)
 
@@ -20,7 +20,7 @@
 
 `summary-worker` читает полный Markdown из RustFS и отправляет его вместе с промптом одним запросом. Промпт запрашивает объяснение на русском объёмом 700–1000 слов и шесть разделов от главной идеи до практического значения. Для суммаризации нужен импорт в режиме HTML.
 
-Для суммаризации и ответов RAG укажи `OPENROUTER_API_KEY` в `.env`. Модель для RAG задаётся через `RAG_OPENROUTER_MODEL`, по умолчанию `deepseek/deepseek-v4.1-flash-1017`. Для суммаризации можно задать `SUMMARY_OPENROUTER_MODEL` и `SUMMARY_OPENROUTER_REASONING_EFFORT`. Если модель суммаризации не задана, воркер берёт модель RAG. В `.env.example` для воркера указаны `deepseek/deepseek-v4-pro-0813` и `high`. Эмбеддинги поступают из DeepKaravan по адресу `EMBEDDING_BASE_URL`. После изменения `.env` пересоздай соответствующий контейнер.
+Для суммаризации и ответов RAG укажи `OPENROUTER_API_KEY` в `.env`. Модель для RAG задаётся через `RAG_OPENROUTER_MODEL`, по умолчанию `deepseek/deepseek-v4.1-flash-1017`. Для суммаризации можно задать `SUMMARY_OPENROUTER_MODEL` и `SUMMARY_OPENROUTER_REASONING_EFFORT`. Если модель суммаризации не задана, воркер берёт модель RAG. В `.env.example` для воркера указаны `deepseek/deepseek-v4-pro-0813` и `high`. Провайдер эмбеддингов выбирается через `EMBEDDING_PROVIDER`, адрес при необходимости переопределяется через `EMBEDDING_BASE_URL`. После изменения `.env` пересоздай соответствующий контейнер.
 
 Для суммаризации через OpenRouter действуют лимиты провайдера. PostgreSQL хранит статус и итоговый Markdown в `paper_summaries`, по одной записи на версию статьи.
 
