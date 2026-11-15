@@ -1,6 +1,5 @@
 """Offline API contract checks: python -m unittest discover -s tests -v."""
 
-import importlib.util
 import json
 import math
 from pathlib import Path
@@ -18,6 +17,7 @@ sys.path.insert(0, str(ROOT / "api"))
 from embedding_schemas import EMBEDDING_OPENROUTER_MODEL, EmbeddingRequest
 from llm_chat import ChatResponseError, ChatSettings
 from openrouter_embeddings import OpenRouterEmbeddings
+from processing.summarizer import Summarizer
 
 
 class ApiLifecycleTests(unittest.TestCase):
@@ -123,9 +123,6 @@ class OpenRouterTests(unittest.IsolatedAsyncioTestCase):
                 await chat.complete(client, [], max_tokens=None)
 
     async def test_summarization_uses_openrouter(self):
-        spec = importlib.util.spec_from_file_location("summary_worker", ROOT / "summary-worker/main.py")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
         progress_events = []
 
         async def progress(done, total):
@@ -140,7 +137,7 @@ class OpenRouterTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key"}):
             chat = ChatSettings.from_env(openrouter_model_env="SUMMARY_OPENROUTER_MODEL")
         async with self.client(handler) as client:
-            self.assertEqual(await module.Summarizer(client, chat).summarize("source article", progress), "summary")
+            self.assertEqual(await Summarizer(client, chat).summarize("source article", progress), "summary")
         self.assertEqual(progress_events, [(0, 1), (1, 1)])
 
 
