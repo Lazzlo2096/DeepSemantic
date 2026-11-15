@@ -15,11 +15,15 @@ async def execute(name, payload, queue=PIPELINE_QUEUE, minutes=10):
         start_to_close_timeout=timedelta(minutes=minutes), heartbeat_timeout=timedelta(seconds=60), retry_policy=RETRY)
 
 
-async def child(name, payload, identity, wait=True):
+async def child(name, payload, identity, wait=True, allow_completed=False):
     try:
         handle = await workflow.start_child_workflow(name, payload, id=identity, task_queue=PIPELINE_QUEUE,
-            id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
+            id_reuse_policy=(WorkflowIDReusePolicy.ALLOW_DUPLICATE if allow_completed
+                             else WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY),
             parent_close_policy=workflow.ParentClosePolicy.ABANDON, memo={"workflow_type": name, "input": payload})
+        if not wait:
+            # Detached children report errors through their own Temporal execution.
+            handle.add_done_callback(lambda done: None if done.cancelled() else done.exception())
         return await handle if wait else None
     except (ChildWorkflowError, WorkflowAlreadyStartedError) as error:
         cause = error.cause if isinstance(error, ChildWorkflowError) else error
@@ -92,6 +96,13 @@ class ImportWorkflow:
 
 @workflow.defn
 class PaperWorkflow:
+    def __init__(self):
+        self.branches = {"article_index": "pending", "summary_index": "pending"}
+
+    @workflow.query
+    def progress(self):
+        return self.branches
+
     @workflow.run
     async def run(self, p: dict):
         paper = p.get("paper") or await execute("paper_context", p)
@@ -103,16 +114,27 @@ class PaperWorkflow:
             return {"status": "superseded"}
         source = {"arxiv_id": paper["arxiv_id"], "source_kind": "article", "source_version": paper["markdown_version"]}
         async def index_article():
-            return await child("IndexWorkflow", {"source": source, "settings": p["settings"]},
-                               "index:" + fingerprint([source, p["settings"]["index"]]))
+            self.branches["article_index"] = "running"
+            result = await child("IndexWorkflow", {"source": source, "settings": p["settings"]},
+                                 "index:" + fingerprint([source, p["settings"]["index"]]))
+            self.branches["article_index"] = result["status"]
+            return result
         async def summarize():
             return await child("SummaryWorkflow", {"paper": paper, "settings": p["settings"]},
                                summary_workflow_id(paper, p["settings"]))
-        results = await asyncio.gather(index_article(), summarize(), return_exceptions=True)
+        if workflow.patched("independent-summary-branch-v1"):
+            mode = await execute("pipeline_summary_mode", {})
+            self.branches["summary_index"] = "deferred" if mode == "deferred" else "queued"
+            if mode == "enabled":
+                await child("SummaryWorkflow", {"paper": paper, "settings": p["settings"]},
+                            summary_workflow_id(paper, p["settings"]), wait=False, allow_completed=True)
+            results = await asyncio.gather(index_article(), return_exceptions=True)
+        else:
+            results = await asyncio.gather(index_article(), summarize(), return_exceptions=True)
         errors = [str(item) for item in results if isinstance(item, BaseException)]
         if errors:
             raise ApplicationError("; ".join(errors))
-        return {"status": "completed"}
+        return {"status": "completed", **self.branches}
 
 
 @workflow.defn
@@ -130,11 +152,15 @@ class SummaryWorkflow:
         source = await execute("summarize_markdown", p, QUEUES["summary"], minutes=45)
         if source is None:
             return {"status": "superseded"}
+        if source.get("status") == "deferred":
+            self.phase = "deferred"
+            return {"status": "deferred"}
         self.phase = "indexing"
-        await child("IndexWorkflow", {"source": source, "settings": p["settings"]},
-                    "index:" + fingerprint([source, p["settings"]["index"]]))
-        self.phase = "completed"
-        return {"status": "completed"}
+        result = await child("IndexWorkflow", {"source": source, "settings": p["settings"]},
+                    "index:" + fingerprint([source, p["settings"]["index"]]),
+                    allow_completed=workflow.patched("repair-summary-index-v1"))
+        self.phase = result["status"]
+        return result
 
 
 @workflow.defn
@@ -144,9 +170,13 @@ class IndexWorkflow:
         prepared = p.get("prepared") or await execute("prepare_index", p, QUEUES["index"])
         if prepared is None:
             return {"status": "superseded"}
+        if prepared.get("status") == "deferred":
+            return {"status": "deferred"}
         cursor = p.get("cursor", 0)
         for _ in range(100):
             batch = await execute("index_batch", {**p, "generation": prepared["generation"], "cursor": cursor}, QUEUES["index"])
+            if batch and batch.get("status") == "deferred":
+                return {"status": "deferred"}
             if batch is None:
                 return {"status": "completed"}
             cursor = batch["cursor"]
@@ -171,4 +201,53 @@ class ReprocessCatalogWorkflow:
         workflow.continue_as_new({**p, "after": after})
 
 
-PIPELINE_WORKFLOWS = [ImportWorkflow, PaperWorkflow, SummaryWorkflow, IndexWorkflow, ReprocessCatalogWorkflow]
+@workflow.defn
+class SummaryReconcileWorkflow:
+    """Durable, bounded catalog reconciliation. SQL contains configuration/artifacts only."""
+    @workflow.init
+    def __init__(self, p: dict):
+        self.woken = False
+        self.state = p.get("progress") or {"passes": 0, "scanned": 0, "submitted": 0, "last_error": None}
+
+    @workflow.signal
+    def wake(self):
+        self.woken = True
+
+    @workflow.query
+    def progress(self):
+        return self.state
+
+    @workflow.run
+    async def run(self, p: dict):
+        after = p.get("after", "")
+        for _ in range(20):
+            self.woken = False
+            try:
+                page = await execute("summary_reconciliation_page", {"after": after})
+                self.state["mode"] = page["mode"]
+                self.state["last_error"] = None
+                for item in page.get("missing_markdown", []):
+                    await child("PaperWorkflow", item, paper_workflow_id(item["paper"], item["settings"]),
+                                wait=False, allow_completed=True)
+                for item in page["items"]:
+                    await child("SummaryWorkflow", item, summary_workflow_id(item["paper"], item["settings"]),
+                                wait=False, allow_completed=True)
+                    self.state["submitted"] += 1
+                self.state["scanned"] += page["scanned"]
+                after = page["after"]
+                self.state["after"] = after
+                if page["mode"] == "enabled" and not after:
+                    self.state["passes"] += 1
+                if after:
+                    continue
+            except (ActivityError, ChildWorkflowError) as error:
+                self.state["last_error"] = str(error)
+            try:
+                await workflow.wait_condition(lambda: self.woken, timeout=timedelta(seconds=60))
+            except asyncio.TimeoutError:
+                pass
+        workflow.continue_as_new({"after": after, "progress": self.state})
+
+
+PIPELINE_WORKFLOWS = [ImportWorkflow, PaperWorkflow, SummaryWorkflow, IndexWorkflow, ReprocessCatalogWorkflow,
+                      SummaryReconcileWorkflow]

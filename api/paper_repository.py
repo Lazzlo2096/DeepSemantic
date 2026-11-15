@@ -13,6 +13,28 @@ from fastapi import HTTPException
 
 from database import Chunk
 from chunks import OPENROUTER_COLLECTION_PREFIXES, PAPER_COLLECTIONS
+from processing.config import fingerprint
+
+
+async def get_pipeline_settings():
+    async with connection() as db:
+        return await (await db.execute(
+            "SELECT summary_mode, updated_at FROM pipeline_settings WHERE singleton"
+        )).fetchone()
+
+
+async def index_progress(source, settings):
+    generation = fingerprint([source["source_version"], settings["index"]])
+    async with connection() as db:
+        row = await (await db.execute("""
+            SELECT count(*) AS chunks_total,
+                count(*) FILTER (WHERE chunk.qdrant_collection = %s AND chunk.qdrant_point_id = chunk.id) AS chunks_indexed
+            FROM current_paper_chunks link JOIN chunks chunk ON chunk.id = link.chunk_id
+            WHERE link.arxiv_id = %s AND link.source_kind = %s
+              AND link.source_version = %s AND link.generation = %s
+        """, (PAPER_COLLECTIONS[source["source_kind"]], source["arxiv_id"], source["source_kind"],
+              source["source_version"], generation))).fetchone()
+    return {**row, "status": "completed" if row["chunks_total"] and row["chunks_total"] == row["chunks_indexed"] else "pending"}
 
 
 async def set_import_workflow(import_id, workflow_id):

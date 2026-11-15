@@ -15,7 +15,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 MAX_BIGINT = 2**63 - 1
 PaperStatus = Literal["downloaded", "texted"]
-PaperSummaryStatus = Literal["queued", "running", "completed", "failed"]
+PaperSummaryStatus = Literal["queued", "running", "completed", "failed", "deferred"]
 
 
 class Base(DeclarativeBase):

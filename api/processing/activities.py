@@ -1,7 +1,7 @@
 """External operations only. Execution state lives in Temporal, never in SQL."""
 import asyncio
 from dataclasses import asdict, replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from functools import wraps
 from hashlib import md5, sha256
 import json
@@ -13,13 +13,15 @@ from botocore.exceptions import ClientError
 from temporalio import activity
 from temporalio.client import WorkflowExecutionStatus
 from temporalio.exceptions import ApplicationError
+from temporalio.service import RPCError, RPCStatusCode
 
 import paper_repository as repository
 from chunks import PAPER_COLLECTIONS
 from embedding_schemas import EMBEDDING_OPENROUTER_MODEL
 from llm_chat import ChatSettings
 from processing.arxiv import Article, ArxivClient, ensure_bucket, store_source
-from processing.config import CHUNKER_VERSION, SUMMARY_PROMPT_VERSION, fingerprint, summary_generation
+from processing.config import (CHUNKER_VERSION, SUMMARY_PROMPT_VERSION, fingerprint, paper_workflow_id,
+                               pipeline_settings, summary_generation, summary_workflow_id)
 from processing.html_text import extract_markdown
 from processing.paper_embeddings import index_batch, prepare_source
 from processing.summarizer import Summarizer, SummaryInputError
@@ -51,6 +53,54 @@ class Activities:
     def __init__(self, state, tokenizer, max_tokens, client):
         self.state, self.s3 = state, state.rustfs
         self.tokenizer, self.max_tokens, self.client = tokenizer, max_tokens, client
+
+    @activity.defn(name="pipeline_summary_mode")
+    @heartbeats
+    async def pipeline_summary_mode(self, p: dict):
+        return (await repository.get_pipeline_settings())["summary_mode"]
+
+    async def reconciliation_due(self, identity, changed_at):
+        try:
+            info = await self.client.get_workflow_handle(identity).describe(rpc_timeout=timedelta(seconds=3))
+        except RPCError as error:
+            if error.status != RPCStatusCode.NOT_FOUND:
+                raise
+            return True
+        if info.status == WorkflowExecutionStatus.RUNNING:
+            return False
+        return info.status == WorkflowExecutionStatus.COMPLETED or info.start_time < changed_at
+
+    @activity.defn(name="summary_reconciliation_page")
+    @heartbeats
+    async def summary_reconciliation_page(self, p: dict):
+        control = await repository.get_pipeline_settings()
+        mode = control["summary_mode"]
+        if mode == "deferred":
+            return {"mode": mode, "items": [], "scanned": 0, "after": ""}
+        settings = pipeline_settings()
+        rows = await repository.catalog_page(p.get("after", ""), limit=25)
+        items = []
+        missing_markdown = []
+        for row in rows:
+            paper = await repository.get_paper(row["arxiv_id"])
+            if not paper or not paper["object_key"].lower().endswith(".html"):
+                continue
+            if not paper["text_object_key"]:
+                if await self.reconciliation_due(paper_workflow_id(paper, settings), control["updated_at"]):
+                    missing_markdown.append({"paper": paper_reference(paper), "settings": settings})
+                continue
+            cached = await repository.get_summary(paper["arxiv_id"], generation=summary_generation(paper, settings))
+            if cached:
+                source = {"arxiv_id": paper["arxiv_id"], "source_kind": "summary",
+                          "source_version": md5(cached["summary"].encode()).hexdigest()}
+                if (await repository.index_progress(source, settings))["status"] == "completed":
+                    continue
+            # Activities already have bounded retries. Do not turn a permanent
+            # LLM failure into a new paid attempt every reconciliation minute.
+            if await self.reconciliation_due(summary_workflow_id(paper, settings), control["updated_at"]):
+                items.append({"paper": paper_reference(paper), "settings": settings})
+        return {"mode": mode, "items": items, "missing_markdown": missing_markdown, "scanned": len(rows),
+                "after": rows[-1]["arxiv_id"] if rows else ""}
 
     @activity.defn(name="discover_import")
     @heartbeats
@@ -128,6 +178,8 @@ class Activities:
     @activity.defn(name="summarize_markdown")
     @heartbeats
     async def summarize(self, p: dict):
+        if await self.pipeline_summary_mode({}) == "deferred":
+            return {"status": "deferred"}
         paper, settings = p["paper"], p["settings"]
         generation = summary_generation(paper, settings)
         cached = await repository.get_summary(paper["arxiv_id"], generation=generation)
@@ -163,6 +215,8 @@ class Activities:
     @activity.defn(name="prepare_index")
     @heartbeats
     async def prepare_index(self, p: dict):
+        if p["source"]["source_kind"] == "summary" and await self.pipeline_summary_mode({}) == "deferred":
+            return {"status": "deferred"}
         config = p["settings"]["index"]
         if config["max_tokens"] != self.max_tokens or config["model"] != EMBEDDING_OPENROUTER_MODEL or config["chunker"] != CHUNKER_VERSION:
             raise ApplicationError("Index worker configuration differs from this request", non_retryable=True)
@@ -184,6 +238,8 @@ class Activities:
     @activity.defn(name="index_batch")
     @heartbeats
     async def index_batch_activity(self, p: dict):
+        if p["source"]["source_kind"] == "summary" and await self.pipeline_summary_mode({}) == "deferred":
+            return {"status": "deferred"}
         source = await repository.get_source(p["source"]["arxiv_id"], p["source"]["source_kind"], p["source"]["source_version"])
         if source is None:
             return None

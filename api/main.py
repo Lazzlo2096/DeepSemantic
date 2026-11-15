@@ -19,6 +19,7 @@ from llm_chat import ChatSettings
 from embedding_service import create_embeddings
 from paper_summaries import router as paper_summaries_router
 from papers import router as papers_router
+from pipeline import router as pipeline_router
 from rag import router as rag_router
 from rag_model import create_rag_model
 from storage import connect_rustfs
@@ -89,6 +90,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="DeepSemantic API", lifespan=lifespan)
 app.include_router(chunks_router)
+app.include_router(pipeline_router)
 app.include_router(paper_summaries_router)
 app.include_router(papers_router)
 app.include_router(rag_router)

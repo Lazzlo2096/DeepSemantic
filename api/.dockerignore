@@ -18,6 +18,7 @@
 !requirements.txt
 !paper_repository.py
 !temporal_runtime.py
+!pipeline.py
 !processing/
 !processing/__init__.py
 !processing/config.py

@@ -44,13 +44,16 @@ async def summary_response(request, arxiv_id, response=None, create=False):
         return None
     settings = pipeline_settings()
     identity = summary_workflow_id(paper, settings)
-    if create:
+    deferred = (await repository.get_pipeline_settings())["summary_mode"] == "deferred"
+    if create and not deferred:
         await temporal_runtime.start(request, 'SummaryWorkflow', {'paper': {
             key: paper[key] for key in ('arxiv_id', 'bucket', 'object_key', 'text_object_key', 'source_version', 'markdown_version')
-        }, 'settings': settings}, identity)
-    runtime = await temporal_runtime.describe(request, identity)
-    if runtime is None:
+        }, 'settings': settings}, identity, allow_completed=True)
+    runtime = None if deferred else await temporal_runtime.describe(request, identity)
+    if runtime is None and not deferred:
         return None
+    if deferred:
+        runtime = {'status': 'deferred', 'progress': {}, 'last_error': None, 'finished_at': None}
     status = runtime['status']
     if status == 'completed':
         cached = await repository.get_summary(arxiv_id)

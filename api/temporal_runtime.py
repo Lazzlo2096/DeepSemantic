@@ -22,13 +22,14 @@ async def client_for(request):
     return client
 
 
-async def start(request, name, payload, identity):
+async def start(request, name, payload, identity, *, allow_completed=False):
     client = await client_for(request)
     try:
         return await client.start_workflow(name, payload, id=identity, task_queue=PIPELINE_QUEUE,
             memo={"workflow_type": name, "input": payload},
             id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
-            id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
+            id_reuse_policy=(WorkflowIDReusePolicy.ALLOW_DUPLICATE if allow_completed
+                             else WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY),
             rpc_timeout=timedelta(seconds=5))
     except WorkflowAlreadyStartedError:
         return client.get_workflow_handle(identity)
