@@ -14,12 +14,9 @@ from xml.etree import ElementTree
 import requests
 from botocore.exceptions import BotoCoreError, ClientError
 
-if __package__:
-    from .html_text import article_body, html_unavailable
-    from .storage import connect_database, connect_rustfs
-else:
-    from html_text import article_body, html_unavailable
-    from storage import connect_database, connect_rustfs
+from processing.html_text import article_body, html_unavailable
+from processing.db import connect_database
+from storage import connect_rustfs
 
 
 ARXIV_API = "https://export.arxiv.org/api/query"
@@ -28,6 +25,8 @@ NAMESPACES = {"a": "http://www.w3.org/2005/Atom", "os": "http://a9.com/-/spec/op
 PAGE_SIZE = 100
 MAX_RESULTS = 10_000
 REQUEST_INTERVAL = 3
+
+
 @dataclass(frozen=True)
 class Article:
     arxiv_id: str

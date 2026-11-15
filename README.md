@@ -45,7 +45,7 @@ API дополнительно проверяет полноту JSON и ссы�
 Проверка без ключей OpenRouter и работающих хранилищ (Python 3.11+):
 
 ```sh
-python -m pip install -r api/requirements.txt -r arxiv-grabber/requirements.txt -r temporal/requirements.txt
+python -m pip install -r api/requirements.txt -r temporal/requirements.txt
 python -m unittest discover -s tests -v
 ```
 

@@ -14,9 +14,9 @@ from sqlalchemy import text
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from arxiv_grabber.html_text import extract_markdown
-from arxiv_grabber.main import Article, ArxivClient, ImportJob, ensure_bucket, log_import_event, log_import_update, save_paper, store_source
-from arxiv_grabber.storage import connect_database
+from processing.html_text import extract_markdown
+from processing.arxiv import Article, ArxivClient, ImportJob, ensure_bucket, log_import_event, log_import_update, save_paper, store_source
+from processing.db import connect_database
 from chunks import PAPER_COLLECTIONS
 from embedding_schemas import EMBEDDING_OPENROUTER_MODEL
 from llm_chat import ChatSettings

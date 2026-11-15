@@ -15,7 +15,7 @@ from temporalio import activity
 from temporalio.worker import Worker, Replayer
 from tokenizers import Tokenizer
 
-from arxiv_grabber.main import Article
+from processing.arxiv import Article
 from chunks import PAPER_COLLECTIONS
 from embedding_schemas import EMBEDDING_OPENROUTER_MODEL
 from main import app, lifespan

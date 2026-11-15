@@ -1,2 +1,5 @@
 temporalio==1.36.1
 tokenizers==0.22.2
+beautifulsoup4>=4.12,<5
+markdownify>=1.2,<2
+requests>=2.32.4,<3

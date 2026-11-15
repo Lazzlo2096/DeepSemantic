@@ -13,3 +13,12 @@ async def connection():
         connect_timeout=5, autocommit=True, row_factory=dict_row,
     ) as db:
         yield db
+
+
+def connect_database():
+    """Synchronous connection for arXiv operations running in worker threads."""
+    return psycopg.connect(
+        host=os.getenv("POSTGRES_HOST", "postgres"), dbname=os.environ["POSTGRES_DB"],
+        user=os.environ["POSTGRES_USER"], password=os.environ["POSTGRES_PASSWORD"],
+        connect_timeout=5, autocommit=True,
+    )

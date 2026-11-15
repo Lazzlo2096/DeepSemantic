@@ -31,6 +31,11 @@ docker compose -f compose.yaml -f compose.server.yaml --profile workers up -d ar
 вычислительных воркера по-прежнему можно включать и выключать независимо.
 Все они собираются из `temporal/Dockerfile`; их имена в Compose и интерфейсе сохранены.
 
+Код работы с arXiv находится в `api/processing/arxiv.py`, преобразование HTML —
+в `api/processing/html_text.py`. Подключения к PostgreSQL общие для пакета
+`processing`, клиент RustFS используется из `api/storage.py`.
+[Описание импорта arXiv](arxiv.md).
+
 [Temporal UI](http://127.0.0.1:8088) доступен только через localhost. На удалённом
 сервере используйте SSH-туннель `ssh -N -L 8088:127.0.0.1:8088 user@server`.
 Порты задаются `TEMPORAL_PORT` (7233) и `TEMPORAL_UI_PORT` (8088).
@@ -70,7 +75,7 @@ docker compose -f compose.yaml -f compose.server.yaml --profile workers up -d ar
 
 Остановка контейнера приостанавливает потребление его очереди. Задания остаются
 в Temporal и восстанавливаются после запуска; это отличается от бизнес-паузы
-конкретного импорта. Прямой CLI `arxiv-grabber/main.py --from ... --to ...` оставлен
+конкретного импорта. Прямой CLI `python -m processing.arxiv --from ... --to ...` оставлен
 для разовой загрузки без Temporal; старые циклы SQL-очередей удалены.
 
 ## Повтор и восстановление индекса
@@ -119,7 +124,7 @@ persistence и visibility в отдельном PostgreSQL 17. Это один �
 ## Проверки
 
 ```sh
-python -m pip install -r api/requirements.txt -r arxiv-grabber/requirements.txt -r temporal/requirements.txt
+python -m pip install -r api/requirements.txt -r temporal/requirements.txt
 python -m unittest discover -s tests -v
 python tests/temporal/run.py
 ```
