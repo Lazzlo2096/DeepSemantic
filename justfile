@@ -1,24 +1,26 @@
 set windows-shell := ["powershell.exe", "-NoProfile", "-Command"]
+set dotenv-load := true
 
 workers := "arxiv-grabber arxiv-text-worker embeding-worker summary-worker"
+embedding_provider := env_var_or_default("EMBEDDING_PROVIDER", "deepkaravan")
 
 default:
     @just --list
 
 build:
-    docker compose --profile workers build
+    docker compose --profile {{embedding_provider}} --profile workers build
 
 up *compose_args:
-    docker compose {{compose_args}} up --build --detach --remove-orphans
+    docker compose --profile {{embedding_provider}} {{compose_args}} up --build --detach --remove-orphans
     docker compose {{compose_args}} up --build --no-start --no-deps {{workers}}
 
 up-server: (up "-f" "compose.yaml" "-f" "compose.server.yaml")
 
 restart *compose_args:
-    docker compose {{compose_args}} up --build --detach --remove-orphans --no-deps --force-recreate --wait api fontend
+    docker compose --profile {{embedding_provider}} {{compose_args}} up --build --detach --remove-orphans --no-deps --force-recreate --wait api fontend
 
 down:
-    docker compose --profile workers --profile langsmith-studio --profile tg-bot down
+    docker compose --profile workers --profile langsmith-studio --profile tg-bot --profile deepkaravan down
 
 # Telegram bot (polling).
 tg-bot-up:
@@ -32,7 +34,7 @@ tg-bot-logs:
 
 # Local Agent Server for LangSmith Studio (https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024).
 langsmith-studio-up:
-    docker compose --profile langsmith-studio up --build --detach --wait langsmith-studio
+    docker compose --profile {{embedding_provider}} --profile langsmith-studio up --build --detach --wait langsmith-studio
 
 langsmith-studio-down:
     docker compose --profile langsmith-studio stop langsmith-studio
@@ -41,10 +43,10 @@ langsmith-studio-logs:
     docker compose --profile langsmith-studio logs --follow langsmith-studio
 
 logs:
-    docker compose --profile workers --profile tg-bot logs --follow
+    docker compose --profile workers --profile tg-bot --profile deepkaravan logs --follow
 
 ps:
-    docker compose --profile workers --profile langsmith-studio --profile tg-bot ps --all
+    docker compose --profile workers --profile langsmith-studio --profile tg-bot --profile deepkaravan ps --all
 
 temporal-test:
     python tests/temporal/run.py
