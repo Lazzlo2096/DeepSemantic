@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="/vendor/katex/katex.min.css">
     <script defer src="/vendor/katex/katex.min.js"></script>
     <script defer src="/vendor/texmath.js"></script>
-    <script type="module" src="/paper.js"></script>
+    <script type="module" src="/paper.js?v=2"></script>
   </head>
   <body>
     <header class="topbar">
@@ -40,6 +40,7 @@
           <button id="summarize" type="button" disabled>Суммаризировать</button>
         </div>
         <p id="summary-status" role="status">Проверяем статус…</p>
+        <p id="summary-deferred-link" hidden><a href="/workers.html">Настроить обработку саммари</a></p>
         <div id="summary-result" class="formatted-text" hidden></div>
       </section>
 

@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Воркеры · DeepSemantic</title>
     <link rel="icon" href="/icon.svg" type="image/svg+xml" sizes="any">
-    <link rel="stylesheet" href="/styles.css?v=3">
-    <script type="module" src="/workers.js"></script>
+    <link rel="stylesheet" href="/styles.css?v=4">
+    <script type="module" src="/pipeline.js?v=1"></script>
   </head>
   <body>
     <header class="topbar">
@@ -26,35 +26,53 @@
       <section class="intro" aria-labelledby="page-title">
         <p class="eyebrow">Фоновые задачи</p>
         <h1 id="page-title">Воркеры</h1>
-        <p>Запускай и останавливай контейнеры обработки. Остановка может прервать текущее задание.</p>
+        <p>Выбирай пути обработки статей и следи за обработкой накопившихся данных.</p>
       </section>
 
-      <section aria-labelledby="workers-title">
+      <section id="pipeline-controls" class="paper pipeline-panel" aria-labelledby="pipeline-title">
         <div class="results-bar">
-          <h2 id="workers-title">Состояние контейнеров</h2>
-          <button id="refresh-workers" type="button">Обновить</button>
+          <h2 id="pipeline-title">Пути обработки статей</h2>
+          <button id="refresh-pipeline" type="button">Обновить режим</button>
         </div>
-        <p id="workers-status" role="status">Проверяем состояние…</p>
-        <div id="workers-list" class="paper-list"></div>
+        <p class="pipeline-note">Настройка действует на всю систему и сохраняется после перезапуска.</p>
+        <div class="pipeline-paths">
+          <article class="pipeline-path" aria-labelledby="article-path-title">
+            <div class="results-bar">
+              <h3 id="article-path-title">Индексация статьи</h3>
+              <span class="paper-stage" data-stage="completed">Всегда включена</span>
+            </div>
+            <p>Скачать HTML → Markdown → чанки статьи → эмбеддинги → Qdrant</p>
+          </article>
+          <article class="pipeline-path" aria-labelledby="summary-path-title">
+            <div class="results-bar">
+              <h3 id="summary-path-title">Саммари и его индекс</h3>
+              <span id="summary-mode" class="paper-stage" role="status">Загружаем режим…</span>
+            </div>
+            <p>Markdown → саммари → чанки саммари → эмбеддинги → Qdrant</p>
+            <div class="filter-actions" role="group" aria-label="Режим ветки саммари">
+              <button id="enable-summaries" type="button" aria-pressed="false" disabled>Включить саммари</button>
+              <button id="defer-summaries" type="button" aria-pressed="false" disabled>Отложить саммари</button>
+            </div>
+          </article>
+        </div>
+        <p id="pipeline-description" class="pipeline-note">Проверяем настройку…</p>
+        <p class="pipeline-note">При включении накопившиеся статьи обрабатываются автоматически. Уже начавшийся вызов модели или батч может завершиться после переключения.</p>
+        <p id="pipeline-feedback" class="pipeline-feedback" role="status" hidden></p>
+        <div class="pipeline-reconciliation" aria-labelledby="reconciliation-title">
+          <h3 id="reconciliation-title">Обработка накопившихся статей</h3>
+          <p id="reconciliation-status" class="pipeline-note" role="status">Проверяем фоновую сверку…</p>
+          <dl id="reconciliation-counters" class="pipeline-counters" hidden>
+            <div><dt>Просмотрено за все проходы</dt><dd id="reconciliation-scanned">0</dd></div>
+            <div><dt>Запусков обработки саммари</dt><dd id="reconciliation-submitted">0</dd></div>
+            <div><dt>Полных проходов каталога</dt><dd id="reconciliation-passes">0</dd></div>
+          </dl>
+          <p class="pipeline-note">Счётчики отражают сверку каталога и запуски обработки. Готовность саммари и эмбеддингов проверяется отдельно для каждой статьи.</p>
+          <p id="reconciliation-error" class="pipeline-feedback" role="status" hidden></p>
+        </div>
       </section>
-      <noscript><p>Для управления воркерами включи JavaScript.</p></noscript>
+
+      <noscript><p>Для управления путями обработки включи JavaScript.</p></noscript>
     </main>
 
-    <template id="worker-template">
-      <article class="paper">
-        <div class="results-bar">
-          <div>
-            <h3 class="worker-name"></h3>
-            <code class="worker-id"></code>
-          </div>
-          <span class="paper-stage" role="status">Проверяем состояние…</span>
-        </div>
-        <div class="filter-actions">
-          <button type="button" data-action="start" disabled>Старт</button>
-          <button type="button" data-action="stop" disabled>Стоп</button>
-          <p class="worker-feedback" role="status"></p>
-        </div>
-      </article>
-    </template>
   </body>
 </html>

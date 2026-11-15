@@ -112,7 +112,9 @@ function loadSummary(url, hasText, isHtml) {
 
   function render(job) {
     const busy = job?.status === "queued" || job?.status === "running";
-    button.disabled = !(hasText || (job && isHtml)) || busy;
+    const deferred = job?.status === "deferred";
+    button.disabled = !(hasText || (job && isHtml)) || busy || deferred;
+    document.querySelector("#summary-deferred-link").hidden = !deferred;
     button.textContent = job?.status === "failed" ? "Повторить" : "Суммаризировать";
     if (job?.status === "completed") {
       result.innerHTML = markdown.render(job.summary);
@@ -131,12 +133,14 @@ function loadSummary(url, hasText, isHtml) {
       } else {
         feedback.textContent = `Обработано частей: ${job.parts_completed} из ${job.parts_total}.`;
       }
+    } else if (deferred) {
+      feedback.textContent = "Создание саммари отложено для всей системы. Оно начнётся после включения ветки на странице «Воркеры».";
     } else if (job?.status === "failed") {
       feedback.textContent = job.last_error || "Не удалось суммаризировать статью.";
     } else {
       feedback.textContent = hasText ? "Суммаризация ещё не создана." : "Полный текст статьи пока недоступен.";
     }
-    return busy || (!job && isHtml);
+    return busy || deferred || (!job && isHtml);
   }
 
   async function refresh(method = "GET", polling = false) {

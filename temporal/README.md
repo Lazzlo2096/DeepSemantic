@@ -174,7 +174,7 @@ SQL-dispatcher и воркеры. Не запускайте их после пр
 just backup
 # Затем переключитесь на новую ревизию:
 just up-server
-# Включите вычислительные воркеры на странице «Воркеры» либо:
+# Запустите вычислительные воркеры:
 docker compose -f compose.yaml -f compose.server.yaml --profile workers up -d arxiv-grabber arxiv-text-worker summary-worker embeding-worker
 ```
 
