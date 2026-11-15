@@ -17,8 +17,8 @@ class PaperIndexStatus(BaseModel):
     chunks_in_qdrant: int | None = 0
 
 
-async def paper_index_statuses(request, arxiv_ids):
-    result = {identity: {f"{kind}_index": PaperIndexStatus().model_dump() for kind in PAPER_COLLECTIONS}
+async def paper_index_statuses(request, arxiv_ids, *, source_kinds=("article", "summary"), session=None):
+    result = {identity: {f"{kind}_index": PaperIndexStatus().model_dump() for kind in source_kinds}
               for identity in arxiv_ids}
     if not result:
         return result
@@ -31,11 +31,15 @@ async def paper_index_statuses(request, arxiv_ids):
         LEFT JOIN paper_summaries summary ON summary.arxiv_id = source.arxiv_id AND source.source_kind = 'summary'
         LEFT JOIN paper_chunks link ON link.arxiv_id = source.arxiv_id
             AND link.source_kind = source.source_kind AND link.source_version = source.source_version
-        WHERE source.arxiv_id IN :ids
-    """).bindparams(bindparam("ids", expanding=True))
-    async with database_session(request) as session:
-        rows = (await session.execute(statement, {"ids": list(result)})).mappings().all()
-    expected = {kind: {} for kind in PAPER_COLLECTIONS}
+        WHERE source.arxiv_id IN :ids AND source.source_kind IN :kinds
+    """).bindparams(bindparam("ids", expanding=True), bindparam("kinds", expanding=True))
+    params = {"ids": list(result), "kinds": list(source_kinds)}
+    if session is None:
+        async with database_session(request) as owned_session:
+            rows = (await owned_session.execute(statement, params)).mappings().all()
+    else:
+        rows = (await session.execute(statement, params)).mappings().all()
+    expected = {kind: {} for kind in source_kinds}
     for row in rows:
         kind = row["source_kind"]
         if kind == "summary" and row["summary_generation"] != summary_generation(row, settings):

@@ -17,6 +17,7 @@ from paper_index_status import PaperIndexStatus, paper_index_statuses
 router = APIRouter(prefix="/papers", tags=["papers"])
 ArxivId = Annotated[str, Path(min_length=1, pattern=r"^[^\x00]+$")]
 PaperSort = Literal["downloaded_desc", "submitted_desc", "submitted_asc", "status"]
+PaperFilterStatus = Literal["downloaded", "texted", "article_index_pending"]
 TEXT_MEDIA_TYPES = {".md": "text/markdown", ".txt": "text/plain"}
 
 
@@ -100,7 +101,7 @@ async def list_papers(
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0, le=MAX_BIGINT)] = 0,
     sort: PaperSort = "downloaded_desc",
-    status: PaperStatus | None = None,
+    status: PaperFilterStatus | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
     has_summary: bool | None = None,
@@ -116,7 +117,7 @@ async def list_papers(
         .exists()
     )
     filters = []
-    if status is not None:
+    if status in ("downloaded", "texted"):
         filters.append(ArxivPaper.status == status)
     if date_from is not None:
         filters.append(ArxivPaper.submitted_at >= datetime.combine(date_from, time.min, UTC))
@@ -124,6 +125,9 @@ async def list_papers(
         filters.append(ArxivPaper.submitted_at <= datetime.combine(date_to, time.max, UTC))
     if has_summary is not None:
         filters.append(summary_ready if has_summary else ~summary_ready)
+
+    if status == "article_index_pending":
+        return await pending_article_index_page(request, response, filters, summary_ready, sort, limit, offset)
 
     page = (
         select(ArxivPaper, ArxivPaper.status.label("status"), summary_ready.label("has_summary"))
@@ -146,6 +150,43 @@ async def list_papers(
     papers = [dict(row) for row in rows if row["arxiv_id"] is not None]
     indexes = await paper_index_statuses(request, [paper["arxiv_id"] for paper in papers])
     return [{**paper, **indexes[paper["arxiv_id"]]} for paper in papers]
+
+
+async def pending_article_index_page(request, response, filters, summary_ready, sort, limit, offset):
+    # Verify before pagination: filtering only the displayed SQL page would lose
+    # matches elsewhere in the catalog and produce an incorrect total count.
+    selected = []
+    article_indexes = {}
+    total = 0
+    async with database_session(request) as session:
+        candidates = await session.stream_scalars(
+            select(ArxivPaper.arxiv_id).where(*filters).order_by(*paper_order(ArxivPaper, sort)),
+            execution_options={"yield_per": 100},
+        )
+        try:
+            async for identities in candidates.partitions(100):
+                indexes = await paper_index_statuses(request, identities, source_kinds=("article",), session=session)
+                for identity in identities:
+                    index = indexes[identity]["article_index"]
+                    if index["status"] == "unavailable":
+                        raise HTTPException(503, "Cannot filter article indexes while Qdrant is unavailable.")
+                    if index["status"] != "pending":
+                        continue
+                    if offset <= total < offset + limit:
+                        selected.append(identity)
+                        article_indexes[identity] = index
+                    total += 1
+        finally:
+            await candidates.close()
+        response.headers["X-Total-Count"] = str(total)
+        if not selected:
+            return []
+        rows = (await session.execute(
+            select(*ArxivPaper.__table__.c, ArxivPaper.status.label("status"), summary_ready.label("has_summary"))
+            .where(ArxivPaper.arxiv_id.in_(selected)).order_by(*paper_order(ArxivPaper, sort))
+        )).mappings().all()
+    summaries = await paper_index_statuses(request, selected, source_kinds=("summary",))
+    return [{**row, "article_index": article_indexes[row["arxiv_id"]], **summaries[row["arxiv_id"]]} for row in rows]
 
 
 @router.get("/{arxiv_id:path}/chunks", response_model=list[PaperChunkResponse])
