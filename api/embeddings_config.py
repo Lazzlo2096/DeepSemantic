@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 class EmbeddingSettings:
     provider: str
     base_url: str
-    timeout: float
+    timeout: float | None
     api_key: str = field(default="", repr=False)
 
     @classmethod
@@ -21,8 +21,10 @@ class EmbeddingSettings:
         if provider not in urls:
             raise ValueError("EMBEDDING_PROVIDER must be deepkaravan or openrouter")
         timeout = float(os.getenv("EMBEDDING_TIMEOUT", "60"))
-        if not math.isfinite(timeout) or timeout <= 0:
-            raise ValueError("EMBEDDING_TIMEOUT must be finite and positive")
+        if not math.isfinite(timeout) or timeout < 0:
+            raise ValueError("EMBEDDING_TIMEOUT must be finite and non-negative (0 disables the HTTP timeout)")
+        if timeout == 0:
+            timeout = None
         base_url = os.getenv("EMBEDDING_BASE_URL", "").strip() or urls[provider]
         api_key = os.getenv("OPENROUTER_API_KEY", "").strip() if provider == "openrouter" else ""
         return cls(provider, base_url.rstrip("/") + "/", timeout, api_key)

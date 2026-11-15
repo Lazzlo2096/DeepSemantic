@@ -74,7 +74,7 @@ class EmbeddingProviderTests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_configuration_is_rejected(self):
         for env in [
             {"EMBEDDING_PROVIDER": "typo"},
-            *({"EMBEDDING_TIMEOUT": value} for value in ["0", "-1", "nan", "inf", "invalid"]),
+            *({"EMBEDDING_TIMEOUT": value} for value in ["-1", "nan", "inf", "invalid"]),
         ]:
             with self.subTest(env=env), patch.dict("os.environ", env, clear=True):
                 with self.assertRaises(ValueError):

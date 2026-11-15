@@ -118,7 +118,7 @@ chmod +x ./bootstrap.sh
 ./bootstrap.sh
 ```
 
-После установки укажи в `.env` ключ `OPENROUTER_API_KEY` для RAG и суммаризации и выбери модели `RAG_OPENROUTER_MODEL` и `SUMMARY_OPENROUTER_MODEL`. Провайдер эмбеддингов выбирается через `EMBEDDING_PROVIDER`: `deepkaravan` (по умолчанию, локальный сервис без ключа) или `openrouter` (использует `OPENROUTER_API_KEY`). Модель задаёт `EMBEDDING_OPENROUTER_MODEL=baai/bge-m3`, таймаут — `EMBEDDING_TIMEOUT` (60 секунд). Запускай и останавливай проект из каталога `DeepSemantic`.
+После установки укажи в `.env` ключ `OPENROUTER_API_KEY` для RAG и суммаризации и выбери модели `RAG_OPENROUTER_MODEL` и `SUMMARY_OPENROUTER_MODEL`. Провайдер эмбеддингов выбирается через `EMBEDDING_PROVIDER`: `deepkaravan` (по умолчанию, локальный сервис без ключа) или `openrouter` (использует `OPENROUTER_API_KEY`). Модель задаёт `EMBEDDING_OPENROUTER_MODEL=baai/bge-m3`, HTTP-таймаут — `EMBEDDING_TIMEOUT` (по умолчанию 60 секунд; `0` отключает HTTP-таймаут). Лимиты Temporal Activities сохраняются: для `index_batch` — 10 минут. Запускай и останавливай проект из каталога `DeepSemantic`.
 
 ```dotenv
 # Локальный DeepKaravan
