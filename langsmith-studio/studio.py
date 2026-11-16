@@ -15,9 +15,11 @@ from langgraph.types import Overwrite
 from langgraph_sdk.runtime import ServerRuntime
 from typing_extensions import TypedDict
 
+from agents.prompts import RESEARCH_INSTRUCTIONS
+from agents.tools import QueryText
 from main import lifespan
 from rag import (
-    RAG_NODES, RAG_RECURSION_LIMIT, RESEARCH_INSTRUCTIONS, QueryText,
+    RAG_NODES, RAG_RECURSION_LIMIT,
     RagContext, RagQuestion, RagSource, add_rag_edges,
 )
 

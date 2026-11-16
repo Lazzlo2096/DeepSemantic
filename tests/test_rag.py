@@ -91,9 +91,9 @@ class RagPipelineTests(unittest.IsolatedAsyncioTestCase):
                                 side_effect=lambda request, run_id, turn: self.model_turns.append(turn)))
         self.enterContext(patch("rag.save_tool_call", new_callable=AsyncMock,
                                 side_effect=lambda request, run_id, call: self.tool_calls.append(call)))
-        self.vectors = self.enterContext(patch("rag.find_chunks", new_callable=AsyncMock, return_value=[chunk()]))
-        self.text = self.enterContext(patch("rag.find_text_chunks", new_callable=AsyncMock, return_value=[]))
-        self.read = self.enterContext(patch("rag.read_document", new_callable=AsyncMock, return_value={
+        self.vectors = self.enterContext(patch("agents.tools.find_chunks", new_callable=AsyncMock, return_value=[chunk()]))
+        self.text = self.enterContext(patch("agents.tools.find_text_chunks", new_callable=AsyncMock, return_value=[]))
+        self.read = self.enterContext(patch("agents.tools.read_document", new_callable=AsyncMock, return_value={
             "document_id": "2611.00001", "source_kind": "article", "source_start": 20, "source_end": 40,
             "text": "More context.", "paper_title": "Research paper", "chunk_index": None,
         }))

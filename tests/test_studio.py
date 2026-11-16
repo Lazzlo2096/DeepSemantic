@@ -36,7 +36,7 @@ class StudioTests(unittest.IsolatedAsyncioTestCase):
         client = await self.enterAsyncContext(httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=None))
         model = create_rag_model(ChatSettings("openrouter", "test", "https://openrouter.ai/api/v1/", "test-key"), client)
         self.context = RagContext(request=SimpleNamespace(), run_id=uuid4(), model=model, record_history=False)
-        self.vectors = self.enterContext(patch("rag.find_chunks", new_callable=AsyncMock, return_value=[chunk()]))
+        self.vectors = self.enterContext(patch("agents.tools.find_chunks", new_callable=AsyncMock, return_value=[chunk()]))
         self.model_history = self.enterContext(patch("rag.save_model_turn", new_callable=AsyncMock))
         self.tool_history = self.enterContext(patch("rag.save_tool_call", new_callable=AsyncMock))
         self.enterContext(patch.dict("os.environ", {"CHUNK_OVERLAP_PERCENT": "0"}))
