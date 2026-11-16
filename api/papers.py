@@ -17,7 +17,7 @@ from paper_index_status import PaperIndexStatus, paper_index_statuses
 router = APIRouter(prefix="/papers", tags=["papers"])
 ArxivId = Annotated[str, Path(min_length=1, pattern=r"^[^\x00]+$")]
 PaperSort = Literal["downloaded_desc", "submitted_desc", "submitted_asc", "status"]
-PaperFilterStatus = Literal["downloaded", "texted", "article_index_pending"]
+PaperFilterStatus = Literal["downloaded", "texted", "article_index_pending", "article_index_completed"]
 TEXT_MEDIA_TYPES = {".md": "text/markdown", ".txt": "text/plain"}
 
 
@@ -126,8 +126,9 @@ async def list_papers(
     if has_summary is not None:
         filters.append(summary_ready if has_summary else ~summary_ready)
 
-    if status == "article_index_pending":
-        return await pending_article_index_page(request, response, filters, summary_ready, sort, limit, offset)
+    if status in ("article_index_pending", "article_index_completed"):
+        index_status = "completed" if status == "article_index_completed" else "pending"
+        return await article_index_page(request, response, filters, summary_ready, sort, limit, offset, index_status)
 
     page = (
         select(ArxivPaper, ArxivPaper.status.label("status"), summary_ready.label("has_summary"))
@@ -152,7 +153,7 @@ async def list_papers(
     return [{**paper, **indexes[paper["arxiv_id"]]} for paper in papers]
 
 
-async def pending_article_index_page(request, response, filters, summary_ready, sort, limit, offset):
+async def article_index_page(request, response, filters, summary_ready, sort, limit, offset, index_status):
     # Verify before pagination: filtering only the displayed SQL page would lose
     # matches elsewhere in the catalog and produce an incorrect total count.
     selected = []
@@ -170,7 +171,7 @@ async def pending_article_index_page(request, response, filters, summary_ready, 
                     index = indexes[identity]["article_index"]
                     if index["status"] == "unavailable":
                         raise HTTPException(503, "Cannot filter article indexes while Qdrant is unavailable.")
-                    if index["status"] != "pending":
+                    if index["status"] != index_status:
                         continue
                     if offset <= total < offset + limit:
                         selected.append(identity)

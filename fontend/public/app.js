@@ -5,7 +5,7 @@ const PAGE_SIZE = 12;
 const stageLabels = new Map([
   ["downloaded", "Исходник скачан"],
   ["texted", "Текст извлечён"],
-  ["article_index_pending", "Индекс статьи не готов"],
+  ["article_index_completed", "Статья в Qdrant"],
 ]);
 const dateFormat = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeZone: "UTC" });
 const list = document.querySelector("#papers");

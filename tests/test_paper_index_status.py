@@ -10,6 +10,8 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "api"))
 import paper_index_status as indexes
+import papers
+from fastapi import HTTPException, Response
 from processing.config import fingerprint, pipeline_settings, summary_generation
 
 
@@ -77,6 +79,66 @@ class PaperIndexTests(unittest.IsolatedAsyncioTestCase):
         result = await self.verify([source_row("article", identity) for identity in range(1, 258)], handler)
         self.assertEqual(sizes, [256, 1])
         self.assertEqual(result["article_index"]["status"], "completed")
+
+
+class CatalogIndexFilterTests(unittest.IsolatedAsyncioTestCase):
+    async def catalog(self, status, *, offset=0, unavailable=False):
+        identities = ["pending", "ready-1", "ready-2", "ready-3"]
+
+        async def partitions(size):
+            yield identities[:2]
+            yield identities[2:]
+
+        candidates = SimpleNamespace(partitions=partitions, close=AsyncMock())
+        session = SimpleNamespace(stream_scalars=AsyncMock(return_value=candidates))
+
+        async def execute(statement):
+            selected = statement.compile().params["arxiv_id_1"]
+            return SimpleNamespace(mappings=lambda: SimpleNamespace(
+                all=lambda: [{"arxiv_id": identity} for identity in selected]))
+
+        session.execute = execute
+
+        @asynccontextmanager
+        async def database_session(request):
+            yield session
+
+        async def statuses(request, selected, *, source_kinds, **kwargs):
+            kind, = source_kinds
+            return {identity: {f"{kind}_index": {
+                "status": "pending" if kind == "summary" or identity == "pending"
+                    else "unavailable" if unavailable else "completed",
+            }} for identity in selected}
+
+        response = Response()
+        with patch.object(papers, "database_session", database_session), \
+                patch.object(papers, "paper_index_statuses", statuses):
+            result = await papers.list_papers(SimpleNamespace(), response,
+                status=status, limit=1, offset=offset)
+        candidates.close.assert_awaited_once()
+        return result, response
+
+    async def test_ready_filter_counts_before_pagination_and_ignores_pending_summary(self):
+        result, response = await self.catalog("article_index_completed", offset=1)
+        self.assertEqual(response.headers["X-Total-Count"], "3")
+        self.assertEqual([row["arxiv_id"] for row in result], ["ready-2"])
+        self.assertEqual(result[0]["article_index"]["status"], "completed")
+        self.assertEqual(result[0]["summary_index"]["status"], "pending")
+
+    async def test_ready_filter_preserves_total_on_empty_page(self):
+        result, response = await self.catalog("article_index_completed", offset=3)
+        self.assertEqual(result, [])
+        self.assertEqual(response.headers["X-Total-Count"], "3")
+
+    async def test_pending_filter_remains_supported(self):
+        result, response = await self.catalog("article_index_pending")
+        self.assertEqual([row["arxiv_id"] for row in result], ["pending"])
+        self.assertEqual(response.headers["X-Total-Count"], "1")
+
+    async def test_ready_filter_reports_unavailable_qdrant(self):
+        with self.assertRaises(HTTPException) as error:
+            await self.catalog("article_index_completed", unavailable=True)
+        self.assertEqual(error.exception.status_code, 503)
 
 
 if __name__ == "__main__":
