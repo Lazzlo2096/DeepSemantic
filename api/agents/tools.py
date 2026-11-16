@@ -5,6 +5,7 @@ run. Tools share this dictionary to avoid mixing different source versions.
 """
 
 from codecs import getincrementaldecoder
+from functools import partial
 from typing import Annotated
 
 from botocore.exceptions import BotoCoreError
@@ -98,41 +99,50 @@ async def search_sources(request: Request, query: str, limit: int, versions: dic
     return results
 
 
+async def search_vectors(query: str, limit: int = 3, *, request: Request, versions: dict):
+    return await search_sources(request, query, limit, versions, vector=True)
+
+
+async def search_text(query: str, limit: int = 3, *, request: Request, versions: dict):
+    return await search_sources(request, query, limit, versions, vector=False)
+
+
+async def read_source(
+    document_id: str, source_start: int, source_end: int, source_kind: PaperChunkSource = "article",
+    *, request: Request, versions: dict,
+):
+    args = ReadArguments(
+        document_id=document_id, source_start=source_start, source_end=source_end, source_kind=source_kind,
+    )
+    return [await read_document(request, args, versions)]
+
+
 TOOL_SPECS = {
-    "search_vectors": (SearchArguments, "Смысловой поиск. Возвращает текст чанка, векторное сходство и его координаты."),
+    "search_vectors": (
+        search_vectors, SearchArguments,
+        "Смысловой поиск. Возвращает текст чанка, векторное сходство и его координаты.",
+    ),
     "search_text": (
-        SearchArguments,
+        search_text, SearchArguments,
         "Буквальный поиск строки без учёта регистра. Все тексты в индексе сейчас на английском языке. "
         "Формулируй поисковую строку на английском. Возвращает текст чанка и координаты.",
     ),
-    "read_document": (ReadArguments, "Читает указанный диапазон исходного текста статьи или суммаризации."),
+    "read_document": (
+        read_source, ReadArguments,
+        "Читает указанный диапазон исходного текста статьи или суммаризации.",
+    ),
 }
 TOOLS = [
     {"type": "function", "function": {"name": name, "description": description, "parameters": arguments.model_json_schema()}}
-    for name, (arguments, description) in TOOL_SPECS.items()
+    for name, (_, arguments, description) in TOOL_SPECS.items()
 ]
 
+
 def create_tools(request: Request, versions: dict) -> dict[str, StructuredTool]:
-    async def search_vectors(query: str, limit: int = 3):
-        return await search_sources(request, query, limit, versions, vector=True)
-
-    async def search_text(query: str, limit: int = 3):
-        return await search_sources(request, query, limit, versions, vector=False)
-
-    async def read_source(document_id: str, source_start: int, source_end: int, source_kind: PaperChunkSource = "article"):
-        args = ReadArguments(
-            document_id=document_id, source_start=source_start, source_end=source_end, source_kind=source_kind,
-        )
-        return [await read_document(request, args, versions)]
-
-    functions = {
-        "search_vectors": search_vectors,
-        "search_text": search_text,
-        "read_document": read_source
-    }
     return {
         name: StructuredTool.from_function(
-            coroutine=functions[name], name=name, description=description, args_schema=arguments,
+            coroutine=partial(function, request=request, versions=versions),
+            name=name, description=description, args_schema=arguments,
         )
-        for name, (arguments, description) in TOOL_SPECS.items()
+        for name, (function, arguments, description) in TOOL_SPECS.items()
     }
