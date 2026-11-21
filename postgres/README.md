@@ -20,9 +20,19 @@ docker compose exec postgres sh -c 'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_
 
 ## Миграции
 
-Ревизии Alembic лежат в `postgres/migrations/versions/`. При запуске через `just up` сервис `migrate` выполняет `alembic upgrade head` после готовности PostgreSQL. API запускается после успешного завершения миграций. Первые две ревизии поддерживают и пустую базу, и таблицу, которую ранее создавал API.
+Основные ревизии Alembic лежат в `postgres/migrations/versions/`, а ревизии аккаунтов — в `postgres/migrations/auth_versions/`. Сервис `migrate` при `upgrade head` сначала обновляет историю `auth`, затем основную историю. API запускается после успешного завершения обеих миграций.
 
-Проверить текущую ревизию можно командой `docker compose run --rm migrate current`.
+Текущие ревизии можно посмотреть командами `docker compose run --rm migrate current` и `docker compose run --rm migrate --name auth current`. Alembic записывает их в `alembic_version` и `auth_alembic_version` соответственно.
+
+## Аккаунты и сессии
+
+Ревизия `0001_auth_schema` создаёт схему `auth` в основной базе PostgreSQL.
+
+- `auth.users` хранит адрес электронной почты, хеш пароля, роль `user` или `admin` и дату блокировки. Уникальность адреса проверяется без учёта регистра.
+- `auth.sessions` хранит SHA-256-хеш токена, владельца, срок действия и дату отзыва.
+- `auth.invites` хранит SHA-256-хеш приглашения, адрес, роль, автора приглашения и даты истечения, использования и отзыва.
+
+Основная ревизия `0041_rag_run_owner` добавляет `rag_runs.user_id` со ссылкой на `auth.users.id`. Для записей, созданных до появления аккаунтов, значение остаётся `NULL`. При откате сначала снимается связь в основной истории, затем откатывается история `auth`. Отдельные роли PostgreSQL для сервисов настраиваются при развёртывании.
 
 ## Счётчики задания импорта arXiv
 
