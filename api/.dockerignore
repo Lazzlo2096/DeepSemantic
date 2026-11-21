@@ -20,6 +20,8 @@
 !temporal_runtime.py
 !pipeline.py
 !paper_index_status.py
+!agents/
+!agents/*.py
 !processing/
 !processing/__init__.py
 !processing/config.py

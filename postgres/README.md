@@ -12,7 +12,7 @@ docker compose exec postgres sh -c 'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_
 
 ## pgAdmin
 
-Запустите `docker compose up -d pgadmin` и откройте http://127.0.0.1:5050. Для первого входа по умолчанию используются `admin@deepsemantic.dev` и пароль `deepsemantic`. Их можно задать через `PGADMIN_DEFAULT_EMAIL` и `PGADMIN_DEFAULT_PASSWORD` перед инициализацией тома `pgadmin-data`.
+Запустите `docker compose up -d pgadmin` и откройте http://127.0.0.1:5050. pgAdmin доступен на локальном интерфейсе и открывается без пароля. Если том `pgadmin-data` уже настроен, `PGADMIN_DEFAULT_EMAIL` должен совпадать с адресом существующей учётной записи, чтобы использовать её подключения.
 
 При первой инициализации pgAdmin импортирует **DeepSemantic PostgreSQL** из `pgadmin/servers.json`. При подключении введите пароль PostgreSQL. Если имя базы или пользователя отличается от значения по умолчанию, укажите его в настройках подключения.
 
