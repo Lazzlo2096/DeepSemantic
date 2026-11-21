@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from sqlalchemy import select, text, update
 
+from auth import CurrentUser
 from database import MAX_BIGINT, Chunk, database_session
 from embedding_schemas import EMBEDDING_MODEL_KEY, EmbeddingRequest, Text
 
@@ -80,7 +81,7 @@ class ChunkSearchResult(ChunkMatch):
 
 
 @router.post("/search", response_model=list[ChunkSearchResult])
-async def search_chunks(payload: ChunkSearchRequest, request: Request):
+async def search_chunks(payload: ChunkSearchRequest, request: Request, _: CurrentUser):
     return await find_chunks(request, payload.query, payload.limit)
 
 

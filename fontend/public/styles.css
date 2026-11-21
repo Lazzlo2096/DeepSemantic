@@ -18,6 +18,9 @@ body { margin: 0; }
 .brand-link { display: flex; align-items: center; gap: 12px; color: #000; text-decoration: none; white-space: nowrap; }
 .topbar-nav { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 16px; margin-inline-start: auto; }
 .topbar-link { color: var(--accent); font-size: 0.9rem; }
+.topbar-account { color: var(--muted); font-size: 0.82rem; font-weight: 500; }
+.topbar-logout { min-height: auto; padding: 0; border: 0; color: var(--accent); background: transparent; font-size: 0.85rem; }
+.topbar-logout:not(:disabled):hover { background: transparent; text-decoration: underline; }
 .brand-mark { flex-shrink: 0; }
 
 main { padding-block: 36px 56px; }
@@ -231,8 +234,38 @@ button:disabled { color: var(--muted); background: #eef1f6; cursor: default; }
 .pipeline-counters dt { color: var(--muted); font-size: 0.85rem; line-height: 1.4; }
 .pipeline-counters dd { margin: 6px 0 0; font-size: 1.5rem; font-weight: 650; }
 
+.auth-layout { display: grid; place-items: start center; }
+.auth-panel { width: min(100%, 430px); padding: clamp(22px, 5vw, 36px); }
+.auth-panel h1 { font-size: clamp(2rem, 6vw, 3rem); }
+.auth-panel form { display: grid; gap: 16px; margin-top: 24px; }
+.auth-panel label, .invite-form label { display: grid; gap: 6px; color: var(--muted); font-size: 0.88rem; }
+.auth-panel input, .invite-form input, .invite-form select, .invite-link input, .users-table select {
+  min-width: 0;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+}
+.auth-panel button[type="submit"] { background: var(--accent); color: #fff; }
+.users-panel { margin-bottom: 20px; }
+.invite-form { display: grid; grid-template-columns: minmax(0, 2fr) minmax(150px, 1fr) auto; align-items: end; gap: 12px; margin-top: 18px; }
+.invite-result { margin-top: 16px; }
+.invite-result > label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 0.85rem; }
+.invite-link { display: flex; gap: 8px; }
+.invite-link input { flex: 1; }
+.users-table-wrap { overflow-x: auto; }
+.users-table { width: 100%; min-width: 650px; border-collapse: collapse; }
+.users-table th, .users-table td { padding: 10px 8px; border-top: 1px solid var(--border); text-align: left; }
+.users-table th { border-top: 0; color: var(--muted); font-size: 0.82rem; }
+.users-table td:first-child { overflow-wrap: anywhere; }
+
 @media (max-width: 480px) {
   .shell { width: calc(100% - 28px); }
   main { padding-top: 22px; }
   .paper { padding: 16px; }
+  .invite-form { grid-template-columns: 1fr; }
+  .invite-link { align-items: stretch; flex-direction: column; }
 }

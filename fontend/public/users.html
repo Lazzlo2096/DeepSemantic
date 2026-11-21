@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Пользователи · DeepSemantic</title>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" sizes="any">
+    <link rel="stylesheet" href="/styles.css?v=7">
+    <script type="module" src="/auth.js?v=1"></script>
+    <script type="module" src="/users.js?v=1"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="shell brand">
+        <a class="brand-link" href="/">
+          <img class="brand-mark" src="/icon.svg" width="32" height="32" alt="">
+          DeepSemantic
+        </a>
+        <nav class="topbar-nav" aria-label="Разделы">
+          <a class="topbar-link" href="/">Каталог статей</a>
+          <a class="topbar-link" href="/imports.html">Импорт arXiv</a>
+          <a class="topbar-link" href="/workers.html">Воркеры</a>
+        </nav>
+      </div>
+    </header>
+    <main class="shell">
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow">Администрирование</p>
+        <h1 id="page-title">Пользователи</h1>
+        <p>Создавайте приглашения и управляйте доступом к DeepSemantic.</p>
+      </section>
+      <section class="paper users-panel" aria-labelledby="invite-title">
+        <h2 id="invite-title">Новое приглашение</h2>
+        <form id="invite-form" class="invite-form">
+          <label><span>Электронная почта</span><input name="email" type="email" required maxlength="320"></label>
+          <label><span>Роль</span><select name="role"><option value="user">Пользователь</option><option value="admin">Администратор</option></select></label>
+          <button type="submit">Создать приглашение</button>
+        </form>
+        <div id="invite-result" class="invite-result" hidden>
+          <label for="invite-url">Ссылка действует ограниченное время</label>
+          <div class="invite-link"><input id="invite-url" readonly><button id="copy-invite" type="button">Копировать</button></div>
+        </div>
+        <p id="users-feedback" class="pipeline-feedback" role="status" hidden></p>
+      </section>
+      <section class="paper users-panel" aria-labelledby="users-title">
+        <div class="results-bar"><h2 id="users-title">Аккаунты</h2><button id="refresh-users" type="button">Обновить</button></div>
+        <div class="users-table-wrap">
+          <table class="users-table">
+            <thead><tr><th>Пользователь</th><th>Роль</th><th>Состояние</th><th></th></tr></thead>
+            <tbody id="users-list"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

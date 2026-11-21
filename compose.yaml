@@ -91,8 +91,12 @@ services:
     depends_on:
       api:
         condition: service_started
+      auth-service:
+        condition: service_healthy
       worker-control:
         condition: service_started
+    environment:
+      AUTH_PROXY_SECRET: "${AUTH_PROXY_SECRET:-deepsemantic-local-proxy-secret}"
     networks: [default, worker-control]
     ports:
       - "127.0.0.1:${FONTEND_PORT:-8080}:80"
@@ -100,6 +104,28 @@ services:
       - ./fontend/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./fontend/routes.caddy:/etc/caddy/routes.caddy:ro
       - ./fontend/public:/srv:ro
+
+  auth-service:
+    build: ./auth-service
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *postgres-environment
+      AUTH_COOKIE_NAME: "${AUTH_COOKIE_NAME:-deepsemantic_session}"
+      AUTH_CSRF_COOKIE_NAME: "deepsemantic_csrf"
+      AUTH_COOKIE_SECURE: "${AUTH_COOKIE_SECURE:-false}"
+      AUTH_SESSION_DAYS: "${AUTH_SESSION_DAYS:-30}"
+      AUTH_INVITE_HOURS: "${AUTH_INVITE_HOURS:-72}"
+      AUTH_PUBLIC_URL: "${AUTH_PUBLIC_URL:-http://127.0.0.1:8080}"
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health/live', timeout=4).close()"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 6
 
   worker-control:
     build:
@@ -129,6 +155,7 @@ services:
       RAG_OPENROUTER_MODEL: "${RAG_OPENROUTER_MODEL:-deepseek/deepseek-v4.1-flash-1017}"
       OPENROUTER_REASONING_EFFORT: "${RAG_OPENROUTER_REASONING_EFFORT:-}"
       RUSTFS_BUCKET: "${RUSTFS_BUCKET:-arxiv-papers}"
+      AUTH_PROXY_SECRET: "${AUTH_PROXY_SECRET:-deepsemantic-local-proxy-secret}"
     healthcheck:
       test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health/live', timeout=4).close()"]
       interval: 10s

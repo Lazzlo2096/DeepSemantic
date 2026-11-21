@@ -15,7 +15,7 @@ up *compose_args:
 up-server: (up "-f" "compose.yaml" "-f" "compose.server.yaml")
 
 restart *compose_args:
-    docker compose --profile {{embedding_provider}} {{compose_args}} up --build --detach --remove-orphans --no-deps --force-recreate --wait api fontend
+    docker compose --profile {{embedding_provider}} {{compose_args}} up --build --detach --remove-orphans --no-deps --force-recreate --wait auth-service api fontend
 
 stop:
     docker compose --profile langsmith-studio --profile tg-bot --profile deepkaravan stop

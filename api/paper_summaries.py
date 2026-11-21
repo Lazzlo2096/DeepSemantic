@@ -4,6 +4,7 @@ from uuid import UUID, NAMESPACE_URL, uuid5
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
+from auth import AdminUser
 from database import PaperSummaryStatus
 from papers import ArxivId
 import paper_repository as repository
@@ -74,5 +75,5 @@ async def get_paper_summary(request: Request, arxiv_id: ArxivId):
 
 
 @router.post('/{arxiv_id:path}/summary', status_code=202, response_model=SummaryJob, responses={200: {'model': SummaryJob}})
-async def create_paper_summary(request: Request, response: Response, arxiv_id: ArxivId):
+async def create_paper_summary(request: Request, response: Response, arxiv_id: ArxivId, _: AdminUser):
     return await summary_response(request, arxiv_id, response, create=True)

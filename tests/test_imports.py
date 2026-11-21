@@ -24,7 +24,12 @@ class ImportResponseTests(unittest.IsolatedAsyncioTestCase):
         @asynccontextmanager
         async def database_session(request):
             yield session
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://test") as api:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://test", headers={
+            "X-Auth-Proxy-Secret": "deepsemantic-local-proxy-secret",
+            "X-Authenticated-User": "00000000-0000-0000-0000-000000000001",
+            "X-Authenticated-Email": "admin@example.test",
+            "X-Authenticated-Role": "admin",
+        }) as api:
             for total in (None, 0, 12):
                 with self.subTest(total=total), patch.object(main, "database_session", database_session), \
                         patch.object(main.temporal_runtime, "describe", new=AsyncMock(return_value={

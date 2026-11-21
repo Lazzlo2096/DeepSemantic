@@ -1,6 +1,8 @@
 services:
   fontend:
     restart: unless-stopped
+    environment:
+      AUTH_PROXY_SECRET: "${AUTH_PROXY_SECRET:?AUTH_PROXY_SECRET must be set}"
     ports: !override
       - "80:80"
       - "443:443"
@@ -8,6 +10,17 @@ services:
     volumes:
       - ./fontend/Caddyfile.server:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
+
+  auth-service:
+    restart: unless-stopped
+    environment:
+      AUTH_COOKIE_NAME: "__Host-deepsemantic-session"
+      AUTH_COOKIE_SECURE: "true"
+      AUTH_PUBLIC_URL: "https://deep-semantic.com"
+
+  api:
+    environment:
+      AUTH_PROXY_SECRET: "${AUTH_PROXY_SECRET:?AUTH_PROXY_SECRET must be set}"
 
 volumes:
   caddy-data:

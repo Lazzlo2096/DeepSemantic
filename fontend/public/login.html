@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <title>Вход · DeepSemantic</title>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" sizes="any">
+    <link rel="stylesheet" href="/styles.css?v=7">
+    <script type="module" src="/login.js?v=1"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="shell brand">
+        <a class="brand-link" href="/">
+          <img class="brand-mark" src="/icon.svg" width="32" height="32" alt="">
+          DeepSemantic
+        </a>
+      </div>
+    </header>
+    <main class="shell auth-layout">
+      <section class="paper auth-panel" aria-labelledby="auth-title">
+        <p class="eyebrow">Аккаунт DeepSemantic</p>
+        <h1 id="auth-title">Вход</h1>
+        <p id="auth-description" class="pipeline-note">Введите адрес и пароль.</p>
+        <form id="auth-form">
+          <label id="email-field">
+            <span>Электронная почта</span>
+            <input name="email" type="email" autocomplete="email" required maxlength="320">
+          </label>
+          <label>
+            <span>Пароль</span>
+            <input name="password" type="password" autocomplete="current-password" required maxlength="1024">
+          </label>
+          <button id="auth-submit" type="submit">Войти</button>
+          <p id="auth-feedback" class="pipeline-feedback" role="status" hidden></p>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

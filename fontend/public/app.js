@@ -1,4 +1,5 @@
 import { arxivUrl } from "./arxiv.js";
+import { authFetch } from "./auth.js?v=1";
 import { renderPaperIndexes } from "./paper-index.js?v=1";
 
 const PAGE_SIZE = 12;
@@ -550,7 +551,7 @@ function updateRagTrace(runId, running, calls = [], turns = []) {
 }
 
 async function showRagRun(runId, signal, allowPending = false) {
-  const response = await fetch(`/api/rag/runs/${encodeURIComponent(runId)}`, { signal, cache: "no-store" });
+  const response = await authFetch(`/api/rag/runs/${encodeURIComponent(runId)}`, { signal, cache: "no-store" });
   if (signal.aborted) return;
   if (response.status === 404 || response.status === 422) {
     if (!allowPending || response.status === 422) searchStatus.textContent = "Запуск RAG не найден.";
@@ -603,7 +604,7 @@ async function postRagSearch(query, signal) {
   const polling = new AbortController();
   const stopPolling = () => polling.abort();
   signal.addEventListener("abort", stopPolling, { once: true });
-  const pending = fetch(searchModes.rag.endpoint, {
+  const pending = authFetch(searchModes.rag.endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query, run_id: runId }),
@@ -643,7 +644,7 @@ async function loadSearch(query, mode, moveFocus, runId) {
       if (moveFocus && !request.signal.aborted) searchTitle.focus();
       return;
     }
-    const response = mode === "rag" ? await postRagSearch(query, request.signal) : await fetch(settings.endpoint, {
+    const response = mode === "rag" ? await postRagSearch(query, request.signal) : await authFetch(settings.endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query }),

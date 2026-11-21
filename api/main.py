@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_valid
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from auth import AdminUser
 from chunks import router as chunks_router
 from database import MAX_BIGINT, create_database_engine, database_session
 from embedding_schemas import EmbeddingRequest, EmbeddingResponse
@@ -127,7 +128,7 @@ def import_payload(row):
 
 
 @app.post("/arxiv/imports", response_model=ArxivImportAccepted, status_code=202, tags=["arXiv"])
-async def enqueue_arxiv_import(payload: ArxivImportRequest, request: Request):
+async def enqueue_arxiv_import(payload: ArxivImportRequest, request: Request, _: AdminUser):
     job_id = payload.request_id or uuid4()
     params = {"id": job_id, "date_from": payload.date_from, "date_to": payload.date_to,
               "bucket": payload.bucket or os.getenv("RUSTFS_BUCKET", "arxiv-papers"), "query": payload.query,
@@ -148,7 +149,7 @@ async def enqueue_arxiv_import(payload: ArxivImportRequest, request: Request):
 
 
 @app.post("/arxiv/imports/{job_id}/{action}", tags=["arXiv"])
-async def control_arxiv_import(job_id: UUID, action: Literal["pause", "resume"], request: Request):
+async def control_arxiv_import(job_id: UUID, action: Literal["pause", "resume"], request: Request, _: AdminUser):
     async with database_session(request) as session:
         row = (await session.execute(text("SELECT * FROM arxiv_imports WHERE id = :id"), {"id": job_id})).mappings().one_or_none()
     if row is None:
@@ -167,6 +168,7 @@ async def control_arxiv_import(job_id: UUID, action: Literal["pause", "resume"],
 
 @app.get("/arxiv/imports", response_model=list[ArxivImportJob], tags=["arXiv"])
 async def list_arxiv_imports(request: Request,
+    _: AdminUser,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0, le=MAX_BIGINT)] = 0):
     async with database_session(request) as session:

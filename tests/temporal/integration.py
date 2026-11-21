@@ -54,7 +54,12 @@ class NativeStateTests(unittest.IsolatedAsyncioTestCase):
                 return {'model': EMBEDDING_OPENROUTER_MODEL, 'revision': 'test', 'dimensions': 3,
                         'embeddings': [[1., 0., 0.] for _ in payload.texts]}
         app.state.embeddings = Embeddings()
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as api:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test', headers={
+            'X-Auth-Proxy-Secret': 'deepsemantic-local-proxy-secret',
+            'X-Authenticated-User': '00000000-0000-0000-0000-000000000001',
+            'X-Authenticated-Email': 'admin@example.test',
+            'X-Authenticated-Role': 'admin',
+        }) as api:
             response = await api.post('/arxiv/imports', json={'request_id': str(uuid4()),
                 'date_from': '2026-11-01', 'date_to': '2026-11-01', 'bucket': 'papers'})
             self.assertEqual(response.status_code, 202)
@@ -95,7 +100,12 @@ class NativeStateTests(unittest.IsolatedAsyncioTestCase):
         app.state.embeddings = Embeddings()
         activities = Activities(app.state, Tokenizer.from_file('/app/bge-m3-tokenizer.json'), 512, self.client)
         await self.stack.enter_async_context(processing_workers(self.client, activities, shutdown_seconds=1))
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as api:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test', headers={
+            'X-Auth-Proxy-Secret': 'deepsemantic-local-proxy-secret',
+            'X-Authenticated-User': '00000000-0000-0000-0000-000000000001',
+            'X-Authenticated-Email': 'admin@example.test',
+            'X-Authenticated-Role': 'admin',
+        }) as api:
             response = await api.put('/pipeline/settings', json={'summary_mode': 'deferred'})
             self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual((await api.get('/pipeline/settings')).json()['summary_mode'], 'deferred')

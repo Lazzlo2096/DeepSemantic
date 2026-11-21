@@ -9,7 +9,7 @@ COPY api/requirements.txt ./api/requirements.txt
 RUN python -m pip install --no-cache-dir -r api/requirements.txt \
     && useradd --create-home --uid 10001 app
 
-COPY api/main.py api/database.py api/chunks.py api/papers.py api/embedding_schemas.py api/paper_chunking.py api/paper_summaries.py api/rag.py api/rag_history.py api/rag_model.py api/llm_chat.py api/embedding_service.py api/embeddings_config.py api/storage.py api/paper_repository.py api/temporal_runtime.py ./api/
+COPY api/main.py api/auth.py api/database.py api/chunks.py api/papers.py api/embedding_schemas.py api/paper_chunking.py api/paper_summaries.py api/rag.py api/rag_history.py api/rag_model.py api/llm_chat.py api/embedding_service.py api/embeddings_config.py api/storage.py api/paper_repository.py api/temporal_runtime.py ./api/
 
 COPY api/agents/ ./api/agents/
 

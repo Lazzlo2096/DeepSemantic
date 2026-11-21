@@ -76,7 +76,12 @@ class RestTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.app = app
         self.api = await self.enterAsyncContext(httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=self.app), base_url="http://test"))
+            transport=httpx.ASGITransport(app=self.app), base_url="http://test", headers={
+                "X-Auth-Proxy-Secret": "deepsemantic-local-proxy-secret",
+                "X-Authenticated-User": "00000000-0000-0000-0000-000000000001",
+                "X-Authenticated-Email": "admin@example.test",
+                "X-Authenticated-Role": "admin",
+            }))
 
     async def test_invalid_modes_and_unknown_settings_are_rejected(self):
         for payload in ({"summary_mode": "off"}, {"summary_mode": "enabled", "skip": True}, {}):

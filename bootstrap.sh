@@ -32,6 +32,7 @@ cat <<'EOF'
 
 Откройте .env и укажите ключ OpenRouter в OPENROUTER_API_KEY.
 Выберите модели для поиска по RAG (RAG_OPENROUTER_MODEL) и суммаризации (SUMMARY_OPENROUTER_MODEL).
+Укажите случайный AUTH_PROXY_SECRET, например результат команды openssl rand -hex 32.
 
 Запустите проект командой just up-server.
 Для остановки выполните just down.

@@ -1,3 +1,5 @@
+import { authFetch } from "./auth.js?v=1";
+
 const settingsEndpoint = "/api/pipeline/settings";
 const reconciliationEndpoint = "/api/pipeline/summary-reconciliation";
 const modeBadge = document.querySelector("#summary-mode");
@@ -61,7 +63,7 @@ function showReconciliation(data) {
 }
 
 async function requestJson(url, options = {}) {
-  const response = await fetch(url, { cache: "no-store", ...options });
+  const response = await authFetch(url, { cache: "no-store", ...options });
   if (!response.ok) {
     const error = await response.json().catch(() => null);
     throw new Error(typeof error?.detail === "string" ? error.detail : "Сервис временно недоступен.");

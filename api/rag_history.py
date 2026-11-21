@@ -43,16 +43,16 @@ class RagRunRecord(BaseModel):
 
 async def start_run(
     request: Request, query: str, run_id: UUID | None = None, *,
-    model: str, reasoning_effort: str | None, prompt_version: str,
+    user_id: UUID, model: str, reasoning_effort: str | None, prompt_version: str,
 ) -> UUID:
     run_id = run_id or uuid4()
     async with database_session(request) as session:
         inserted = await session.scalar(text("""
-            INSERT INTO rag_runs (id, query, status, model, reasoning_effort, prompt_version)
-            VALUES (:id, :query, 'running', :model, :reasoning_effort, :prompt_version)
+            INSERT INTO rag_runs (id, user_id, query, status, model, reasoning_effort, prompt_version)
+            VALUES (:id, :user_id, :query, 'running', :model, :reasoning_effort, :prompt_version)
             ON CONFLICT (id) DO NOTHING RETURNING id
         """), {
-            "id": run_id, "query": query, "model": model,
+            "id": run_id, "user_id": user_id, "query": query, "model": model,
             "reasoning_effort": reasoning_effort, "prompt_version": prompt_version,
         })
     if inserted is None:
@@ -91,13 +91,13 @@ async def finish_run(request: Request, run_id: UUID, status: str, *,
         })
 
 
-async def load_run(request: Request, run_id: UUID) -> RagRunRecord:
+async def load_run(request: Request, run_id: UUID, user_id: UUID) -> RagRunRecord:
     async with database_session(request) as session:
         run = (await session.execute(text("""
             SELECT id AS run_id, query, status, started_at, finished_at,
                    model, reasoning_effort, prompt_version, answer, error
-            FROM rag_runs WHERE id = :id
-        """), {"id": run_id})).mappings().one_or_none()
+            FROM rag_runs WHERE id = :id AND user_id = :user_id
+        """), {"id": run_id, "user_id": user_id})).mappings().one_or_none()
         if run is None:
             raise HTTPException(404, "RAG run not found.")
         calls = (await session.execute(text("""

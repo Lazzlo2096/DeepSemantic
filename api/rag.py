@@ -20,6 +20,7 @@ from typing_extensions import TypedDict
 
 from agents.prompts import ANSWER_INSTRUCTIONS, PROMPT_VERSION, RESEARCH_INSTRUCTIONS
 from agents.tools import TOOLS, QueryText, create_tools
+from auth import CurrentUser
 from chunks import PaperChunkSource, require_zero_chunk_overlap
 from llm_chat import ChatResponseError
 from rag_history import (
@@ -301,7 +302,7 @@ async def generate_answer(payload: RagQuestion, request: Request, run_id: UUID) 
 
 
 @router.post("/answer", response_model=RagAnswer)
-async def answer_question(payload: RagQuestion, request: Request):
+async def answer_question(payload: RagQuestion, request: Request, user: CurrentUser):
     require_zero_chunk_overlap()
     chat = request.app.state.chat_settings
     if not chat.configured:
@@ -310,7 +311,7 @@ async def answer_question(payload: RagQuestion, request: Request):
     reasoning_effort = chat.reasoning_effort or "disabled"
     run_id = await start_run(
         request, payload.query, payload.run_id,
-        model=chat.model, reasoning_effort=reasoning_effort, prompt_version=PROMPT_VERSION,
+        user_id=user.id, model=chat.model, reasoning_effort=reasoning_effort, prompt_version=PROMPT_VERSION,
     )
     headers = {"X-RAG-Run-Id": str(run_id)}
     try:
@@ -331,6 +332,6 @@ async def answer_question(payload: RagQuestion, request: Request):
 
 
 @router.get("/runs/{run_id}", response_model=RagRunRecord)
-async def get_run(request: Request, response: Response, run_id: UUID):
+async def get_run(request: Request, response: Response, run_id: UUID, user: CurrentUser):
     response.headers["Cache-Control"] = "no-store"
-    return await load_run(request, run_id)
+    return await load_run(request, run_id, user.id)

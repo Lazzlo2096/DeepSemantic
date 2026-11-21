@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 from temporalio.exceptions import TemporalError
 
+from auth import AdminUser
 from database import database_session
 from papers import ArxivId
 import paper_repository as repository
@@ -48,12 +49,12 @@ class PaperProcessingResponse(BaseModel):
 
 
 @router.get("/pipeline/settings", response_model=PipelineSettingsResponse)
-async def get_settings():
+async def get_settings(_: AdminUser):
     return await repository.get_pipeline_settings()
 
 
 @router.put("/pipeline/settings", response_model=PipelineSettingsResponse)
-async def update_settings(payload: PipelineSettingsUpdate, request: Request):
+async def update_settings(payload: PipelineSettingsUpdate, request: Request, _: AdminUser):
     # Start before committing configuration: a lost HTTP response or signal cannot
     # leave an enabled configuration without a durable periodic catalog scan.
     handle = await temporal_runtime.start(request, "SummaryReconcileWorkflow", {}, RECONCILER_ID)
@@ -71,7 +72,7 @@ async def update_settings(payload: PipelineSettingsUpdate, request: Request):
 
 
 @router.get("/pipeline/summary-reconciliation")
-async def reconciliation_progress(request: Request):
+async def reconciliation_progress(request: Request, _: AdminUser):
     return {"workflow_id": RECONCILER_ID, "runtime": await temporal_runtime.describe(request, RECONCILER_ID)}
 
 

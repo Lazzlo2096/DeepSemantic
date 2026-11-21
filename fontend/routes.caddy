@@ -1,18 +1,90 @@
+(authenticated) {
+	request_header -X-Authenticated-User
+	request_header -X-Authenticated-Role
+	request_header -X-Authenticated-Email
+	forward_auth auth-service:8000 {
+		uri /verify
+		copy_headers X-Authenticated-User X-Authenticated-Role X-Authenticated-Email
+	}
+}
+
+(administrator) {
+	request_header -X-Authenticated-User
+	request_header -X-Authenticated-Role
+	request_header -X-Authenticated-Email
+	forward_auth auth-service:8000 {
+		uri /verify/admin
+		copy_headers X-Authenticated-User X-Authenticated-Role X-Authenticated-Email
+	}
+}
+
+(api_backend) {
+	uri strip_prefix /api
+	reverse_proxy api:8000 {
+		header_up X-Auth-Proxy-Secret {$AUTH_PROXY_SECRET}
+	}
+}
+
 (workers) {
 	@workers path /api/workers /api/workers/*
 	handle @workers {
-		uri strip_prefix /api
-		reverse_proxy worker-control:8000 {
-			header_up Host {args[0]}
+		route {
+			import administrator
+			uri strip_prefix /api
+			reverse_proxy worker-control:8000 {
+				header_up Host {args[0]}
+			}
 		}
 	}
 }
 
 (catalog) {
-	@api path /api/papers /api/papers/* /api/pipeline/* /api/chunks/search /api/chunks/search/text /api/arxiv/imports /api/arxiv/imports/* /api/rag/answer /api/rag/runs/*
-	handle @api {
+	@auth path /api/auth /api/auth/*
+	handle @auth {
+		uri strip_prefix /api
+		reverse_proxy auth-service:8000
+	}
+
+	@admin_api path /api/arxiv/imports /api/arxiv/imports/* /api/pipeline/*
+	handle @admin_api {
+		route {
+			import administrator
+			import api_backend
+		}
+	}
+
+	@admin_summary {
+		method POST
+		path /api/papers/*/summary
+	}
+	handle @admin_summary {
+		route {
+			import administrator
+			import api_backend
+		}
+	}
+
+	@user_api path /api/rag/* /api/chunks/search
+	handle @user_api {
+		route {
+			import authenticated
+			import api_backend
+		}
+	}
+
+	@public_api path /api/papers /api/papers/* /api/chunks/search/text
+	handle @public_api {
 		uri strip_prefix /api
 		reverse_proxy api:8000
+	}
+
+	@admin_pages path /imports.html /workers.html /users.html
+	handle @admin_pages {
+		route {
+			import administrator
+			root * /srv
+			file_server
+		}
 	}
 
 	handle {

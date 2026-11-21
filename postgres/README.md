@@ -34,6 +34,8 @@ docker compose exec postgres sh -c 'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_
 
 Основная ревизия `0041_rag_run_owner` добавляет `rag_runs.user_id` со ссылкой на `auth.users.id`. Для записей, созданных до появления аккаунтов, значение остаётся `NULL`. При откате сначала снимается связь в основной истории, затем откатывается история `auth`. Отдельные роли PostgreSQL для сервисов настраиваются при развёртывании.
 
+Ревизия `0002_session_csrf` добавляет к сессии SHA-256-хеш CSRF-токена для изменяющих запросов из браузера.
+
 ## Счётчики задания импорта arXiv
 
 `arxiv_import_result` принимает ID задания из `POST /arxiv/imports` и возвращает одну строку со счётчиками из `arxiv_import_attempts`. API возвращает счётчики в поле `result` и прогресс в `processed_articles` в `GET /arxiv/imports`.

@@ -1,3 +1,5 @@
+import { authFetch } from "./auth.js?v=1";
+
 const endpoint = "/api/arxiv/imports";
 const pageSize = 20;
 const refreshInterval = 5000;
@@ -91,7 +93,7 @@ async function changeImport(id, action, button) {
   button.disabled = true;
   controlFeedback.hidden = true;
   try {
-    const response = await fetch(`${endpoint}/${id}/${action}`, { method: "POST" });
+    const response = await authFetch(`${endpoint}/${id}/${action}`, { method: "POST" });
     if (!response.ok) throw new Error();
   } catch {
     controlFeedback.textContent = "Не удалось выполнить команду. Проверь текущий статус задания.";
@@ -109,7 +111,7 @@ async function loadImports(page = currentPage) {
   listRequest = request;
   const params = new URLSearchParams({ limit: pageSize + 1, offset: page * pageSize });
   try {
-    const response = await fetch(`${endpoint}?${params}`, { signal: request.signal, cache: "no-store" });
+    const response = await authFetch(`${endpoint}?${params}`, { signal: request.signal, cache: "no-store" });
     if (!response.ok) throw new Error(`Import list returned ${response.status}`);
     const jobs = await response.json();
     if (request.signal.aborted) return;
@@ -149,7 +151,7 @@ form.addEventListener("submit", async (event) => {
   submit.disabled = true;
   feedback.textContent = "Создаём задание…";
   try {
-    const response = await fetch(endpoint, {
+    const response = await authFetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),

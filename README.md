@@ -50,6 +50,18 @@ python -m pip install -r api/requirements.txt -r temporal/requirements.txt
 python -m unittest discover -s tests -v
 ```
 
+## Пользователи и авторизация
+
+Caddy проверяет защищённые запросы через отдельный `auth-service`. Каталог и готовые материалы доступны без входа. RAG и векторный поиск требуют аккаунт, а импорт, суммаризация и настройки обработки — роль администратора. Сессии и приглашения хранятся в схеме PostgreSQL `auth`; история RAG привязана к создавшему её пользователю.
+
+Для локального запуска создайте первого администратора после миграций:
+
+```sh
+docker compose run --rm auth-service python -m auth_service.cli create-admin admin@example.com
+```
+
+На сервере сначала задайте случайный `AUTH_PROXY_SECRET` в `.env`. Подробности находятся в [описании auth-service](auth-service/README.md).
+
 ## LangSmith Studio
 
 Запусти локальный Agent Server с графом RAG:

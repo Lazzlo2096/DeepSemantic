@@ -1,4 +1,5 @@
 import { arxivPath, arxivUrl } from "./arxiv.js";
+import { authFetch } from "./auth.js?v=1";
 import { renderPaperIndexes } from "./paper-index.js?v=1";
 import MarkdownIt from "./vendor/markdown-it.mjs";
 
@@ -146,7 +147,7 @@ function loadSummary(url, hasText, isHtml) {
 
   async function refresh(method = "GET", polling = false) {
     try {
-      const response = await fetch(url, { method, cache: "no-store" });
+      const response = await authFetch(url, { method, cache: "no-store" });
       if (method === "POST" && response.status === 409) {
         const { detail } = await response.json();
         feedback.textContent = detail;

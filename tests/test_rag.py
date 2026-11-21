@@ -83,7 +83,12 @@ class RagPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.app.state.chat_settings = settings
         self.app.state.rag_model = create_rag_model(settings, client)
         self.api = await self.enterAsyncContext(httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=self.app), base_url="http://test",
+            transport=httpx.ASGITransport(app=self.app), base_url="http://test", headers={
+                "X-Auth-Proxy-Secret": "deepsemantic-local-proxy-secret",
+                "X-Authenticated-User": "00000000-0000-0000-0000-000000000001",
+                "X-Authenticated-Email": "user@example.test",
+                "X-Authenticated-Role": "user",
+            },
         ))
         self.start_run = self.enterContext(patch("rag.start_run", new_callable=AsyncMock, return_value=self.run_id))
         self.finish_run = self.enterContext(patch("rag.finish_run", new_callable=AsyncMock))
@@ -165,6 +170,7 @@ class RagPipelineTests(unittest.IsolatedAsyncioTestCase):
             })
         self.assertEqual(self.finish_run.call_args.args[2], "answered")
         self.assertEqual(self.start_run.call_args.kwargs["prompt_version"], rag.PROMPT_VERSION)
+        self.assertEqual(str(self.start_run.call_args.kwargs["user_id"]), "00000000-0000-0000-0000-000000000001")
 
     async def test_no_sources_skips_answer_model(self):
         self.vectors.return_value = []
