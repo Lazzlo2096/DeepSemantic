@@ -9,6 +9,7 @@ const list = document.querySelector("#files-list");
 const empty = document.querySelector("#files-empty");
 const arxivTargetButton = document.querySelector("#arxiv-target-button");
 const arxivTargetStatus = document.querySelector("#arxiv-target-status");
+const spaceCatalogLink = document.querySelector("#space-catalog-link");
 
 const dateFormat = new Intl.DateTimeFormat("ru-RU", {
   year: "numeric", month: "long", day: "numeric",
@@ -41,6 +42,7 @@ function renderFile(file) {
 
 async function loadSpace() {
   if (!spaceId) throw new Error("В ссылке не указан Space.");
+  spaceCatalogLink.href = `/space-catalog.html?id=${encodeURIComponent(spaceId)}`;
   const base = `/api/spaces/public/${encodeURIComponent(spaceId)}`;
   const [spaceResponse, filesResponse] = await Promise.all([
     authFetch(base, { cache: "no-store" }),

@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Каталог Space · DeepSemantic</title>
+    <meta name="description" content="Каталог публикаций Space в DeepSemantic.">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" sizes="any">
+    <link rel="stylesheet" href="/styles.css?v=8">
+    <link rel="stylesheet" href="/vendor/katex/katex.min.css">
+    <script defer src="/vendor/katex/katex.min.js"></script>
+    <script defer src="/vendor/texmath.js"></script>
+    <script type="module" src="/auth.js?v=1"></script>
+    <script type="module" src="/app.js?v=10"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="shell brand">
+        <a class="brand-link" href="/">
+          <img class="brand-mark" src="/icon.svg" width="32" height="32" alt="">
+          DeepSemantic
+        </a>
+        <nav class="topbar-nav" aria-label="Разделы"></nav>
+      </div>
+    </header>
+
+    <main class="shell">
+      <form id="search-form" class="search-form" role="search" aria-label="Поиск по статьям">
+        <fieldset class="search-modes">
+          <legend>Режим поиска</legend>
+          <div class="search-mode-options">
+            <label><input type="radio" name="mode" value="rag" checked> Поиск по RAG</label>
+            <label><input type="radio" name="mode" value="vector"> Векторный поиск по эмбеддингам</label>
+            <label><input type="radio" name="mode" value="text"> Текстовый поиск</label>
+          </div>
+        </fieldset>
+        <label for="search-query">Запрос</label>
+        <div class="search-controls">
+          <input id="search-query" name="query" type="search" required placeholder="Поиск по Space">
+          <button id="search-submit" type="submit">Найти</button>
+        </div>
+      </form>
+
+      <section id="catalog" aria-labelledby="results-title">
+        <div class="results-bar catalog-heading">
+          <div class="catalog-title">
+            <h2 id="results-title" tabindex="-1"></h2>
+            <p id="status" role="status">Загружаем статьи…</p>
+          </div>
+          <label class="catalog-sort">
+            Сортировка
+            <select name="sort" form="catalog-filters">
+              <option value="downloaded_desc">Последние загрузки</option>
+              <option value="submitted_desc">По дате подачи · новые</option>
+              <option value="submitted_asc">По дате подачи · старые</option>
+              <option value="status">По этапу обработки</option>
+            </select>
+          </label>
+        </div>
+        <form id="catalog-filters" class="catalog-filters" aria-label="Фильтры каталога">
+          <div class="filter-fields catalog-filter-fields">
+            <label>Статус<select name="status"><option value="">Все статусы</option></select></label>
+            <label>Текст саммари<select name="has_summary"><option value="">Все</option><option value="true">Создан</option><option value="false">Нет</option></select></label>
+            <fieldset class="filter-date-range">
+              <legend>Дата подачи <span title="Границы периода включены целиком по UTC">UTC</span></legend>
+              <div class="filter-date-inputs">
+                <label><span>От</span><input name="date_from" type="date" min="0001-01-01" max="9999-12-31"></label>
+                <label><span>До</span><input name="date_to" type="date" min="0001-01-01" max="9999-12-31"></label>
+              </div>
+            </fieldset>
+          </div>
+          <div class="filter-actions">
+            <button class="filter-apply" type="submit">Применить</button>
+            <button id="clear-filters" class="filter-reset" type="button" hidden>Сбросить</button>
+          </div>
+        </form>
+        <div id="active-filters" class="active-filters" role="group" aria-label="Применённые фильтры" hidden></div>
+        <button id="retry" type="button" hidden>Повторить загрузку</button>
+        <div id="papers" class="paper-list"></div>
+        <nav id="pagination" class="pagination" aria-label="Страницы каталога" hidden>
+          <button id="previous" type="button">← Назад</button>
+          <span id="page-number"></span>
+          <button id="next" type="button">Дальше →</button>
+        </nav>
+      </section>
+
+      <section id="search-results" aria-labelledby="search-title" hidden>
+        <div class="results-bar">
+          <h2 id="search-title" tabindex="-1">Похожие фрагменты</h2>
+          <button id="back-to-catalog" type="button">Вернуться к каталогу</button>
+        </div>
+        <p id="search-status" role="status"></p>
+        <div id="rag-history" hidden>
+          <a id="rag-permalink">Ссылка на запуск</a>
+          <details id="rag-trace" class="paper"><summary>Как найден ответ</summary>
+            <p id="rag-trace-status" role="status"></p>
+            <section id="rag-model-history" aria-labelledby="rag-model-title" hidden>
+              <h3 id="rag-model-title">Шаги модели</h3>
+              <div id="rag-model-turns" class="paper-list"></div>
+              <details id="rag-unassigned-step" class="rag-tool" hidden><summary>Вызовы без сохранённого шага</summary><div id="rag-unassigned-calls" class="rag-tool-body"></div></details>
+            </section>
+            <p id="rag-trace-empty" hidden>В этом запуске инструментов не вызывали.</p>
+          </details>
+        </div>
+        <section id="rag-result" class="paper" aria-labelledby="rag-title" hidden>
+          <h3 id="rag-title">Ответ по статьям</h3>
+          <ul id="rag-points"></ul>
+          <section id="rag-explanation" aria-labelledby="rag-explanation-title" hidden><h3 id="rag-explanation-title">Почему выбраны эти источники</h3><div id="rag-explanation-text" class="formatted-text"></div></section>
+          <h3>Источники</h3><div id="rag-sources" class="paper-list"></div>
+        </section>
+        <div id="search-chunks" class="paper-list"></div>
+      </section>
+    </main>
+
+    <template id="paper-template">
+      <article class="paper"><div class="paper-meta"><span class="paper-id"></span><time class="paper-date" title="Дата подачи в UTC"></time><span class="paper-stage"></span><span class="paper-stage paper-index-status"></span><span class="paper-stage paper-summary-status"></span></div><h3><a class="paper-title"></a><a class="paper-arxiv" target="_blank" rel="noopener" aria-label="Оригинал на arXiv, новая вкладка" hidden>arXiv ↗</a></h3><p class="paper-authors"></p><details><summary>Аннотация</summary><div class="paper-abstract formatted-text"></div></details></article>
+    </template>
+    <template id="search-result-template"><article class="paper"><div class="paper-meta"><span class="search-fragment"></span><span class="paper-stage search-score"></span></div><h3><a class="paper-title search-paper"></a><a class="paper-arxiv" target="_blank" rel="noopener" aria-label="Оригинал на arXiv, новая вкладка" hidden>arXiv ↗</a></h3><div class="search-excerpt formatted-text"></div></article></template>
+  </body>
+</html>
