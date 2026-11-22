@@ -4,6 +4,7 @@ No job statuses, retries, leases or execution progress are stored here.
 """
 import os
 from contextlib import asynccontextmanager
+from pathlib import PurePosixPath
 from types import SimpleNamespace
 
 import psycopg
@@ -45,36 +46,52 @@ async def set_import_workflow(import_id, workflow_id):
 async def get_paper(arxiv_id):
     async with connection() as db:
         return await (await db.execute("""
-            SELECT paper.*, jsonb_build_array(bucket, object_key, downloaded_at)::text AS source_version,
-                jsonb_build_array(bucket, text_object_key)::text AS markdown_version
-            FROM arxiv_papers paper WHERE arxiv_id = %s
+            SELECT paper.*, file.bucket, file.object_key, file.created_at AS downloaded_at,
+                jsonb_build_array(file.bucket, file.object_key, file.created_at)::text AS source_version,
+                jsonb_build_array(file.bucket, paper.text_object_key)::text AS markdown_version
+            FROM arxiv_papers paper JOIN space_files file ON file.id = paper.space_file_id
+            WHERE paper.arxiv_id = %s
         """, (arxiv_id,))).fetchone()
 
 
-async def save_paper(article, bucket, object_key, downloaded_at, import_id=None):
-    async with connection() as db:
+async def save_paper(article, bucket, object_key, downloaded_at, space_id, import_id=None):
+    async with connection() as db, db.transaction():
+        file = await (await db.execute("""
+            INSERT INTO space_files
+                (space_id, uploaded_by, bucket, object_key, filename, content_type, created_at)
+            SELECT %s, owner_id, %s, %s, %s, 'text/html', %s
+            FROM spaces WHERE id = %s
+            ON CONFLICT (bucket, object_key) DO UPDATE SET
+                space_id = EXCLUDED.space_id,
+                uploaded_by = EXCLUDED.uploaded_by,
+                filename = EXCLUDED.filename,
+                content_type = EXCLUDED.content_type,
+                created_at = EXCLUDED.created_at
+            RETURNING id
+        """, (space_id, bucket, object_key, PurePosixPath(object_key).name, downloaded_at, space_id))).fetchone()
+        if file is None:
+            raise ValueError(f"Space {space_id} does not exist")
         await db.execute("""
             INSERT INTO arxiv_papers AS paper
-                (arxiv_id, bucket, object_key, title, authors, abstract, submitted_at, downloaded_at, arxiv_import_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (arxiv_id) DO UPDATE SET bucket = EXCLUDED.bucket, object_key = EXCLUDED.object_key,
+                (arxiv_id, space_file_id, title, authors, abstract, submitted_at, arxiv_import_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (arxiv_id) DO UPDATE SET space_file_id = EXCLUDED.space_file_id,
                 title = EXCLUDED.title, authors = EXCLUDED.authors, abstract = EXCLUDED.abstract,
-                submitted_at = EXCLUDED.submitted_at, downloaded_at = EXCLUDED.downloaded_at,
-                arxiv_import_id = EXCLUDED.arxiv_import_id, text_object_key = NULL
-            WHERE (paper.bucket, paper.object_key, paper.downloaded_at) IS DISTINCT FROM
-                  (EXCLUDED.bucket, EXCLUDED.object_key, EXCLUDED.downloaded_at)
-              AND (paper.bucket = EXCLUDED.bucket OR EXCLUDED.downloaded_at > paper.downloaded_at
-                   OR (EXCLUDED.downloaded_at = paper.downloaded_at AND EXCLUDED.bucket < paper.bucket))
-        """, (article.arxiv_id, bucket, object_key, article.title, article.authors, article.abstract,
-              article.submitted_at, downloaded_at, import_id))
+                submitted_at = EXCLUDED.submitted_at, arxiv_import_id = EXCLUDED.arxiv_import_id,
+                text_object_key = CASE WHEN paper.space_file_id IS DISTINCT FROM EXCLUDED.space_file_id
+                                       THEN NULL ELSE paper.text_object_key END
+        """, (article.arxiv_id, file["id"], article.title, article.authors, article.abstract,
+              article.submitted_at, import_id))
     return await get_paper(article.arxiv_id)
 
 
 async def save_markdown(paper, key):
     async with connection() as db:
         row = await db.execute("""
-            UPDATE arxiv_papers SET text_object_key = %s WHERE arxiv_id = %s
-              AND jsonb_build_array(bucket, object_key, downloaded_at)::text = %s
+            UPDATE arxiv_papers AS paper SET text_object_key = %s
+            FROM space_files AS file
+            WHERE paper.arxiv_id = %s AND file.id = paper.space_file_id
+              AND jsonb_build_array(file.bucket, file.object_key, file.created_at)::text = %s
         """, (key, paper["arxiv_id"], paper["source_version"]))
         return bool(row.rowcount)
 
@@ -82,9 +99,11 @@ async def save_markdown(paper, key):
 async def get_summary(arxiv_id, *, generation=None):
     async with connection() as db:
         return await (await db.execute("""
-            SELECT result.* FROM paper_summaries result JOIN arxiv_papers paper USING (arxiv_id)
+            SELECT result.* FROM paper_summaries result
+            JOIN arxiv_papers paper USING (arxiv_id)
+            JOIN space_files file ON file.id = paper.space_file_id
             WHERE result.arxiv_id = %s
-              AND result.source_version = jsonb_build_array(paper.bucket, paper.text_object_key)::text
+              AND result.source_version = jsonb_build_array(file.bucket, paper.text_object_key)::text
               AND (%s::text IS NULL OR result.generation = %s)
         """, (arxiv_id, generation, generation))).fetchone()
 
@@ -92,8 +111,9 @@ async def get_summary(arxiv_id, *, generation=None):
 async def save_summary(paper, result, summary_id, generation, settings):
     async with connection() as db, db.transaction():
         current = await (await db.execute("""
-            SELECT jsonb_build_array(bucket, text_object_key)::text AS version FROM arxiv_papers
-            WHERE arxiv_id = %s FOR NO KEY UPDATE
+            SELECT jsonb_build_array(file.bucket, paper.text_object_key)::text AS version
+            FROM arxiv_papers paper JOIN space_files file ON file.id = paper.space_file_id
+            WHERE paper.arxiv_id = %s FOR UPDATE OF paper
         """, (paper["arxiv_id"],))).fetchone()
         if current is None or current["version"] != paper["markdown_version"]:
             return False
@@ -153,8 +173,9 @@ async def replace_chunks(state, source, fragments, generation):
         # Recheck the version after reading the source and lock it until the replacement commits.
         if source.source_kind == "article":
             current = await session.scalar(text("""
-                SELECT jsonb_build_array(bucket, text_object_key)::text FROM arxiv_papers
-                WHERE arxiv_id = :arxiv_id AND text_object_key IS NOT NULL
+                SELECT jsonb_build_array(file.bucket, paper.text_object_key)::text
+                FROM arxiv_papers paper JOIN space_files file ON file.id = paper.space_file_id
+                WHERE paper.arxiv_id = :arxiv_id AND paper.text_object_key IS NOT NULL
                 FOR NO KEY UPDATE
             """), params)
         else:

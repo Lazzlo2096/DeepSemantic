@@ -126,11 +126,17 @@ async def embeddings(payload: EmbeddingRequest, request: Request):
 def import_payload(row):
     return {"id": str(row["id"]), "date_from": str(row["date_from"]), "date_to": str(row["date_to"]),
             "bucket": row["bucket"], "query": row["query"], "source_format": os.getenv("ARXIV_SOURCE_FORMAT", "html"),
+            "space_id": os.getenv("ARXIV_SPACE_ID"),
             "settings": pipeline_settings()}
 
 
 @app.post("/arxiv/imports", response_model=ArxivImportAccepted, status_code=202, tags=["arXiv"])
 async def enqueue_arxiv_import(payload: ArxivImportRequest, request: Request, _: AdminUser):
+    space_id = os.getenv("ARXIV_SPACE_ID", "")
+    try:
+        UUID(space_id)
+    except ValueError as error:
+        raise HTTPException(503, "ARXIV_SPACE_ID must point to the manually created arXiv Space.") from error
     job_id = payload.request_id or uuid4()
     params = {"id": job_id, "date_from": payload.date_from, "date_to": payload.date_to,
               "bucket": payload.bucket or os.getenv("RUSTFS_BUCKET", "arxiv-papers"), "query": payload.query,

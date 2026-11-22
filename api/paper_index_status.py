@@ -25,9 +25,11 @@ async def paper_index_statuses(request, arxiv_ids, *, source_kinds=("article", "
     settings = pipeline_settings()
     statement = text("""
         SELECT source.arxiv_id, source.source_kind, source.source_version,
-            jsonb_build_array(paper.bucket, paper.text_object_key)::text AS markdown_version,
+            jsonb_build_array(file.bucket, paper.text_object_key)::text AS markdown_version,
             summary.generation AS summary_generation, link.chunk_id, link.generation
-        FROM paper_chunk_sources source JOIN arxiv_papers paper USING (arxiv_id)
+        FROM paper_chunk_sources source
+        JOIN arxiv_papers paper USING (arxiv_id)
+        JOIN space_files file ON file.id = paper.space_file_id
         LEFT JOIN paper_summaries summary ON summary.arxiv_id = source.arxiv_id AND source.source_kind = 'summary'
         LEFT JOIN paper_chunks link ON link.arxiv_id = source.arxiv_id
             AND link.source_kind = source.source_kind AND link.source_version = source.source_version

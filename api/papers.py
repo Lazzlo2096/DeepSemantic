@@ -184,7 +184,14 @@ async def article_index_page(request, response, filters, summary_ready, sort, li
         if not selected:
             return []
         rows = (await session.execute(
-            select(*ArxivPaper.__table__.c, ArxivPaper.status.label("status"), summary_ready.label("has_summary"))
+            select(
+                *ArxivPaper.__table__.c,
+                ArxivPaper.bucket.label("bucket"),
+                ArxivPaper.object_key.label("object_key"),
+                ArxivPaper.downloaded_at.label("downloaded_at"),
+                ArxivPaper.status.label("status"),
+                summary_ready.label("has_summary"),
+            )
             .where(ArxivPaper.arxiv_id.in_(selected)).order_by(*paper_order(ArxivPaper, sort))
         )).mappings().all()
     summaries = await paper_index_statuses(request, selected, source_kinds=("summary",))

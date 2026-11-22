@@ -2,15 +2,16 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 from fastapi import HTTPException, Request
-from sqlalchemy import BigInteger, DateTime, Identity, Text, case, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Text, Uuid, case, func, select
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.engine import URL
 from sqlalchemy.exc import OperationalError, TimeoutError as PoolTimeout
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, column_property, mapped_column
 
 
 MAX_BIGINT = 2**63 - 1
@@ -32,18 +33,33 @@ class Chunk(Base):
     qdrant_point_id: Mapped[int | None] = mapped_column(BigInteger)
 
 
+class SpaceFile(Base):
+    __tablename__ = "space_files"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    space_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("spaces.id"))
+    uploaded_by: Mapped[UUID] = mapped_column(Uuid, ForeignKey("auth.users.id"))
+    bucket: Mapped[str] = mapped_column(Text)
+    object_key: Mapped[str] = mapped_column(Text)
+    filename: Mapped[str] = mapped_column(Text)
+    content_type: Mapped[str | None] = mapped_column(Text)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ArxivPaper(Base):
     __tablename__ = "arxiv_papers"
 
     arxiv_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    bucket: Mapped[str] = mapped_column(Text)
-    object_key: Mapped[str] = mapped_column(Text)
+    space_file_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("space_files.id"))
+    bucket = column_property(select(SpaceFile.bucket).where(SpaceFile.id == space_file_id).scalar_subquery())
+    object_key = column_property(select(SpaceFile.object_key).where(SpaceFile.id == space_file_id).scalar_subquery())
+    downloaded_at = column_property(select(SpaceFile.created_at).where(SpaceFile.id == space_file_id).scalar_subquery())
     text_object_key: Mapped[str | None] = mapped_column(Text)
     title: Mapped[str] = mapped_column(Text)
     authors: Mapped[list[str]] = mapped_column(ARRAY(Text))
     abstract: Mapped[str] = mapped_column(Text)
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    downloaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     @hybrid_property
     def status(self):
         """Artifact availability for the catalog; not an execution state column."""
