@@ -23,7 +23,7 @@ from papers import router as papers_router
 from pipeline import router as pipeline_router
 from rag import router as rag_router
 from rag_model import create_rag_model
-from storage import connect_rustfs
+from storage import USER_FILES_BUCKET, connect_rustfs, ensure_bucket
 from spaces import router as spaces_router
 from processing.config import pipeline_settings
 import temporal_runtime
@@ -86,6 +86,8 @@ async def lifespan(app: FastAPI):
         app.state.db_engine = engine
         app.state.db_sessions = async_sessionmaker(engine, expire_on_commit=False)
         app.state.rustfs = stack.enter_context(closing(connect_rustfs())) if os.getenv("RUSTFS_ENDPOINT") else None
+        if app.state.rustfs is not None:
+            ensure_bucket(app.state.rustfs, USER_FILES_BUCKET)
         app.state.qdrant = await stack.enter_async_context(
             httpx.AsyncClient(base_url=os.getenv("QDRANT_URL", "http://qdrant:6333"), timeout=5)
         )

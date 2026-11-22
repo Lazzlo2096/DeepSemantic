@@ -1,7 +1,6 @@
 """Space ownership and access control endpoints."""
 
 from datetime import datetime
-import os
 from pathlib import PurePath
 from typing import Literal
 from uuid import UUID, uuid4
@@ -13,6 +12,7 @@ from sqlalchemy import text
 
 from auth import AdminUser, CurrentUser, OptionalCurrentUser
 from database import database_session
+from storage import USER_FILES_BUCKET
 
 
 router = APIRouter(prefix="/spaces", tags=["spaces"])
@@ -287,14 +287,14 @@ async def upload_space_file(
     try:
         await run_in_threadpool(
             storage.put_object,
-            Bucket=os.getenv("RUSTFS_BUCKET", "deepsemantic"),
+            Bucket=USER_FILES_BUCKET,
             Key=object_key,
             Body=file.file,
             **({"ContentType": file.content_type} if file.content_type else {}),
         )
     except Exception as error:
         raise HTTPException(503, "Не удалось сохранить файл.") from error
-    bucket = os.getenv("RUSTFS_BUCKET", "deepsemantic")
+    bucket = USER_FILES_BUCKET
     async with database_session(request) as session:
         row = (await session.execute(text("""
             INSERT INTO space_files
