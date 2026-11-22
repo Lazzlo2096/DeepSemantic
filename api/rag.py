@@ -293,8 +293,17 @@ async def generate_answer(payload: RagQuestion, request: Request, run_id: UUID) 
         raise HTTPException(502, f"{chat.provider} returned an incomplete answer or invalid citations.") from error
     except (httpx.HTTPStatusError, OpenRouterError) as error:
         status = error.status_code if isinstance(error, OpenRouterError) else error.response.status_code
+        body = error.body if isinstance(error, OpenRouterError) else error.response.text
+        detail = body.strip() or str(error)
+        # Keep the upstream diagnostic in the API response.  In particular,
+        # OpenRouter uses the body to explain routing failures (for example,
+        # when no provider supports the requested response format).
+        detail = detail[:4000]
         logger.warning("%s returned HTTP %d for RAG", chat.provider, status)
-        raise HTTPException(503 if status in (404, 503) else 502, f"{chat.provider} could not answer.") from error
+        raise HTTPException(
+            503 if status in (404, 503) else 502,
+            f"{chat.provider} returned HTTP {status}: {detail}",
+        ) from error
     except (httpx.RequestError, NoResponseError) as error:
         raise HTTPException(503, f"{chat.provider} is unavailable.") from error
     except ValueError as error:
