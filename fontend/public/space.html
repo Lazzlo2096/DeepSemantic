@@ -4,77 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Space · DeepSemantic</title>
+    <meta name="description" content="Каталог публикаций Space в DeepSemantic.">
     <link rel="icon" href="/icon.svg" type="image/svg+xml" sizes="any">
     <link rel="stylesheet" href="/styles.css?v=8">
-    <script type="module" src="/space.js?v=2"></script>
+    <link rel="stylesheet" href="/vendor/katex/katex.min.css">
+    <script defer src="/vendor/katex/katex.min.js"></script>
+    <script defer src="/vendor/texmath.js"></script>
+    <script type="module" src="/catalog-page.js?v=2"></script>
   </head>
-  <body>
-    <header class="topbar">
-      <div class="shell brand">
-        <a class="brand-link" href="/">
-          <img class="brand-mark" src="/icon.svg" width="32" height="32" alt="">
-          DeepSemantic
-        </a>
-        <nav class="topbar-nav" aria-label="Разделы"></nav>
-      </div>
-    </header>
-
-    <main class="shell">
-      <p>
-        <a class="catalog-back" href="/my-spaces.html">← Мои Spaces</a>
-        <a class="paper-download" href="/space-catalog.html" id="space-catalog-link">Открыть каталог Space</a>
-      </p>
-      <section class="intro" aria-labelledby="space-title">
-        <p class="eyebrow">Public Space</p>
-        <h1 id="space-title">Загружаем…</h1>
-        <p id="space-description"></p>
-        <p class="intro-actions">
-          <button id="space-edit-button" type="button" hidden>Редактировать Space</button>
-          <button id="space-delete-button" type="button" hidden>Удалить Space</button>
-          <button id="arxiv-target-button" type="button" hidden>Сделать пространство приёмником импортов arXiv</button>
-          <span id="arxiv-target-status" role="status"></span>
-        </p>
-        <form id="space-edit-form" class="space-edit-form" hidden>
-          <label>
-            Название
-            <input id="space-edit-name" name="name" type="text" maxlength="300" required>
-          </label>
-          <label>
-            Описание
-            <textarea id="space-edit-description" name="description" maxlength="10000" rows="4"></textarea>
-          </label>
-          <label>
-            Доступ
-            <select id="space-edit-visibility" name="visibility">
-              <option value="private">Приватный — только приглашённые пользователи</option>
-              <option value="public">Public — читать смогут все в интернете</option>
-            </select>
-          </label>
-          <div class="filter-actions">
-            <button id="space-edit-submit" type="submit">Сохранить</button>
-            <button id="space-edit-cancel" type="button">Отмена</button>
-          </div>
-          <p id="space-edit-status" role="status"></p>
-        </form>
-        <form id="space-upload-form" class="space-upload-form" hidden>
-          <label>
-            Документы
-            <input id="space-file-input" type="file" name="file" multiple>
-          </label>
-          <button id="space-upload-submit" type="submit">Загрузить документы</button>
-          <p id="space-upload-status" role="status"></p>
-        </form>
-      </section>
-
-      <section aria-labelledby="files-title">
-        <div class="results-bar">
-          <h2 id="files-title">Файлы Space</h2>
-          <p id="files-status" role="status">Загружаем файлы…</p>
-        </div>
-        <p id="space-error" role="alert" hidden></p>
-        <div id="files-list" class="paper-list"></div>
-        <p id="files-empty" hidden>В этом Space пока нет файлов.</p>
-      </section>
-    </main>
-  </body>
+  <body data-catalog-mode="space"></body>
 </html>
