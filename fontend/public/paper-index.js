@@ -30,7 +30,38 @@ export function renderSummaryStatus(summaryStatus, summaryIndex, hasSummary) {
   }
 }
 
+function renderPaperChips(card, paper) {
+  const articleIndex = card.querySelector(".paper-index-status");
+  const articleReady = paper.article_index?.status === "completed";
+  articleIndex.dataset.ready = String(articleReady);
+  articleIndex.textContent = articleReady ? "Статья в Qdrant"
+    : paper.article_index?.status === "unavailable" ? "Индекс статьи: нет связи" : "Индекс статьи не готов";
+  articleIndex.title = articleReady
+    ? `Все ${paper.article_index.chunks_total} чанков полного текста найдены в Qdrant.`
+    : "Индекс полного текста: готовность подтверждается наличием всех актуальных чанков в Qdrant.";
+  const summaryStatus = card.querySelector(".paper-summary-status");
+  const summaryIndexed = paper.summary_index?.status === "completed";
+  const hasSummary = paper.has_summary === true;
+  summaryStatus.dataset.ready = String(hasSummary || summaryIndexed);
+  if (summaryIndexed) {
+    summaryStatus.textContent = "Саммари готово · в Qdrant";
+    summaryStatus.title = `Саммари создано, все ${paper.summary_index.chunks_total} его чанков найдены в Qdrant.`;
+  } else if (hasSummary) {
+    summaryStatus.textContent = paper.summary_index?.status === "unavailable"
+      ? "Саммари готово · индекс недоступен" : "Саммари готово · индексируется";
+    summaryStatus.title = "Саммари создано, его индекс ещё проверяется или недоступен.";
+  } else {
+    summaryStatus.textContent = paper.summary_index?.status === "unavailable"
+      ? "Индекс саммари: нет связи" : "Саммари не готово";
+    summaryStatus.title = "Саммари ещё не создано.";
+  }
+}
+
 export function renderPaperIndexes(card, paper) {
+  if (!card.querySelector(".paper-status-list")) {
+    renderPaperChips(card, paper);
+    return;
+  }
   const textStatus = card.querySelector('[data-status-kind="text"]');
   const articleIndex = card.querySelector('[data-status-kind="article-index"]');
   const summaryStatus = card.querySelector('[data-status-kind="summary"]');

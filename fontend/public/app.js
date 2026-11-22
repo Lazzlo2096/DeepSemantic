@@ -1,6 +1,6 @@
 import { arxivUrl } from "./arxiv.js";
 import { authFetch } from "./auth.js?v=3";
-import { renderPaperIndexes } from "./paper-index.js?v=3";
+import { renderPaperIndexes } from "./paper-index.js?v=4";
 import { setMarkdownContent } from "./math-render.js?v=1";
 
 const PAGE_SIZE = 12;
@@ -102,12 +102,18 @@ function renderPaper(paper) {
   const card = template.content.cloneNode(true);
   const title = card.querySelector(".paper-title");
   const date = card.querySelector(".paper-date");
+  const stage = card.querySelector(".paper-stage");
 
   setMarkdownContent(title, paper.title || paper.arxiv_id, { inline: true });
   linkPaper(card, paper.arxiv_id);
   card.querySelector(".paper-id").textContent = `arXiv:${paper.arxiv_id}`;
   date.dateTime = paper.submitted_at;
   date.textContent = dateFormat.format(new Date(paper.submitted_at));
+  stage.dataset.stage = paper.status ?? "";
+  stage.textContent = stageLabels.get(paper.status) ?? "Статус неизвестен";
+  stage.title = paper.status === "texted"
+    ? "Markdown статьи сохранён. Готовность чанков и эмбеддингов показана отдельно."
+    : "HTML скачан. Извлечение текста, чанки и эмбеддинги проверяются отдельно.";
   renderPaperIndexes(card, paper);
   card.querySelector(".paper-authors").textContent = paper.authors.join(", ");
   setMarkdownContent(card.querySelector(".paper-abstract"), paper.abstract || "Аннотация отсутствует.");
