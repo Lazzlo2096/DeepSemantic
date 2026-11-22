@@ -9,6 +9,7 @@ const mathOptions = {
   delimiters: "dollars",
   katexOptions: { trust: false, throwOnError: false, maxExpand: 500, maxSize: 25 },
 };
+const summaryMarkdown = new MarkdownIt({ html: false }).use(window.texmath, mathOptions);
 const articleMarkdown = new MarkdownIt({ html: true }).use(window.texmath, mathOptions);
 const tableMarkdown = new MarkdownIt("zero").use(window.texmath, mathOptions);
 const tableTextTags = new Set(["caption", "th", "td"]);
@@ -119,7 +120,7 @@ function loadSummary(url, hasText, isHtml) {
     document.querySelector("#summary-deferred-link").hidden = !deferred;
     button.textContent = job?.status === "failed" ? "Повторить" : "Суммаризировать";
     if (job?.status === "completed") {
-      result.innerHTML = markdown.render(job.summary);
+      result.innerHTML = summaryMarkdown.render(job.summary);
       feedback.textContent = "Готово.";
       button.hidden = true;
       result.hidden = false;
