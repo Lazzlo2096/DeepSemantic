@@ -52,9 +52,15 @@ class ArxivPaper(Base):
 
     arxiv_id: Mapped[str] = mapped_column(Text, primary_key=True)
     space_file_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("space_files.id"))
-    bucket = column_property(select(SpaceFile.bucket).where(SpaceFile.id == space_file_id).scalar_subquery())
-    object_key = column_property(select(SpaceFile.object_key).where(SpaceFile.id == space_file_id).scalar_subquery())
-    downloaded_at = column_property(select(SpaceFile.created_at).where(SpaceFile.id == space_file_id).scalar_subquery())
+    bucket = column_property(
+        select(SpaceFile.bucket).where(SpaceFile.id == space_file_id).correlate_except(SpaceFile).scalar_subquery()
+    )
+    object_key = column_property(
+        select(SpaceFile.object_key).where(SpaceFile.id == space_file_id).correlate_except(SpaceFile).scalar_subquery()
+    )
+    downloaded_at = column_property(
+        select(SpaceFile.created_at).where(SpaceFile.id == space_file_id).correlate_except(SpaceFile).scalar_subquery()
+    )
     text_object_key: Mapped[str | None] = mapped_column(Text)
     title: Mapped[str] = mapped_column(Text)
     authors: Mapped[list[str]] = mapped_column(ARRAY(Text))

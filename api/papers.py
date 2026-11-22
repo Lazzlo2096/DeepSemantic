@@ -132,7 +132,14 @@ async def list_papers(
         return await article_index_page(request, response, filters, summary_ready, sort, limit, offset, index_status)
 
     page = (
-        select(ArxivPaper, ArxivPaper.status.label("status"), summary_ready.label("has_summary"))
+        select(
+            *ArxivPaper.__table__.c,
+            ArxivPaper.bucket.label("bucket"),
+            ArxivPaper.object_key.label("object_key"),
+            ArxivPaper.downloaded_at.label("downloaded_at"),
+            ArxivPaper.status.label("status"),
+            summary_ready.label("has_summary"),
+        )
         .where(*filters)
         .order_by(*paper_order(ArxivPaper, sort))
         .limit(limit)
