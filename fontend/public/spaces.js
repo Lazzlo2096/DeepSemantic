@@ -22,7 +22,11 @@ function renderSpace(space) {
   meta.append(badge, date);
 
   const title = document.createElement("h3");
-  title.textContent = space.name;
+  const link = document.createElement("a");
+  link.className = "paper-title";
+  link.href = `/space.html?id=${encodeURIComponent(space.id)}`;
+  link.textContent = space.name;
+  title.append(link);
   const description = document.createElement("p");
   description.textContent = space.description || "Описание отсутствует.";
   description.className = "formatted-text";

@@ -89,7 +89,7 @@
 		reverse_proxy api:8000
 	}
 
-	@public_spaces path /api/spaces/public
+	@public_spaces path /api/spaces/public /api/spaces/public/*
 	handle @public_spaces {
 		uri strip_prefix /api
 		reverse_proxy api:8000

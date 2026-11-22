@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Space · DeepSemantic</title>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" sizes="any">
+    <link rel="stylesheet" href="/styles.css?v=8">
+    <script type="module" src="/space.js?v=1"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="shell brand">
+        <a class="brand-link" href="/">
+          <img class="brand-mark" src="/icon.svg" width="32" height="32" alt="">
+          DeepSemantic
+        </a>
+        <nav class="topbar-nav" aria-label="Разделы"></nav>
+      </div>
+    </header>
+
+    <main class="shell">
+      <p><a class="catalog-back" href="/spaces.html">← Все Public Spaces</a></p>
+      <section class="intro" aria-labelledby="space-title">
+        <p class="eyebrow">Public Space</p>
+        <h1 id="space-title">Загружаем…</h1>
+        <p id="space-description"></p>
+      </section>
+
+      <section aria-labelledby="files-title">
+        <div class="results-bar">
+          <h2 id="files-title">Файлы Space</h2>
+          <p id="files-status" role="status">Загружаем файлы…</p>
+        </div>
+        <p id="space-error" role="alert" hidden></p>
+        <div id="files-list" class="paper-list"></div>
+        <p id="files-empty" hidden>В этом Space пока нет файлов.</p>
+      </section>
+    </main>
+  </body>
+</html>

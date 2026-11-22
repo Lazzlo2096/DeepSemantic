@@ -1,0 +1,65 @@
+import { authFetch } from "./auth.js";
+
+const spaceId = new URLSearchParams(location.search).get("id");
+const title = document.querySelector("#space-title");
+const description = document.querySelector("#space-description");
+const status = document.querySelector("#files-status");
+const error = document.querySelector("#space-error");
+const list = document.querySelector("#files-list");
+const empty = document.querySelector("#files-empty");
+
+const dateFormat = new Intl.DateTimeFormat("ru-RU", {
+  year: "numeric", month: "long", day: "numeric",
+});
+
+function formatSize(size) {
+  if (size == null) return "Размер неизвестен";
+  if (size < 1024) return `${size} Б`;
+  if (size < 1024 ** 2) return `${Math.round(size / 1024)} КБ`;
+  return `${(size / 1024 ** 2).toFixed(1)} МБ`;
+}
+
+function renderFile(file) {
+  const card = document.createElement("article");
+  card.className = "paper";
+  const meta = document.createElement("div");
+  meta.className = "paper-meta";
+  const type = document.createElement("span");
+  type.className = "paper-stage";
+  type.textContent = file.content_type || "Файл";
+  const date = document.createElement("time");
+  date.dateTime = file.created_at;
+  date.textContent = `${formatSize(file.size_bytes)} · ${dateFormat.format(new Date(file.created_at))}`;
+  meta.append(type, date);
+  const name = document.createElement("h3");
+  name.textContent = file.filename;
+  card.append(meta, name);
+  return card;
+}
+
+async function loadSpace() {
+  if (!spaceId) throw new Error("В ссылке не указан Space.");
+  const base = `/api/spaces/public/${encodeURIComponent(spaceId)}`;
+  const [spaceResponse, filesResponse] = await Promise.all([
+    authFetch(base, { cache: "no-store" }),
+    authFetch(`${base}/files`, { cache: "no-store" }),
+  ]);
+  if (!spaceResponse.ok || !filesResponse.ok) {
+    throw new Error("Space не найден или больше не является публичным.");
+  }
+  const space = await spaceResponse.json();
+  const files = await filesResponse.json();
+  document.title = `${space.name} · DeepSemantic`;
+  title.textContent = space.name;
+  description.textContent = space.description || "Описание отсутствует.";
+  list.replaceChildren(...files.map(renderFile));
+  empty.hidden = files.length !== 0;
+  status.textContent = `${files.length} ${files.length === 1 ? "файл" : "файлов"}`;
+}
+
+loadSpace().catch((loadError) => {
+  title.textContent = "Space недоступен";
+  status.textContent = "Ошибка загрузки";
+  error.textContent = loadError.message;
+  error.hidden = false;
+});

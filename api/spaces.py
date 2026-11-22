@@ -53,6 +53,18 @@ class SpaceFileResponse(BaseModel):
     created_at: datetime
 
 
+async def list_space_files(request: Request, space_id: UUID, user_id: UUID | None):
+    await get_accessible_space(request, space_id, user_id)
+    async with database_session(request) as session:
+        rows = (await session.execute(text("""
+            SELECT id, space_id, uploaded_by, filename, content_type, size_bytes, created_at
+            FROM space_files
+            WHERE space_id = :space_id
+            ORDER BY created_at DESC, id DESC
+        """), {"space_id": space_id})).mappings().all()
+    return rows
+
+
 async def get_accessible_space(request: Request, space_id: UUID, user_id: UUID | None):
     async with database_session(request) as session:
         row = (await session.execute(text("""
@@ -60,9 +72,9 @@ async def get_accessible_space(request: Request, space_id: UUID, user_id: UUID |
             FROM spaces AS s
             WHERE s.id = :space_id
               AND (s.visibility = 'public'
-                   OR (:user_id IS NOT NULL AND (s.owner_id = :user_id OR EXISTS (
+                   OR (CAST(:user_id AS uuid) IS NOT NULL AND (s.owner_id = CAST(:user_id AS uuid) OR EXISTS (
                        SELECT 1 FROM space_members AS m
-                       WHERE m.space_id = s.id AND m.user_id = :user_id
+                       WHERE m.space_id = s.id AND m.user_id = CAST(:user_id AS uuid)
                    ))))
         """), {"space_id": space_id, "user_id": user_id})).mappings().one_or_none()
     if row is None:
@@ -119,6 +131,16 @@ async def list_public_spaces(request: Request):
             ORDER BY created_at DESC
         """))).mappings().all()
     return rows
+
+
+@router.get("/public/{space_id}", response_model=SpaceResponse)
+async def get_public_space(space_id: UUID, request: Request):
+    return await get_accessible_space(request, space_id, None)
+
+
+@router.get("/public/{space_id}/files", response_model=list[SpaceFileResponse])
+async def list_public_space_files(space_id: UUID, request: Request):
+    return await list_space_files(request, space_id, None)
 
 
 @router.get("/{space_id}", response_model=SpaceResponse)
