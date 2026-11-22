@@ -1,0 +1,33 @@
+spaces
+────────────────────────────────────────
+id             UUID PK
+owner_id       UUID → auth.users.id
+name           TEXT NOT NULL
+description    TEXT NULL
+visibility     ENUM: private | public
+created_at     TIMESTAMPTZ
+updated_at     TIMESTAMPTZ
+
+
+
+
+space_members
+────────────────────────────────────────
+space_id       UUID → spaces.id
+user_id        UUID → auth.users.id
+permission     ENUM: read | write
+invited_by     UUID → auth.users.id
+created_at     TIMESTAMPTZ
+
+PRIMARY KEY (space_id, user_id)
+
+
+
+
+Для файлов потребуется добавить связь:
+
+files
+────────────────────────────────────────
+...
+space_id       UUID → spaces.id
+uploaded_by    UUID → auth.users.id

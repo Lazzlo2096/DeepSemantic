@@ -31,6 +31,15 @@ async def authenticated_user(request: Request) -> AuthenticatedUser:
 CurrentUser = Annotated[AuthenticatedUser, Depends(authenticated_user)]
 
 
+async def optional_authenticated_user(request: Request) -> AuthenticatedUser | None:
+    if not request.headers.get("x-auth-proxy-secret"):
+        return None
+    return await authenticated_user(request)
+
+
+OptionalCurrentUser = Annotated[AuthenticatedUser | None, Depends(optional_authenticated_user)]
+
+
 async def administrator(user: CurrentUser) -> AuthenticatedUser:
     if user.role != "admin":
         raise HTTPException(403, "Требуются права администратора.")

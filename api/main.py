@@ -24,6 +24,7 @@ from pipeline import router as pipeline_router
 from rag import router as rag_router
 from rag_model import create_rag_model
 from storage import connect_rustfs
+from spaces import router as spaces_router
 from processing.config import pipeline_settings
 import temporal_runtime
 
@@ -103,6 +104,7 @@ app.include_router(pipeline_router)
 app.include_router(paper_summaries_router)
 app.include_router(papers_router)
 app.include_router(rag_router)
+app.include_router(spaces_router)
 
 
 @app.get("/health/live", include_in_schema=False)
