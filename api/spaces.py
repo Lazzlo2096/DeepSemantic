@@ -196,6 +196,11 @@ async def get_space(space_id: UUID, request: Request, user: OptionalCurrentUser)
     return await get_accessible_space(request, space_id, user.id if user else None)
 
 
+@router.get("/{space_id}/files", response_model=list[SpaceFileResponse])
+async def list_space_files_for_user(space_id: UUID, request: Request, user: CurrentUser):
+    return await list_space_files(request, space_id, user.id)
+
+
 @router.post("/{space_id}/members", status_code=204)
 async def grant_space_access(
     space_id: UUID, payload: SpaceMemberCreate, request: Request, user: CurrentUser,

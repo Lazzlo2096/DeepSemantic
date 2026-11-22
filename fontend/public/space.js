@@ -43,11 +43,14 @@ function renderFile(file) {
 async function loadSpace() {
   if (!spaceId) throw new Error("В ссылке не указан Space.");
   spaceCatalogLink.href = `/space-catalog.html?id=${encodeURIComponent(spaceId)}`;
-  const base = `/api/spaces/public/${encodeURIComponent(spaceId)}`;
-  const [spaceResponse, filesResponse] = await Promise.all([
-    authFetch(base, { cache: "no-store" }),
-    authFetch(`${base}/files`, { cache: "no-store" }),
-  ]);
+  const publicBase = `/api/spaces/public/${encodeURIComponent(spaceId)}`;
+  let base = publicBase;
+  let spaceResponse = await authFetch(base, { cache: "no-store" });
+  if (!spaceResponse.ok) {
+    base = `/api/spaces/${encodeURIComponent(spaceId)}`;
+    spaceResponse = await authFetch(base, { cache: "no-store" });
+  }
+  const filesResponse = await authFetch(`${base}/files`, { cache: "no-store" });
   if (!spaceResponse.ok || !filesResponse.ok) {
     throw new Error("Space не найден или больше не является публичным.");
   }
