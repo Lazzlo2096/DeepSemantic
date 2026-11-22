@@ -1,6 +1,6 @@
 import { arxivPath, arxivUrl } from "./arxiv.js";
 import { authFetch } from "./auth.js?v=1";
-import { renderPaperIndexes } from "./paper-index.js?v=1";
+import { renderPaperIndexes, renderSummaryStatus } from "./paper-index.js?v=2";
 import MarkdownIt from "./vendor/markdown-it.mjs";
 
 const markdown = new MarkdownIt({ html: false });
@@ -105,11 +105,12 @@ async function loadText(url, available) {
   }
 }
 
-function loadSummary(url, hasText, isHtml) {
+function loadSummary(url, hasText, isHtml, summaryIndex) {
   const panel = document.querySelector("#paper-summary");
   const button = document.querySelector("#summarize");
   const feedback = document.querySelector("#summary-status");
   const result = document.querySelector("#summary-result");
+  const summaryBadge = document.querySelector(".paper-summary-status");
   panel.hidden = false;
   let refreshTimer;
 
@@ -119,6 +120,7 @@ function loadSummary(url, hasText, isHtml) {
     button.disabled = !(hasText || (job && isHtml)) || busy || deferred;
     document.querySelector("#summary-deferred-link").hidden = !deferred;
     button.textContent = job?.status === "failed" ? "Повторить" : "Суммаризировать";
+    renderSummaryStatus(summaryBadge, summaryIndex, job?.status === "completed");
     if (job?.status === "completed") {
       result.innerHTML = summaryMarkdown.render(job.summary);
       feedback.textContent = "Готово.";
@@ -213,7 +215,7 @@ async function loadPaper(id) {
       download.href = `${url}/html`;
       download.hidden = false;
     }
-    loadSummary(`${url}/summary`, paper.status === "texted" && textKey.endsWith(".md"), isHtml);
+    loadSummary(`${url}/summary`, paper.status === "texted" && textKey.endsWith(".md"), isHtml, paper.summary_index);
     const textLoading = loadText(url, textKey.endsWith(".md") || textKey.endsWith(".txt"));
     list.replaceChildren(...chunks.map(renderChunk));
     status.textContent = chunks.length ? `Всего чанков: ${chunks.length}` : "У этой статьи пока нет чанков.";

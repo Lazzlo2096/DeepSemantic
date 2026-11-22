@@ -1,6 +1,6 @@
 import { arxivUrl } from "./arxiv.js";
 import { authFetch } from "./auth.js?v=1";
-import { renderPaperIndexes } from "./paper-index.js?v=1";
+import { renderPaperIndexes } from "./paper-index.js?v=2";
 
 const PAGE_SIZE = 12;
 const stageLabels = new Map([
