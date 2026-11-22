@@ -6,9 +6,12 @@
     <title>Статьи arXiv · DeepSemantic</title>
     <meta name="description" content="Каталог статей arXiv, загруженных в DeepSemantic.">
     <link rel="icon" href="/icon.svg" type="image/svg+xml" sizes="any">
-    <link rel="stylesheet" href="/styles.css?v=7">
+    <link rel="stylesheet" href="/styles.css?v=8">
+    <link rel="stylesheet" href="/vendor/katex/katex.min.css">
+    <script defer src="/vendor/katex/katex.min.js"></script>
+    <script defer src="/vendor/texmath.js"></script>
     <script type="module" src="/auth.js?v=1"></script>
-    <script type="module" src="/app.js?v=9"></script>
+    <script type="module" src="/app.js?v=10"></script>
   </head>
   <body>
     <header class="topbar">
@@ -126,7 +129,7 @@
           <ul id="rag-points"></ul>
           <section id="rag-explanation" aria-labelledby="rag-explanation-title" hidden>
             <h3 id="rag-explanation-title">Почему выбраны эти источники</h3>
-            <p id="rag-explanation-text"></p>
+            <div id="rag-explanation-text" class="formatted-text"></div>
           </section>
           <h3>Источники</h3>
           <div id="rag-sources" class="paper-list"></div>
@@ -152,7 +155,7 @@
         <p class="paper-authors"></p>
         <details>
           <summary>Аннотация</summary>
-          <p class="paper-abstract"></p>
+          <div class="paper-abstract formatted-text"></div>
         </details>
       </article>
     </template>
@@ -167,7 +170,7 @@
           <a class="paper-title search-paper"></a>
           <a class="paper-arxiv" target="_blank" rel="noopener" aria-label="Оригинал на arXiv, новая вкладка" hidden>arXiv ↗</a>
         </h3>
-        <p class="search-excerpt"></p>
+        <div class="search-excerpt formatted-text"></div>
       </article>
     </template>
   </body>

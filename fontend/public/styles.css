@@ -160,7 +160,7 @@ h3 { margin: 9px 0 5px; font-size: 1.08rem; line-height: 1.4; overflow-wrap: any
 .debug-switch input:checked::before { transform: translateX(16px); }
 #paper-title { font-size: clamp(1.6rem, 5vw, 2.6rem); overflow-wrap: anywhere; }
 .catalog-back { display: inline-block; margin-bottom: 14px; color: var(--accent); }
-.chunk-text { margin: 8px 0 0; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chunk-text { margin: 8px 0 0; line-height: 1.6; overflow-wrap: anywhere; }
 #paper-summary, #paper-text { margin-bottom: 24px; overflow-wrap: anywhere; }
 #summary-status, #text-status { margin: 0; color: var(--muted); font-size: 0.9rem; }
 .formatted-text { line-height: 1.6; overflow-x: auto; }
@@ -169,6 +169,8 @@ h3 { margin: 9px 0 5px; font-size: 1.08rem; line-height: 1.4; overflow-wrap: any
 .formatted-text pre { overflow-x: auto; }
 .formatted-text table { border-collapse: collapse; }
 .formatted-text :is(th, td) { padding: 4px 8px; border: 1px solid var(--border); }
+.formatted-text .katex-display { overflow-x: auto; overflow-y: hidden; padding-block: 0.25em; }
+.formatted-text .katex-display > .katex { width: max-content; min-width: 100%; }
 #text-result { max-height: 65vh; overflow: auto; }
 #text-result img { max-width: 100%; height: auto; }
 :is(#summary-result, #text-result) .katex-display { overflow-x: auto; overflow-y: hidden; padding-block: 0.25em; }
@@ -177,8 +179,10 @@ h3 { margin: 9px 0 5px; font-size: 1.08rem; line-height: 1.4; overflow-wrap: any
 .paper-authors { margin: 0 0 12px; color: var(--muted); font-size: 0.9rem; line-height: 1.5; }
 .paper-load-status { margin: 0 0 12px; color: #962e37; font-size: 0.9rem; }
 summary { width: fit-content; cursor: pointer; color: var(--accent); font-size: 0.9rem; font-weight: 600; }
-.paper-abstract { max-width: 76ch; margin: 10px 0 0; color: #334258; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
+.paper-abstract { max-width: 76ch; margin: 10px 0 0; color: #334258; line-height: 1.6; overflow-wrap: anywhere; }
 .search-excerpt { margin: 10px 0 0; line-height: 1.6; overflow-wrap: anywhere; }
+.paper-abstract > :first-child, .search-excerpt > :first-child, .chunk-text > :first-child { margin-top: 0; }
+.paper-abstract > :last-child, .search-excerpt > :last-child, .chunk-text > :last-child { margin-bottom: 0; }
 #rag-points { padding-inline-start: 22px; line-height: 1.6; overflow-wrap: anywhere; }
 #rag-points li + li { margin-top: 6px; }
 #rag-result a { color: var(--accent); }

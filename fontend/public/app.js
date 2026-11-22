@@ -1,6 +1,7 @@
 import { arxivUrl } from "./arxiv.js";
 import { authFetch } from "./auth.js?v=1";
 import { renderPaperIndexes } from "./paper-index.js?v=2";
+import { setMarkdownContent } from "./math-render.js?v=1";
 
 const PAGE_SIZE = 12;
 const stageLabels = new Map([
@@ -102,7 +103,7 @@ function renderPaper(paper) {
   const date = card.querySelector(".paper-date");
   const stage = card.querySelector(".paper-stage");
 
-  title.textContent = paper.title || paper.arxiv_id;
+  setMarkdownContent(title, paper.title || paper.arxiv_id, { inline: true });
   linkPaper(card, paper.arxiv_id);
   card.querySelector(".paper-id").textContent = `arXiv:${paper.arxiv_id}`;
   date.dateTime = paper.submitted_at;
@@ -114,7 +115,7 @@ function renderPaper(paper) {
     : "HTML скачан. Извлечение текста, чанки и эмбеддинги проверяются отдельно.";
   renderPaperIndexes(card, paper);
   card.querySelector(".paper-authors").textContent = paper.authors.join(", ");
-  card.querySelector(".paper-abstract").textContent = paper.abstract || "Аннотация отсутствует.";
+  setMarkdownContent(card.querySelector(".paper-abstract"), paper.abstract || "Аннотация отсутствует.");
   return card;
 }
 
@@ -325,7 +326,7 @@ function showLocation(moveFocus = false) {
 function renderSearchResult(chunk) {
   const card = searchTemplate.content.cloneNode(true);
   const title = card.querySelector(".search-paper");
-  title.textContent = chunk.paper_title || chunk.arxiv_id || "Фрагмент без статьи";
+  setMarkdownContent(title, chunk.paper_title || chunk.arxiv_id || "Фрагмент без статьи", { inline: true });
   if (chunk.arxiv_id) {
     linkPaper(card, chunk.arxiv_id);
   }
@@ -334,7 +335,7 @@ function renderSearchResult(chunk) {
   const score = card.querySelector(".search-score");
   score.hidden = typeof chunk.score !== "number";
   if (!score.hidden) score.textContent = `Сходство ${scoreFormat.format(chunk.score)}`;
-  card.querySelector(".search-excerpt").textContent = chunk.text;
+  setMarkdownContent(card.querySelector(".search-excerpt"), chunk.text);
   return card;
 }
 
@@ -350,16 +351,16 @@ function renderRagAnswer(answer) {
       : source.chunk_index === null ? "paper-text" : `chunk-${source.chunk_index + 1}`;
     link.href = `${paperUrl(source.arxiv_id)}#${anchor}`;
     link.textContent = isSummary ? "Открыть суммаризацию" : "Открыть фрагмент статьи";
-    heading.textContent = `[${source.id}] ${source.paper_title || source.arxiv_id} · [${source.source_start}, ${source.source_end})`;
-    excerpt.className = "chunk-text";
-    excerpt.textContent = source.text;
+    setMarkdownContent(heading, `[${source.id}] ${source.paper_title || source.arxiv_id} · [${source.source_start}, ${source.source_end})`, { inline: true });
+    excerpt.className = "chunk-text formatted-text";
+    setMarkdownContent(excerpt, source.text);
     details.append(heading, excerpt, link);
     links.set(source.id, link.href);
     return details;
   }));
   ragPoints.replaceChildren(...answer.points.map((point) => {
     const item = document.createElement("li");
-    item.textContent = point.text;
+    setMarkdownContent(item, point.text);
     for (const id of new Set(point.source_ids)) {
       const link = document.createElement("a");
       link.href = links.get(id);
@@ -369,7 +370,7 @@ function renderRagAnswer(answer) {
     }
     return item;
   }));
-  ragExplanationText.textContent = answer.source_explanation;
+  setMarkdownContent(ragExplanationText, answer.source_explanation);
   ragExplanation.hidden = !answer.source_explanation;
   ragResult.hidden = false;
 }
@@ -423,11 +424,11 @@ function renderToolExcerpt(item) {
   const score = typeof item.score === "number" ? ` · Сходство ${scoreFormat.format(item.score)}` : "";
   card.className = "rag-tool-excerpt";
   title.href = `${paperUrl(item.document_id)}#${anchor}`;
-  title.textContent = `[${item.source_id}] ${item.paper_title || item.document_id}`;
+  setMarkdownContent(title, `[${item.source_id}] ${item.paper_title || item.document_id}`, { inline: true });
   meta.className = "rag-tool-meta";
   meta.textContent = `${isSummary ? "Суммаризация" : "Статья"} · arXiv:${item.document_id} · [${item.source_start}, ${item.source_end})${score}`;
-  excerpt.className = "chunk-text";
-  excerpt.textContent = item.text;
+  excerpt.className = "chunk-text formatted-text";
+  setMarkdownContent(excerpt, item.text);
   card.append(title, meta, excerpt);
   return card;
 }

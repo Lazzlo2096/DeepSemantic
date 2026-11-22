@@ -2,6 +2,7 @@ import { arxivPath, arxivUrl } from "./arxiv.js";
 import { authFetch, loadCurrentUser } from "./auth.js?v=1";
 import { renderPaperIndexes, renderSummaryStatus } from "./paper-index.js?v=2";
 import MarkdownIt from "./vendor/markdown-it.mjs";
+import { setMarkdownContent } from "./math-render.js?v=1";
 
 const markdown = new MarkdownIt({ html: false });
 const mathOptions = {
@@ -75,7 +76,7 @@ function renderChunk(chunk) {
   const chunkNumber = chunk.chunk_index + 1;
   card.querySelector("article").id = `chunk-${chunkNumber}`;
   card.querySelector(".chunk-heading").textContent = `Чанк №${chunkNumber}`;
-  card.querySelector(".chunk-text").textContent = chunk.text;
+  setMarkdownContent(card.querySelector(".chunk-text"), chunk.text);
   return card;
 }
 
@@ -158,10 +159,7 @@ async function loadText(url, available) {
     if (response.headers.get("Content-Type")?.startsWith("text/markdown")) {
       result.innerHTML = articleMarkdown.render(source.replace(layoutPreamble, ""));
     } else {
-      const plain = document.createElement("pre");
-      plain.className = "paper-plain-text";
-      plain.textContent = source;
-      result.replaceChildren(plain);
+      setMarkdownContent(result, source);
     }
     result.hidden = false;
     feedback.textContent = "";
@@ -262,7 +260,7 @@ async function loadPaper(id) {
     renderPaperIndexes(document, paper);
     const title = paper.title || paper.arxiv_id;
     document.title = `${title} · DeepSemantic`;
-    document.querySelector("#paper-title").textContent = title;
+    setMarkdownContent(document.querySelector("#paper-title"), title, { inline: true });
     document.querySelector("#paper-id").textContent = `arXiv:${paper.arxiv_id}`;
     const authors = document.querySelector("#paper-authors");
     authors.textContent = paper.authors.join(", ");
