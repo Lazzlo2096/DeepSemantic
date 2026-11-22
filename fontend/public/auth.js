@@ -35,15 +35,73 @@ function loginUrl() {
 async function initializeNavigation() {
   const navigation = document.querySelector(".topbar-nav");
   if (!navigation || location.pathname === "/login.html") return;
-  const spacesLink = document.createElement("a");
-  spacesLink.className = "topbar-link";
-  spacesLink.href = "/public-spaces.html";
-  spacesLink.textContent = "Public Spaces";
-  const mySpacesLink = document.createElement("a");
-  mySpacesLink.className = "topbar-link";
-  mySpacesLink.href = "/my-spaces.html";
-  mySpacesLink.textContent = "Мои Spaces";
-  navigation.append(spacesLink, mySpacesLink);
+
+  const menuButton = document.querySelector(".menu-toggle");
+  const mobileMenu = document.querySelector(".mobile-menu");
+  const mobileMenuClose = () => {
+    if (!mobileMenu || !menuButton) return;
+    mobileMenu.classList.remove("is-open");
+    mobileMenu.hidden = true;
+    menuButton.setAttribute("aria-expanded", "false");
+    document.body.classList.remove("menu-open");
+  };
+  const mobileMenuOpen = () => {
+    if (!mobileMenu || !menuButton) return;
+    mobileMenu.hidden = false;
+    mobileMenu.classList.add("is-open");
+    menuButton.setAttribute("aria-expanded", "true");
+    document.body.classList.add("menu-open");
+    mobileMenu.querySelector("a, button")?.focus();
+  };
+
+  function link(href, label, current = location.pathname) {
+    const element = document.createElement("a");
+    element.className = "topbar-link";
+    element.href = href;
+    element.textContent = label;
+    if (href === current || (href === "/" && current === "/index.html")) {
+      element.classList.add("is-active");
+      element.setAttribute("aria-current", "page");
+    }
+    return element;
+  }
+
+  function menu(label, items) {
+    const wrapper = document.createElement("details");
+    wrapper.className = "topbar-menu";
+    const summary = document.createElement("summary");
+    summary.className = "topbar-link topbar-menu-label";
+    summary.textContent = label;
+    const list = document.createElement("div");
+    list.className = "topbar-menu-list";
+    for (const [href, itemLabel] of items) list.append(link(href, itemLabel));
+    wrapper.append(summary, list);
+    return wrapper;
+  }
+
+  function appendAccount(container, user, logoutHandler) {
+    const account = document.createElement("details");
+    account.className = "topbar-account-menu";
+    const summary = document.createElement("summary");
+    summary.className = "topbar-account";
+    summary.textContent = user.email;
+    const accountActions = document.createElement("div");
+    accountActions.className = "topbar-menu-list topbar-account-list";
+    const logout = document.createElement("button");
+    logout.className = "topbar-logout";
+    logout.type = "button";
+    logout.textContent = "Выйти";
+    logout.addEventListener("click", logoutHandler);
+    accountActions.append(logout);
+    account.append(summary, accountActions);
+    container.append(account);
+  }
+
+  navigation.replaceChildren(
+    link("/", "Каталог статей"),
+    menu("Spaces", [["/public-spaces.html", "Public Spaces"], ["/my-spaces.html", "Мои Spaces"]]),
+  );
+
   try {
     const user = await loadCurrentUser();
     if (!user) {
@@ -52,34 +110,54 @@ async function initializeNavigation() {
       login.href = loginUrl();
       login.textContent = "Войти";
       navigation.append(login);
-      return;
-    }
-    if (user.role === "admin") {
-      for (const [href, label] of [["/imports.html", "Импорт arXiv"], ["/arxiv-import-spaces.html", "Приёмники arXiv"], ["/workers.html", "Воркеры"], ["/users.html", "Пользователи"]]) {
-        if (navigation.querySelector(`[href="${href}"]`)) continue;
-        const link = document.createElement("a");
-        link.className = "topbar-link";
-        link.href = href;
-        link.textContent = label;
-        navigation.append(link);
+    } else {
+      if (user.role === "admin") {
+        navigation.append(menu("Администрирование", [["/imports.html", "Импорт arXiv"], ["/arxiv-import-spaces.html", "Приёмники arXiv"], ["/workers.html", "Воркеры"], ["/users.html", "Пользователи"]]));
       }
+      appendAccount(navigation, user, async (event) => {
+        const logout = event.currentTarget;
+        logout.disabled = true;
+        const response = await authFetch("/api/auth/logout", { method: "POST" });
+        if (response.ok) location.assign("/");
+        else logout.disabled = false;
+      });
     }
-    const account = document.createElement("span");
-    account.className = "topbar-account";
-    account.textContent = user.email;
-    const logout = document.createElement("button");
-    logout.className = "topbar-logout";
-    logout.type = "button";
-    logout.textContent = "Выйти";
-    logout.addEventListener("click", async () => {
+  } catch (error) {
+    console.warn(error);
+  }
+
+  if (mobileMenu) {
+    mobileMenu.replaceChildren(...Array.from(navigation.children).map((item) => item.cloneNode(true)));
+    mobileMenu.addEventListener("click", async (event) => {
+      const logout = event.target.closest(".topbar-logout");
+      if (!logout) return;
       logout.disabled = true;
       const response = await authFetch("/api/auth/logout", { method: "POST" });
       if (response.ok) location.assign("/");
       else logout.disabled = false;
     });
-    navigation.append(account, logout);
-  } catch (error) {
-    console.warn(error);
+  }
+
+  if (menuButton && mobileMenu) {
+    menuButton.addEventListener("click", () => {
+      if (mobileMenu.hidden) mobileMenuOpen();
+      else mobileMenuClose();
+    });
+    mobileMenu.addEventListener("click", (event) => {
+      if (event.target.closest("a")) mobileMenuClose();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        mobileMenuClose();
+        document.querySelectorAll(".topbar details[open]").forEach((item) => { item.open = false; });
+      }
+    });
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest(".topbar")) {
+        mobileMenuClose();
+        document.querySelectorAll(".topbar details[open]").forEach((item) => { item.open = false; });
+      }
+    });
   }
 }
 

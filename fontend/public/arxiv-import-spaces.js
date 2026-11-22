@@ -1,4 +1,4 @@
-import { authFetch } from "./auth.js?v=2";
+import { authFetch } from "./auth.js?v=3";
 
 const list = document.querySelector("#targets-list");
 const status = document.querySelector("#targets-status");

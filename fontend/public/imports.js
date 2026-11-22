@@ -1,4 +1,4 @@
-import { authFetch } from "./auth.js?v=2";
+import { authFetch } from "./auth.js?v=3";
 
 const endpoint = "/api/arxiv/imports";
 const pageSize = 20;

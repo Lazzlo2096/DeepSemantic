@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Воркеры · DeepSemantic</title>
     <link rel="icon" href="/icon.svg" type="image/svg+xml" sizes="any">
-    <link rel="stylesheet" href="/styles.css?v=7">
-    <script type="module" src="/auth.js?v=2"></script>
+    <link rel="stylesheet" href="/styles.css?v=8">
+    <script type="module" src="/auth.js?v=3"></script>
     <script type="module" src="/pipeline.js?v=4"></script>
   </head>
   <body>
@@ -16,10 +16,9 @@
           <img class="brand-mark" src="/icon.svg" width="32" height="32" alt="">
           DeepSemantic
         </a>
-        <nav class="topbar-nav" aria-label="Разделы">
-          <a class="topbar-link" href="/">Каталог статей</a>
-          <a class="topbar-link" href="/imports.html">Импорт arXiv</a>
-        </nav>
+        <nav class="topbar-nav" aria-label="Основная навигация"></nav>
+        <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="mobile-menu">Меню</button>
+        <nav id="mobile-menu" class="mobile-menu" aria-label="Мобильная навигация" hidden></nav>
       </div>
     </header>
 

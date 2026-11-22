@@ -26,6 +26,6 @@ if (mode === "space") {
   document.querySelector("#space-promo").hidden = false;
 }
 
-await import("./auth.js?v=2");
+await import("./auth.js?v=3");
 await import("./app.js?v=14");
 if (mode === "space") await import("./space-catalog-actions.js?v=2");

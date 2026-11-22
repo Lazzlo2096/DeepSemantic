@@ -1,4 +1,4 @@
-import { authFetch, loadCurrentUser } from "./auth.js?v=2";
+import { authFetch, loadCurrentUser } from "./auth.js?v=3";
 
 const status = document.querySelector("#spaces-status");
 const error = document.querySelector("#spaces-error");

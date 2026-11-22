@@ -1,4 +1,4 @@
-import { authFetch, loadCurrentUser } from "./auth.js?v=2";
+import { authFetch, loadCurrentUser } from "./auth.js?v=3";
 
 const spaceId = new URLSearchParams(location.search).get("id");
 const title = document.querySelector("#space-title");

@@ -1,4 +1,4 @@
-import { authFetch } from "./auth.js?v=2";
+import { authFetch } from "./auth.js?v=3";
 
 const form = document.querySelector("#space-create-form");
 const submit = document.querySelector("#space-create-submit");
