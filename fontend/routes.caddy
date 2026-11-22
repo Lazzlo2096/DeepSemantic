@@ -75,7 +75,7 @@
 		}
 	}
 
-	@user_api path /api/rag/* /api/chunks/search
+@user_api path /api/rag/* /api/chunks/search /api/chunks/search/text
 	handle @user_api {
 		route {
 			import authenticated
@@ -83,7 +83,7 @@
 		}
 	}
 
-	@public_api path /api/papers /api/papers/* /api/chunks/search/text
+@public_api path /api/papers /api/papers/*
 	handle @public_api {
 		uri strip_prefix /api
 		reverse_proxy api:8000
