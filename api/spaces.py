@@ -272,6 +272,45 @@ async def list_space_files_for_user(space_id: UUID, request: Request, user: Curr
     return await list_space_files(request, space_id, user.id)
 
 
+@router.get("/{space_id}/files/{file_id}/processing")
+async def get_space_file_processing(
+    space_id: UUID, file_id: UUID, request: Request, user: OptionalCurrentUser,
+):
+    await get_accessible_space(request, space_id, user.id if user else None)
+    async with database_session(request) as session:
+        row = (await session.execute(text("""
+            SELECT
+                processing.text_object_key IS NOT NULL AS text_ready,
+                processing.summary IS NOT NULL AS summary_ready,
+                count(chunks.chunk_id) FILTER (WHERE chunks.source_kind = 'article') AS article_chunks,
+                count(chunks.chunk_id) FILTER (WHERE chunks.source_kind = 'article' AND chunk.qdrant_collection IS NOT NULL) AS article_indexed,
+                count(chunks.chunk_id) FILTER (WHERE chunks.source_kind = 'summary') AS summary_chunks,
+                count(chunks.chunk_id) FILTER (WHERE chunks.source_kind = 'summary' AND chunk.qdrant_collection IS NOT NULL) AS summary_indexed
+            FROM public.space_files file
+            LEFT JOIN neural_things.document_processing processing ON processing.space_file_id = file.id
+            LEFT JOIN neural_things.document_chunks chunks ON chunks.space_file_id = file.id
+            LEFT JOIN neural_things.chunks chunk ON chunk.id = chunks.chunk_id
+            WHERE file.id = :file_id AND file.space_id = :space_id
+            GROUP BY processing.text_object_key, processing.summary
+        """), {"file_id": file_id, "space_id": space_id})).mappings().one_or_none()
+    if row is None:
+        raise HTTPException(404, "Файл не найден.")
+    article_total = row["article_chunks"] or 0
+    article_indexed = row["article_indexed"] or 0
+    summary_total = row["summary_chunks"] or 0
+    summary_indexed = row["summary_indexed"] or 0
+    article_status = "completed" if article_total and article_indexed == article_total else "partial" if article_indexed else "pending"
+    summary_status = "completed" if summary_total and summary_indexed == summary_total else "partial" if summary_indexed else "pending"
+    runtime = await temporal_runtime.describe(request, f"document:{file_id}")
+    return {
+        "text": "completed" if row["text_ready"] else "pending",
+        "summary_available": bool(row["summary_ready"]),
+        "article_index": {"status": article_status, "chunks_total": article_total, "chunks_indexed": article_indexed},
+        "summary_index": {"status": summary_status, "chunks_total": summary_total, "chunks_indexed": summary_indexed},
+        "runtime": runtime,
+    }
+
+
 @router.get("/{space_id}/files/{file_id}")
 async def get_space_file(
     space_id: UUID, file_id: UUID, request: Request, user: OptionalCurrentUser,

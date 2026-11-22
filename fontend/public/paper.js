@@ -312,6 +312,8 @@ async function loadUploadedFile(id, currentSpaceId) {
     const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
     const filename = encodedName ? decodeURIComponent(encodedName) : "Документ";
     const contentType = response.headers.get("Content-Type") || "";
+    const processingResponse = await authFetch(`${url}/processing`, { cache: "no-store" });
+    const processing = processingResponse.ok ? await processingResponse.json() : null;
     const textPanel = document.querySelector("#paper-text");
     const textStatus = document.querySelector("#text-status");
     const result = document.querySelector("#text-result");
@@ -322,6 +324,7 @@ async function loadUploadedFile(id, currentSpaceId) {
     document.querySelector("#catalog-back").textContent = "← Вернуться к Space";
     document.querySelector("#paper-summary").hidden = true;
     chunksPanel.hidden = true;
+    if (processing) renderUploadedFileProcessing(processing);
     const download = document.querySelector("#paper-html");
     download.href = url;
     download.textContent = "Открыть исходный файл";
@@ -350,6 +353,32 @@ async function loadUploadedFile(id, currentSpaceId) {
     pageStatus.textContent = "Не удалось загрузить документ. Попробуй обновить страницу.";
     pageStatus.hidden = false;
   }
+}
+
+function renderUploadedFileProcessing(processing) {
+  const articleStatus = document.querySelector(".paper-index-status");
+  const summaryStatus = document.querySelector(".paper-summary-status");
+  const article = processing.article_index;
+  const summary = processing.summary_index;
+  articleStatus.dataset.ready = String(article.status === "completed");
+  articleStatus.textContent = `Чанки статьи: ${article.chunks_indexed}/${article.chunks_total}`;
+  articleStatus.title = processing.text === "completed"
+    ? "Извлечённый текст разбит на чанки, указано количество чанков с embeddings в Qdrant."
+    : "Текст документа ещё не извлечён.";
+  summaryStatus.dataset.ready = String(summary.status === "completed");
+  summaryStatus.textContent = processing.summary_available
+    ? `Чанки саммари: ${summary.chunks_indexed}/${summary.chunks_total}`
+    : "Саммари ещё не создано";
+  summaryStatus.title = processing.summary_available
+    ? "Указано количество чанков саммари с embeddings в Qdrant."
+    : "Саммари будет создано после обработки текста документа.";
+  const runtime = processing.runtime;
+  document.querySelector("#paper-load-status").textContent = runtime?.status === "failed"
+    ? "Обработка завершилась с ошибкой."
+    : runtime?.status === "completed" && article.status === "completed" && summary.status === "completed"
+      ? "Обработка завершена."
+      : "Обработка выполняется…";
+  document.querySelector("#paper-load-status").hidden = false;
 }
 
 initializeDebugMode();
