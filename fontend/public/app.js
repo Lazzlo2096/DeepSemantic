@@ -135,6 +135,7 @@ async function loadPage(page, moveFocus = false) {
     const params = new URLSearchParams(appliedFilters);
     params.set("limit", PAGE_SIZE);
     params.set("offset", offset);
+    if (window.catalogSpaceId) params.set("space_id", window.catalogSpaceId);
     const response = await fetch(`/api/papers?${params}`, { signal: request.signal, cache: "no-store" });
     if (request.signal.aborted) return;
     if (response.status === 422) {

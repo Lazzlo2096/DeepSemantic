@@ -1,5 +1,6 @@
 const mode = document.body.dataset.catalogMode || "home";
 const spaceId = new URLSearchParams(location.search).get("id");
+window.catalogSpaceId = mode === "space" ? spaceId : null;
 const response = await fetch("/catalog-components.html", { cache: "no-store" });
 if (!response.ok) throw new Error("Не удалось загрузить компоненты каталога.");
 document.body.replaceChildren();

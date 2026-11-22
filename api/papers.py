@@ -2,6 +2,7 @@ from datetime import UTC, date, datetime, time
 from pathlib import PurePosixPath
 from typing import Annotated, Literal
 from urllib.parse import quote
+from uuid import UUID
 
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
@@ -106,6 +107,7 @@ async def list_papers(
     date_from: date | None = None,
     date_to: date | None = None,
     has_summary: bool | None = None,
+    space_id: UUID | None = None,
 ):
     if date_from is not None and date_to is not None and date_from > date_to:
         raise HTTPException(422, "date_from must be on or before date_to.")
@@ -118,6 +120,20 @@ async def list_papers(
         .exists()
     )
     filters = []
+    if space_id is not None:
+        space_files = table("space_files", column("id"), column("space_id"))
+        spaces = table("spaces", column("id"), column("visibility"))
+        filters.append(
+            select(space_files.c.id)
+            .select_from(space_files.join(spaces, spaces.c.id == space_files.c.space_id))
+            .where(
+                space_files.c.id == ArxivPaper.space_file_id,
+                spaces.c.id == space_id,
+                spaces.c.visibility == "public",
+            )
+            .correlate(ArxivPaper)
+            .exists()
+        )
     if status in ("downloaded", "texted"):
         filters.append(ArxivPaper.status == status)
     if date_from is not None:
