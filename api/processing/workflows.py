@@ -122,7 +122,18 @@ class PaperWorkflow:
         async def summarize():
             return await child("SummaryWorkflow", {"paper": paper, "settings": p["settings"]},
                                summary_workflow_id(paper, p["settings"]))
-        if workflow.patched("independent-summary-branch-v1"):
+        if workflow.patched("independent-article-branch-v1"):
+            article_mode, summary_mode = await asyncio.gather(
+                execute("pipeline_article_mode", {}), execute("pipeline_summary_mode", {}))
+            self.branches["article_index"] = "deferred" if article_mode == "deferred" else "queued"
+            self.branches["summary_index"] = "deferred" if summary_mode == "deferred" else "queued"
+            if summary_mode == "enabled":
+                await child("SummaryWorkflow", {"paper": paper, "settings": p["settings"]},
+                            summary_workflow_id(paper, p["settings"]), wait=False, allow_completed=True)
+            results = await asyncio.gather(
+                index_article() if article_mode == "enabled" else asyncio.sleep(0),
+                return_exceptions=True)
+        elif workflow.patched("independent-summary-branch-v1"):
             mode = await execute("pipeline_summary_mode", {})
             self.branches["summary_index"] = "deferred" if mode == "deferred" else "queued"
             if mode == "enabled":
@@ -224,7 +235,8 @@ class SummaryReconcileWorkflow:
             self.woken = False
             try:
                 page = await execute("summary_reconciliation_page", {"after": after})
-                self.state["mode"] = page["mode"]
+                self.state["article_mode"] = page["article_mode"]
+                self.state["summary_mode"] = page["summary_mode"]
                 self.state["last_error"] = None
                 for item in page.get("missing_markdown", []):
                     await child("PaperWorkflow", item, paper_workflow_id(item["paper"], item["settings"]),
@@ -236,7 +248,7 @@ class SummaryReconcileWorkflow:
                 self.state["scanned"] += page["scanned"]
                 after = page["after"]
                 self.state["after"] = after
-                if page["mode"] == "enabled" and not after:
+                if (page["article_mode"] == "enabled" or page["summary_mode"] == "enabled") and not after:
                     self.state["passes"] += 1
                 if after:
                     continue

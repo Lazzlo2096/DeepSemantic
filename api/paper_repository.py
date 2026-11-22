@@ -19,7 +19,7 @@ from processing.config import fingerprint
 async def get_pipeline_settings():
     async with connection() as db:
         return await (await db.execute(
-            "SELECT summary_mode, updated_at FROM pipeline_settings WHERE singleton"
+            "SELECT article_mode, summary_mode, updated_at FROM pipeline_settings WHERE singleton"
         )).fetchone()
 
 

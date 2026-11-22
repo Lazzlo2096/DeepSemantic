@@ -23,7 +23,8 @@ def worker_bindings(activities, kind):
         "text": [activities.extract], "summary": [activities.summarize],
         "index": [activities.prepare_index, activities.index_batch_activity],
         "pipeline": [activities.paper_context, activities.dependency_result, activities.catalog_page,
-                     activities.pipeline_summary_mode, activities.summary_reconciliation_page],
+                     activities.pipeline_article_mode, activities.pipeline_summary_mode,
+                     activities.summary_reconciliation_page],
     }
     return {"task_queue": PIPELINE_QUEUE if kind == 'pipeline' else QUEUES[kind],
             "workflows": PIPELINE_WORKFLOWS if kind == 'pipeline' else [], "activities": methods[kind]}

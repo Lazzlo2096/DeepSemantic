@@ -22,7 +22,7 @@ SETTINGS = {"summary": {}, "index": {"model": "test"}}
 
 
 class BranchTests(unittest.IsolatedAsyncioTestCase):
-    async def test_deferred_paper_completes_article_without_starting_summary(self):
+    async def test_deferred_paper_defers_both_branches_without_starting_children(self):
         async def child(name, *args, **kwargs):
             self.assertEqual(name, "IndexWorkflow")
             return {"status": "completed"}
@@ -30,7 +30,7 @@ class BranchTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(workflows, "execute", new=AsyncMock(return_value="deferred")), \
                 patch.object(workflows, "child", side_effect=child):
             result = await workflows.PaperWorkflow().run({"paper": PAPER, "settings": SETTINGS})
-        self.assertEqual(result["article_index"], "completed")
+        self.assertEqual(result["article_index"], "deferred")
         self.assertEqual(result["summary_index"], "deferred")
 
     async def test_enabled_paper_does_not_wait_for_summary_completion(self):
@@ -90,7 +90,7 @@ class RestTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_put_starts_durable_reconciler_before_committing_and_wakes_after(self):
         events = []
-        row = {"summary_mode": "enabled", "updated_at": datetime.now(timezone.utc)}
+        row = {"article_mode": "enabled", "summary_mode": "enabled", "updated_at": datetime.now(timezone.utc)}
         handle = SimpleNamespace(signal=AsyncMock(side_effect=lambda *a, **kw: events.append("wake")))
         async def start(*args):
             events.append("start")
@@ -108,11 +108,13 @@ class RestTests(unittest.IsolatedAsyncioTestCase):
             response = await self.api.put("/pipeline/settings", json={"summary_mode": "enabled"})
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(events, ["start", "transaction", "commit", "wake"])
+        self.assertEqual(response.json()["article_mode"], "enabled")
         self.assertEqual(response.json()["summary_mode"], "enabled")
 
     async def test_processing_exposes_completed_article_with_deferred_summary(self):
         with patch.object(pipeline.repository, "get_paper", new=AsyncMock(return_value=PAPER)), \
-                patch.object(pipeline.repository, "get_pipeline_settings", new=AsyncMock(return_value={"summary_mode": "deferred"})), \
+                patch.object(pipeline.repository, "get_pipeline_settings", new=AsyncMock(return_value={
+                    "article_mode": "enabled", "summary_mode": "deferred"})), \
                 patch.object(pipeline.repository, "get_summary", new=AsyncMock(return_value=None)), \
                 patch.object(pipeline.repository, "index_progress", new=AsyncMock(return_value={
                     "status": "completed", "chunks_total": 3, "chunks_indexed": 3})), \
@@ -120,6 +122,7 @@ class RestTests(unittest.IsolatedAsyncioTestCase):
             response = await self.api.get("/papers/2611.00001v1/processing")
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["article_index"]["status"], "completed")
+        self.assertEqual(response.json()["article_mode"], "enabled")
         self.assertEqual(response.json()["summary_index"]["status"], "deferred")
 
 

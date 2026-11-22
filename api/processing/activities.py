@@ -59,6 +59,11 @@ class Activities:
     async def pipeline_summary_mode(self, p: dict):
         return (await repository.get_pipeline_settings())["summary_mode"]
 
+    @activity.defn(name="pipeline_article_mode")
+    @heartbeats
+    async def pipeline_article_mode(self, p: dict):
+        return (await repository.get_pipeline_settings())["article_mode"]
+
     async def reconciliation_due(self, identity, changed_at):
         try:
             info = await self.client.get_workflow_handle(identity).describe(rpc_timeout=timedelta(seconds=3))
@@ -74,9 +79,11 @@ class Activities:
     @heartbeats
     async def summary_reconciliation_page(self, p: dict):
         control = await repository.get_pipeline_settings()
-        mode = control["summary_mode"]
-        if mode == "deferred":
-            return {"mode": mode, "items": [], "scanned": 0, "after": ""}
+        article_mode = control["article_mode"]
+        summary_mode = control["summary_mode"]
+        if article_mode == "deferred" and summary_mode == "deferred":
+            return {"article_mode": article_mode, "summary_mode": summary_mode,
+                    "items": [], "missing_markdown": [], "scanned": 0, "after": ""}
         settings = pipeline_settings()
         rows = await repository.catalog_page(p.get("after", ""), limit=25)
         items = []
@@ -86,20 +93,27 @@ class Activities:
             if not paper or not paper["object_key"].lower().endswith(".html"):
                 continue
             if not paper["text_object_key"]:
-                if await self.reconciliation_due(paper_workflow_id(paper, settings), control["updated_at"]):
+                if (article_mode == "enabled" or summary_mode == "enabled") and await self.reconciliation_due(
+                        paper_workflow_id(paper, settings), control["updated_at"]):
                     missing_markdown.append({"paper": paper_reference(paper), "settings": settings})
                 continue
+            article_source = {"arxiv_id": paper["arxiv_id"], "source_kind": "article",
+                              "source_version": paper["markdown_version"]}
+            article_missing = article_mode == "enabled" and (
+                await repository.index_progress(article_source, settings))["status"] != "completed"
             cached = await repository.get_summary(paper["arxiv_id"], generation=summary_generation(paper, settings))
+            summary_missing = summary_mode == "enabled"
             if cached:
                 source = {"arxiv_id": paper["arxiv_id"], "source_kind": "summary",
                           "source_version": md5(cached["summary"].encode()).hexdigest()}
-                if (await repository.index_progress(source, settings))["status"] == "completed":
-                    continue
+                summary_missing = (await repository.index_progress(source, settings))["status"] != "completed"
             # Activities already have bounded retries. Do not turn a permanent
             # LLM failure into a new paid attempt every reconciliation minute.
-            if await self.reconciliation_due(summary_workflow_id(paper, settings), control["updated_at"]):
+            identity = paper_workflow_id(paper, settings) if article_missing else summary_workflow_id(paper, settings)
+            if (article_missing or summary_missing) and await self.reconciliation_due(identity, control["updated_at"]):
                 items.append({"paper": paper_reference(paper), "settings": settings})
-        return {"mode": mode, "items": items, "missing_markdown": missing_markdown, "scanned": len(rows),
+        return {"article_mode": article_mode, "summary_mode": summary_mode, "items": items,
+                "missing_markdown": missing_markdown, "scanned": len(rows),
                 "after": rows[-1]["arxiv_id"] if rows else ""}
 
     @activity.defn(name="discover_import")
@@ -217,6 +231,8 @@ class Activities:
     async def prepare_index(self, p: dict):
         if p["source"]["source_kind"] == "summary" and await self.pipeline_summary_mode({}) == "deferred":
             return {"status": "deferred"}
+        if p["source"]["source_kind"] == "article" and await self.pipeline_article_mode({}) == "deferred":
+            return {"status": "deferred"}
         config = p["settings"]["index"]
         if config["max_tokens"] != self.max_tokens or config["model"] != EMBEDDING_OPENROUTER_MODEL or config["chunker"] != CHUNKER_VERSION:
             raise ApplicationError("Index worker configuration differs from this request", non_retryable=True)
@@ -239,6 +255,8 @@ class Activities:
     @heartbeats
     async def index_batch_activity(self, p: dict):
         if p["source"]["source_kind"] == "summary" and await self.pipeline_summary_mode({}) == "deferred":
+            return {"status": "deferred"}
+        if p["source"]["source_kind"] == "article" and await self.pipeline_article_mode({}) == "deferred":
             return {"status": "deferred"}
         source = await repository.get_source(p["source"]["arxiv_id"], p["source"]["source_kind"], p["source"]["source_version"])
         if source is None:

@@ -2,7 +2,10 @@ import { authFetch } from "./auth.js?v=1";
 
 const settingsEndpoint = "/api/pipeline/settings";
 const reconciliationEndpoint = "/api/pipeline/summary-reconciliation";
-const modeBadge = document.querySelector("#summary-mode");
+const modeBadges = {
+  article: document.querySelector("#article-mode"),
+  summary: document.querySelector("#summary-mode"),
+};
 const description = document.querySelector("#pipeline-description");
 const feedback = document.querySelector("#pipeline-feedback");
 const refreshButton = document.querySelector("#refresh-pipeline");
@@ -10,29 +13,38 @@ const modeButtons = [...document.querySelectorAll(".pipeline-mode-button")];
 const reconciliationStatus = document.querySelector("#reconciliation-status");
 const reconciliationError = document.querySelector("#reconciliation-error");
 const counters = document.querySelector("#reconciliation-counters");
-let mode = null;
+const modes = { article: null, summary: null };
 let changing = false;
 let loading;
 
 function updateButtons() {
   for (const button of modeButtons) {
+    const branch = button.dataset.branch;
     const buttonMode = button.dataset.mode;
-    button.disabled = changing || mode === null || mode === buttonMode;
-    button.setAttribute("aria-pressed", String(mode === buttonMode));
+    button.disabled = changing || modes[branch] === null || modes[branch] === buttonMode;
+    button.setAttribute("aria-pressed", String(modes[branch] === buttonMode));
   }
   refreshButton.disabled = changing;
 }
 
 function showSettings(settings) {
-  if (!["enabled", "deferred"].includes(settings?.summary_mode)) {
+  if (!["enabled", "deferred"].includes(settings?.article_mode)
+      || !["enabled", "deferred"].includes(settings?.summary_mode)) {
     throw new Error("Сервер вернул неизвестный режим обработки.");
   }
-  mode = settings.summary_mode;
-  modeBadge.textContent = mode === "enabled" ? "Включено" : "Отложено";
-  modeBadge.dataset.stage = mode === "enabled" ? "completed" : "deferred";
-  description.textContent = mode === "enabled"
+  modes.article = settings.article_mode;
+  modes.summary = settings.summary_mode;
+  for (const branch of ["article", "summary"]) {
+    modeBadges[branch].textContent = modes[branch] === "enabled" ? "Включено" : "Отложено";
+    modeBadges[branch].dataset.stage = modes[branch] === "enabled" ? "completed" : "deferred";
+  }
+  description.textContent = modes.article === "enabled" && modes.summary === "enabled"
     ? "Работают обе ветки: индекс статьи и саммари с эмбеддингами. Фоновая сверка обрабатывает недостающие результаты."
-    : "Работает только индексация статей. Создание саммари и их эмбеддингов отложено до включения этой ветки.";
+    : modes.article === "deferred" && modes.summary === "deferred"
+      ? "Индексация статьи и создание саммари отложены до включения соответствующих веток."
+      : modes.article === "deferred"
+        ? "Саммари работает, а индексация статьи отложена до включения этой ветки."
+        : "Индексация статьи работает, а создание саммари отложено до включения этой ветки.";
   updateButtons();
 }
 
@@ -53,8 +65,8 @@ function showReconciliation(data) {
     reconciliationStatus.textContent = "Ожидаем запуска фоновой сверки.";
   } else if (runtime.status === "completed") {
     reconciliationStatus.textContent = "Фоновая сверка завершена.";
-  } else if (mode === "deferred") {
-    reconciliationStatus.textContent = "Обработка накопившихся саммари отложена. Она продолжится после включения ветки.";
+  } else if (modes.article === "deferred" && modes.summary === "deferred") {
+    reconciliationStatus.textContent = "Обработка накопившихся статей отложена. Она продолжится после включения веток.";
   } else {
     reconciliationStatus.textContent = "Фоновая сверка работает. Каталог проверяется повторно каждые 60 секунд.";
   }
@@ -86,9 +98,12 @@ async function loadPipeline() {
       if (settings.status === "rejected") throw settings.reason;
       showSettings(settings.value);
     } catch {
-      mode = null;
-      modeBadge.textContent = "Режим недоступен";
-      modeBadge.dataset.stage = "failed";
+      modes.article = null;
+      modes.summary = null;
+      for (const branch of ["article", "summary"]) {
+        modeBadges[branch].textContent = "Режим недоступен";
+        modeBadges[branch].dataset.stage = "failed";
+      }
       description.textContent = "Не удалось прочитать настройку. Нажми «Обновить режим», чтобы повторить попытку.";
     }
     if (reconciliation.status === "fulfilled") {
@@ -106,8 +121,8 @@ async function loadPipeline() {
   }
 }
 
-async function changeMode(nextMode) {
-  if (changing || mode === null || mode === nextMode) return;
+async function changeMode(branch, nextMode) {
+  if (changing || modes[branch] === null || modes[branch] === nextMode) return;
   changing = true;
   loading?.abort();
   loading = undefined;
@@ -119,13 +134,15 @@ async function changeMode(nextMode) {
     const settings = await requestJson(settingsEndpoint, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ summary_mode: nextMode }),
+      body: JSON.stringify({ [`${branch}_mode`]: nextMode }),
       signal: AbortSignal.timeout(15000),
     });
     showSettings(settings);
-    feedback.textContent = mode === "enabled"
-      ? "Саммари включены. Накопившиеся статьи будут обработаны автоматически."
-      : "Саммари отложены. Индексация статей продолжает работать.";
+    feedback.textContent = branch === "article"
+      ? (nextMode === "enabled" ? "Индексация статей включена. Накопившиеся статьи будут обработаны автоматически."
+        : "Индексация статей отложена.")
+      : (nextMode === "enabled" ? "Саммари включены. Накопившиеся статьи будут обработаны автоматически."
+        : "Саммари отложены. Индексация статей продолжает работать.");
   } catch (error) {
     feedback.dataset.error = "true";
     feedback.textContent = `Не удалось подтвердить переключение. ${error.message || "Обнови режим и повтори попытку."}`;
@@ -137,7 +154,7 @@ async function changeMode(nextMode) {
 }
 
 for (const button of modeButtons) {
-  button.addEventListener("click", () => changeMode(button.dataset.mode));
+  button.addEventListener("click", () => changeMode(button.dataset.branch, button.dataset.mode));
 }
 refreshButton.addEventListener("click", loadPipeline);
 document.addEventListener("visibilitychange", () => {

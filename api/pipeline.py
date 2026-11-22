@@ -21,10 +21,13 @@ router = APIRouter(tags=["pipeline"])
 
 class PipelineSettingsUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    summary_mode: Literal["enabled", "deferred"]
+    article_mode: Literal["enabled", "deferred"] | None = None
+    summary_mode: Literal["enabled", "deferred"] | None = None
 
 
 class PipelineSettingsResponse(PipelineSettingsUpdate):
+    article_mode: Literal["enabled", "deferred"]
+    summary_mode: Literal["enabled", "deferred"]
     updated_at: datetime
     reconciler_workflow_id: str = RECONCILER_ID
 
@@ -44,6 +47,7 @@ class PaperProcessingResponse(BaseModel):
     arxiv_id: str
     markdown: Literal["pending", "completed"]
     article_index: IndexProgress
+    article_mode: Literal["enabled", "deferred"]
     summary_mode: Literal["enabled", "deferred"]
     summary_index: SummaryIndexProgress
 
@@ -55,14 +59,18 @@ async def get_settings(_: AdminUser):
 
 @router.put("/pipeline/settings", response_model=PipelineSettingsResponse)
 async def update_settings(payload: PipelineSettingsUpdate, request: Request, _: AdminUser):
+    if payload.article_mode is None and payload.summary_mode is None:
+        raise HTTPException(422, "At least one pipeline mode is required.")
     # Start before committing configuration: a lost HTTP response or signal cannot
     # leave an enabled configuration without a durable periodic catalog scan.
     handle = await temporal_runtime.start(request, "SummaryReconcileWorkflow", {}, RECONCILER_ID)
     async with database_session(request) as session:
         row = (await session.execute(text("""
-            UPDATE pipeline_settings SET summary_mode = :mode, updated_at = now()
-            WHERE singleton RETURNING summary_mode, updated_at
-        """), {"mode": payload.summary_mode})).mappings().one()
+            UPDATE pipeline_settings
+            SET article_mode = COALESCE(:article_mode, article_mode),
+                summary_mode = COALESCE(:summary_mode, summary_mode), updated_at = now()
+            WHERE singleton RETURNING article_mode, summary_mode, updated_at
+        """), {"article_mode": payload.article_mode, "summary_mode": payload.summary_mode})).mappings().one()
     try:
         await handle.signal("wake", rpc_timeout=timedelta(seconds=3))
     except TemporalError:
@@ -82,7 +90,8 @@ async def paper_processing(request: Request, arxiv_id: ArxivId):
     if paper is None:
         raise HTTPException(404, "Paper not found.")
     settings = pipeline_settings()
-    mode = (await repository.get_pipeline_settings())["summary_mode"]
+    control = await repository.get_pipeline_settings()
+    article_mode, summary_mode = control["article_mode"], control["summary_mode"]
     article = {"status": "pending", "chunks_total": 0, "chunks_indexed": 0}
     summary_index = dict(article)
     cached = None
@@ -96,14 +105,16 @@ async def paper_processing(request: Request, arxiv_id: ArxivId):
                 "source_version": md5(cached["summary"].encode()).hexdigest()}, settings)
         if summary_index["status"] != "completed":
             runtime = await temporal_runtime.describe(request, summary_workflow_id(paper, settings))
+    if article["status"] != "completed" and article_mode == "deferred":
+        article["status"] = "deferred"
     status = summary_index["status"]
     if status != "completed":
-        status = "deferred" if mode == "deferred" else (runtime or {}).get("status", "pending")
+        status = "deferred" if summary_mode == "deferred" else (runtime or {}).get("status", "pending")
         # A closed run may have deferred or become superseded; only artifacts
         # establish end-to-end completion.
         if status == "completed":
             status = "pending"
     return {"arxiv_id": arxiv_id, "markdown": "completed" if paper["text_object_key"] else "pending",
-            "article_index": article, "summary_mode": mode,
+            "article_index": article, "article_mode": article_mode, "summary_mode": summary_mode,
             "summary_index": {**summary_index, "status": status, "summary_available": cached is not None,
                               "runtime": runtime}}

@@ -7,7 +7,7 @@
     <link rel="icon" href="/icon.svg" type="image/svg+xml" sizes="any">
     <link rel="stylesheet" href="/styles.css?v=7">
     <script type="module" src="/auth.js?v=1"></script>
-    <script type="module" src="/pipeline.js?v=3"></script>
+    <script type="module" src="/pipeline.js?v=4"></script>
   </head>
   <body>
     <header class="topbar">
@@ -40,12 +40,12 @@
           <article class="pipeline-path" aria-labelledby="article-path-title">
             <div class="results-bar">
               <h3 id="article-path-title">Индексация статьи</h3>
-              <span class="paper-stage" data-stage="completed">Всегда включена</span>
+              <span id="article-mode" class="paper-stage" role="status">Загружаем режим…</span>
             </div>
             <p>Скачать HTML → Markdown → чанки статьи → эмбеддинги → Qdrant</p>
-            <div class="filter-actions" role="group" aria-label="Режим ветки саммари для индексации статьи">
-              <button class="pipeline-mode-button" data-mode="enabled" type="button" aria-pressed="false" disabled>Включить саммари</button>
-              <button class="pipeline-mode-button" data-mode="deferred" type="button" aria-pressed="false" disabled>Отложить саммари</button>
+            <div class="filter-actions" role="group" aria-label="Режим индексации статьи">
+              <button class="pipeline-mode-button" data-branch="article" data-mode="enabled" type="button" aria-pressed="false" disabled>Включить индексацию</button>
+              <button class="pipeline-mode-button" data-branch="article" data-mode="deferred" type="button" aria-pressed="false" disabled>Отложить индексацию</button>
             </div>
           </article>
           <article class="pipeline-path" aria-labelledby="summary-path-title">
@@ -55,8 +55,8 @@
             </div>
             <p>Markdown → саммари → чанки саммари → эмбеддинги → Qdrant</p>
             <div class="filter-actions" role="group" aria-label="Режим ветки саммари">
-              <button class="pipeline-mode-button" data-mode="enabled" type="button" aria-pressed="false" disabled>Включить саммари</button>
-              <button class="pipeline-mode-button" data-mode="deferred" type="button" aria-pressed="false" disabled>Отложить саммари</button>
+              <button class="pipeline-mode-button" data-branch="summary" data-mode="enabled" type="button" aria-pressed="false" disabled>Включить саммари</button>
+              <button class="pipeline-mode-button" data-branch="summary" data-mode="deferred" type="button" aria-pressed="false" disabled>Отложить саммари</button>
             </div>
           </article>
         </div>
