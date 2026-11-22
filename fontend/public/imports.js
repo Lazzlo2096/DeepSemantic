@@ -16,6 +16,7 @@ const dateTimeFormat = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", ti
 const form = document.querySelector("#import-form");
 const dateTo = form.elements.namedItem("date_to");
 const submit = document.querySelector("#import-submit");
+const spaceSelect = document.querySelector("#import-space");
 const feedback = document.querySelector("#import-feedback");
 const listStatus = document.querySelector("#imports-status");
 const controlFeedback = document.querySelector("#import-control-feedback");
@@ -31,6 +32,24 @@ let currentPage = 0;
 let requestIdentity = crypto.randomUUID();
 let listRequest;
 const pendingActions = new Set();
+
+async function loadImportTargets() {
+  try {
+    const response = await authFetch("/api/spaces/arxiv-import-targets", { cache: "no-store" });
+    if (!response.ok) throw new Error();
+    const targets = await response.json();
+    spaceSelect.replaceChildren(new Option("Выберите Space", ""), ...targets.map(
+      (space) => new Option(space.name, space.id),
+    ));
+    if (!targets.length) {
+      spaceSelect.replaceChildren(new Option("Сначала назначьте Space-приёмник", ""));
+    }
+    submit.disabled = targets.length === 0;
+  } catch {
+    spaceSelect.replaceChildren(new Option("Не удалось загрузить приёмники", ""));
+    submit.disabled = true;
+  }
+}
 
 function formatTime(timestamp) {
   return dateTimeFormat.format(new Date(timestamp));
@@ -179,3 +198,4 @@ setInterval(() => {
   if (!document.hidden && !listRequest) loadImports();
 }, refreshInterval);
 loadImports();
+loadImportTargets();

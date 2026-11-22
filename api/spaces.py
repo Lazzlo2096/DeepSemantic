@@ -11,7 +11,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 
-from auth import CurrentUser, OptionalCurrentUser
+from auth import AdminUser, CurrentUser, OptionalCurrentUser
 from database import database_session
 
 
@@ -141,6 +141,41 @@ async def get_public_space(space_id: UUID, request: Request):
 @router.get("/public/{space_id}/files", response_model=list[SpaceFileResponse])
 async def list_public_space_files(space_id: UUID, request: Request):
     return await list_space_files(request, space_id, None)
+
+
+@router.get("/arxiv-import-targets", response_model=list[SpaceResponse])
+async def list_arxiv_import_targets(request: Request, _: AdminUser):
+    async with database_session(request) as session:
+        rows = (await session.execute(text("""
+            SELECT s.*
+            FROM spaces AS s
+            JOIN arxiv_import_targets AS target ON target.space_id = s.id
+            ORDER BY target.created_at DESC
+        """))).mappings().all()
+    return rows
+
+
+@router.post("/{space_id}/arxiv-import-target", status_code=204)
+async def enable_arxiv_import_target(space_id: UUID, request: Request, user: AdminUser):
+    async with database_session(request) as session:
+        exists = await session.scalar(
+            text("SELECT EXISTS (SELECT 1 FROM spaces WHERE id = :space_id)"), {"space_id": space_id}
+        )
+        if not exists:
+            raise HTTPException(404, "Space не найден.")
+        await session.execute(text("""
+            INSERT INTO arxiv_import_targets (space_id, created_by)
+            VALUES (:space_id, :created_by)
+            ON CONFLICT (space_id) DO NOTHING
+        """), {"space_id": space_id, "created_by": user.id})
+
+
+@router.delete("/{space_id}/arxiv-import-target", status_code=204)
+async def disable_arxiv_import_target(space_id: UUID, request: Request, _: AdminUser):
+    async with database_session(request) as session:
+        await session.execute(
+            text("DELETE FROM arxiv_import_targets WHERE space_id = :space_id"), {"space_id": space_id}
+        )
 
 
 @router.get("/{space_id}", response_model=SpaceResponse)

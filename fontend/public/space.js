@@ -1,4 +1,4 @@
-import { authFetch } from "./auth.js";
+import { authFetch, loadCurrentUser } from "./auth.js";
 
 const spaceId = new URLSearchParams(location.search).get("id");
 const title = document.querySelector("#space-title");
@@ -7,6 +7,8 @@ const status = document.querySelector("#files-status");
 const error = document.querySelector("#space-error");
 const list = document.querySelector("#files-list");
 const empty = document.querySelector("#files-empty");
+const arxivTargetButton = document.querySelector("#arxiv-target-button");
+const arxivTargetStatus = document.querySelector("#arxiv-target-status");
 
 const dateFormat = new Intl.DateTimeFormat("ru-RU", {
   year: "numeric", month: "long", day: "numeric",
@@ -57,9 +59,34 @@ async function loadSpace() {
   status.textContent = `${files.length} ${files.length === 1 ? "файл" : "файлов"}`;
 }
 
+async function setupArxivTargetButton() {
+  try {
+    const user = await loadCurrentUser();
+    if (user?.role !== "admin" || !spaceId) return;
+    arxivTargetButton.hidden = false;
+    arxivTargetButton.addEventListener("click", async () => {
+      arxivTargetButton.disabled = true;
+      arxivTargetStatus.textContent = "Сохраняем…";
+      const response = await authFetch(`/api/spaces/${encodeURIComponent(spaceId)}/arxiv-import-target`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        arxivTargetStatus.textContent = "Не удалось назначить приёмник.";
+        arxivTargetButton.disabled = false;
+        return;
+      }
+      arxivTargetStatus.textContent = "Space назначен приёмником импортов arXiv.";
+      arxivTargetButton.textContent = "Приёмник импортов arXiv";
+    });
+  } catch {
+    // Public visitors do not need to see an admin-only control.
+  }
+}
+
 loadSpace().catch((loadError) => {
   title.textContent = "Space недоступен";
   status.textContent = "Ошибка загрузки";
   error.textContent = loadError.message;
   error.hidden = false;
 });
+setupArxivTargetButton();

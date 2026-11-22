@@ -55,7 +55,7 @@ async function initializeNavigation() {
       return;
     }
     if (user.role === "admin") {
-      for (const [href, label] of [["/imports.html", "Импорт arXiv"], ["/workers.html", "Воркеры"], ["/users.html", "Пользователи"]]) {
+      for (const [href, label] of [["/imports.html", "Импорт arXiv"], ["/arxiv-import-spaces.html", "Приёмники arXiv"], ["/workers.html", "Воркеры"], ["/users.html", "Пользователи"]]) {
         if (navigation.querySelector(`[href="${href}"]`)) continue;
         const link = document.createElement("a");
         link.className = "topbar-link";

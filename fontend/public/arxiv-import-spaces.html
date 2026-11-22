@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Приёмники arXiv · DeepSemantic</title>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" sizes="any">
+    <link rel="stylesheet" href="/styles.css?v=8">
+    <script type="module" src="/arxiv-import-spaces.js?v=1"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="shell brand">
+        <a class="brand-link" href="/">
+          <img class="brand-mark" src="/icon.svg" width="32" height="32" alt="">
+          DeepSemantic
+        </a>
+        <nav class="topbar-nav" aria-label="Разделы"></nav>
+      </div>
+    </header>
+    <main class="shell">
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow">Администрирование</p>
+        <h1 id="page-title">Приёмники arXiv</h1>
+        <p>Здесь отображаются Spaces, в которые администратор разрешил импортировать статьи arXiv.</p>
+      </section>
+      <section aria-labelledby="targets-title">
+        <div class="results-bar">
+          <h2 id="targets-title">Разрешённые Spaces</h2>
+          <p id="targets-status" role="status">Загружаем…</p>
+        </div>
+        <p id="targets-error" role="alert" hidden></p>
+        <div id="targets-list" class="paper-list"></div>
+        <p id="targets-empty" hidden>Приёмники ещё не назначены.</p>
+      </section>
+    </main>
+  </body>
+</html>

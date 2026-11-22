@@ -45,7 +45,7 @@
 		reverse_proxy auth-service:8000
 	}
 
-	@admin_api path /api/arxiv/imports /api/arxiv/imports/* /api/pipeline/*
+	@admin_api path /api/arxiv/imports /api/arxiv/imports/* /api/pipeline/* /api/spaces/arxiv-import-targets /api/spaces/*/arxiv-import-target
 	handle @admin_api {
 		route {
 			import administrator
@@ -103,7 +103,7 @@
 		}
 	}
 
-	@admin_pages path /imports.html /workers.html /users.html
+	@admin_pages path /imports.html /workers.html /users.html /arxiv-import-spaces.html
 	handle @admin_pages {
 		route {
 			import administrator

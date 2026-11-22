@@ -33,6 +33,7 @@ class ArxivImportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     request_id: UUID | None = None
+    space_id: UUID
     date_from: date
     date_to: date
     bucket: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
@@ -126,29 +127,30 @@ async def embeddings(payload: EmbeddingRequest, request: Request):
 def import_payload(row):
     return {"id": str(row["id"]), "date_from": str(row["date_from"]), "date_to": str(row["date_to"]),
             "bucket": row["bucket"], "query": row["query"], "source_format": os.getenv("ARXIV_SOURCE_FORMAT", "html"),
-            "space_id": os.getenv("ARXIV_SPACE_ID"),
+            "space_id": str(row["space_id"]),
             "settings": pipeline_settings()}
 
 
 @app.post("/arxiv/imports", response_model=ArxivImportAccepted, status_code=202, tags=["arXiv"])
 async def enqueue_arxiv_import(payload: ArxivImportRequest, request: Request, _: AdminUser):
-    space_id = os.getenv("ARXIV_SPACE_ID", "")
-    try:
-        UUID(space_id)
-    except ValueError as error:
-        raise HTTPException(503, "ARXIV_SPACE_ID must point to the manually created arXiv Space.") from error
     job_id = payload.request_id or uuid4()
     params = {"id": job_id, "date_from": payload.date_from, "date_to": payload.date_to,
+              "space_id": payload.space_id,
               "bucket": payload.bucket or os.getenv("RUSTFS_BUCKET", "arxiv-papers"), "query": payload.query,
               "workflow_id": f"import:{job_id.hex}"}
     # This is an immutable request catalog, not a job queue. It is never polled by workers.
     async with database_session(request) as session:
+        target_exists = await session.scalar(text(
+            "SELECT EXISTS (SELECT 1 FROM arxiv_import_targets WHERE space_id = :space_id)"
+        ), {"space_id": payload.space_id})
+        if not target_exists:
+            raise HTTPException(422, "Этот Space не назначен приёмником импорта arXiv.")
         await session.execute(text("""
-            INSERT INTO arxiv_imports (id, date_from, date_to, bucket, query, workflow_id)
-            VALUES (:id, :date_from, :date_to, :bucket, :query, :workflow_id) ON CONFLICT DO NOTHING
+            INSERT INTO arxiv_imports (id, space_id, date_from, date_to, bucket, query, workflow_id)
+            VALUES (:id, :space_id, :date_from, :date_to, :bucket, :query, :workflow_id) ON CONFLICT DO NOTHING
         """), params)
         row = (await session.execute(text("SELECT * FROM arxiv_imports WHERE id = :id"), params)).mappings().one()
-        if any(row[key] != params[key] for key in ("date_from", "date_to", "bucket", "query")):
+        if any(row[key] != params[key] for key in ("space_id", "date_from", "date_to", "bucket", "query")):
             raise HTTPException(409, "request_id already belongs to a different import.")
     await temporal_runtime.start(request, "ImportWorkflow", import_payload(row), row["workflow_id"])
     print(json.dumps({"event": "arxiv_import.insert", "table": "arxiv_imports", "operation": "insert",
