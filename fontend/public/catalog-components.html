@@ -10,6 +10,30 @@
     <p id="catalog-eyebrow" class="eyebrow">Каталог публикаций</p>
     <h1 id="page-title">Статьи arXiv</h1>
     <a id="space-back-link" class="catalog-back" href="/public-spaces.html" hidden>← Вернуться к Space</a>
+    <a id="space-page-link" class="paper-download" href="#" hidden>Открыть страницу Space</a>
+    <div id="space-overview" hidden>
+      <p id="space-visibility" class="eyebrow"></p>
+      <h1 id="space-title">Загружаем…</h1>
+      <p id="space-description"></p>
+      <p class="intro-actions">
+        <button id="space-edit-button" type="button" hidden>Редактировать Space</button>
+        <button id="space-delete-button" type="button" hidden>Удалить Space</button>
+        <button id="arxiv-target-button" type="button" hidden>Сделать пространство приёмником импортов arXiv</button>
+        <span id="arxiv-target-status" role="status"></span>
+      </p>
+      <form id="space-edit-form" class="space-edit-form" hidden>
+        <label>Название<input id="space-edit-name" name="name" type="text" maxlength="300" required></label>
+        <label>Описание<textarea id="space-edit-description" name="description" maxlength="10000" rows="4"></textarea></label>
+        <label>Доступ<select id="space-edit-visibility" name="visibility"><option value="private">Приватный — только приглашённые пользователи</option><option value="public">Public — читать смогут все в интернете</option></select></label>
+        <div class="filter-actions"><button id="space-edit-submit" type="submit">Сохранить</button><button id="space-edit-cancel" type="button">Отмена</button></div>
+        <p id="space-edit-status" role="status"></p>
+      </form>
+      <form id="space-upload-form" class="space-upload-form" hidden>
+        <label>Документы<input id="space-file-input" type="file" name="file" multiple></label>
+        <button id="space-upload-submit" type="submit">Загрузить документы</button>
+        <p id="space-upload-status" role="status"></p>
+      </form>
+    </div>
     <form id="search-form" class="search-form" role="search" aria-label="Поиск по статьям">
       <fieldset class="search-modes">
         <legend>Режим поиска</legend>
