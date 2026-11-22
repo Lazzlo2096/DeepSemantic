@@ -23,7 +23,8 @@ form.addEventListener("submit", async (event) => {
       const body = await response.json().catch(() => ({}));
       throw new Error(typeof body.detail === "string" ? body.detail : "Не удалось создать Space.");
     }
-    location.assign("/spaces.html");
+    const space = await response.json();
+    location.assign(`/space.html?id=${encodeURIComponent(space.id)}`);
   } catch (error) {
     feedback.textContent = error.message;
     feedback.hidden = false;
