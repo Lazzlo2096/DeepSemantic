@@ -64,6 +64,17 @@
 		}
 	}
 
+	@admin_paper_chunks {
+		method GET
+		path /api/papers/*/chunks
+	}
+	handle @admin_paper_chunks {
+		route {
+			import administrator
+			import api_backend
+		}
+	}
+
 	@user_api path /api/rag/* /api/chunks/search
 	handle @user_api {
 		route {

@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Text, cast, column, func, select, table, text, true
 
+from auth import AdminUser
 from database import MAX_BIGINT, ArxivPaper, PaperStatus, database_session
 from paper_index_status import PaperIndexStatus, paper_index_statuses
 
@@ -191,7 +192,7 @@ async def article_index_page(request, response, filters, summary_ready, sort, li
 
 
 @router.get("/{arxiv_id:path}/chunks", response_model=list[PaperChunkResponse])
-async def list_paper_chunks(request: Request, arxiv_id: ArxivId):
+async def list_paper_chunks(request: Request, arxiv_id: ArxivId, _: AdminUser):
     async with database_session(request) as session:
         rows = (await session.execute(
             text("""

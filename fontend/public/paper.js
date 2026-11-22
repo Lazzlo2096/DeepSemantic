@@ -1,5 +1,5 @@
 import { arxivPath, arxivUrl } from "./arxiv.js";
-import { authFetch } from "./auth.js?v=1";
+import { authFetch, loadCurrentUser } from "./auth.js?v=1";
 import { renderPaperIndexes, renderSummaryStatus } from "./paper-index.js?v=2";
 import MarkdownIt from "./vendor/markdown-it.mjs";
 
@@ -18,8 +18,16 @@ const tableTags = new Set([...tableTextTags, "thead", "tbody", "tfoot", "tr"]);
 const layoutPreamble = /^\\isopage\s+(?:\[\d+\]\s+)?\\setlrmargins[^\n]*\n\\checkandfixthelayout\s+(?=# )/;
 const arxivId = new URLSearchParams(location.search).get("id");
 const status = document.querySelector("#status");
+const pageStatus = document.querySelector("#paper-load-status");
 const list = document.querySelector("#paper-chunks");
 const template = document.querySelector("#chunk-template");
+const chunksPanel = document.querySelector("#paper-chunks-section");
+const debugControl = document.querySelector("#debug-mode-control");
+const debugMode = document.querySelector("#debug-mode");
+const debugStorageKey = "deepsemantic_debug_mode";
+let chunksUrl;
+let chunksLoaded = false;
+let chunksRequest;
 
 function copyTableChildren(source, target) {
   for (const child of source.childNodes) {
@@ -70,6 +78,63 @@ function renderChunk(chunk) {
   card.querySelector(".chunk-text").textContent = chunk.text;
   return card;
 }
+
+function savedDebugMode() {
+  try {
+    return localStorage.getItem(debugStorageKey) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function saveDebugMode(enabled) {
+  try {
+    localStorage.setItem(debugStorageKey, String(enabled));
+  } catch {
+    // The switch still works for this page when persistent storage is unavailable.
+  }
+}
+
+async function loadChunks() {
+  if (!chunksUrl || chunksLoaded || chunksRequest) return chunksRequest;
+  status.textContent = "Загружаем чанки…";
+  list.setAttribute("aria-busy", "true");
+  chunksRequest = authFetch(chunksUrl, { cache: "no-store" });
+  try {
+    const response = await chunksRequest;
+    if (!response.ok) throw new Error(`Chunks request returned ${response.status}`);
+    const chunks = await response.json();
+    list.replaceChildren(...chunks.map(renderChunk));
+    status.textContent = chunks.length ? `Всего чанков: ${chunks.length}` : "У этой статьи пока нет чанков.";
+    chunksLoaded = true;
+    if (location.hash.startsWith("#chunk-")) document.getElementById(location.hash.slice(1))?.scrollIntoView();
+  } catch {
+    status.textContent = "Не удалось загрузить чанки статьи.";
+  } finally {
+    chunksRequest = undefined;
+    list.setAttribute("aria-busy", "false");
+  }
+}
+
+function setDebugMode(enabled) {
+  debugMode.checked = enabled;
+  chunksPanel.hidden = !enabled;
+  saveDebugMode(enabled);
+  if (enabled) loadChunks();
+}
+
+async function initializeDebugMode() {
+  try {
+    const user = await loadCurrentUser();
+    if (user?.role !== "admin") return;
+    debugControl.hidden = false;
+    setDebugMode(savedDebugMode());
+  } catch {
+    // Debug controls stay unavailable when the current role cannot be verified.
+  }
+}
+
+debugMode.addEventListener("change", () => setDebugMode(debugMode.checked));
 
 async function loadText(url, available) {
   const panel = document.querySelector("#paper-text");
@@ -183,19 +248,17 @@ function loadSummary(url, hasText, isHtml, summaryIndex) {
 }
 
 async function loadPaper(id) {
-  list.setAttribute("aria-busy", "true");
   const url = `/api/papers/${arxivPath(id)}`;
   try {
-    const [paperResponse, chunksResponse] = await Promise.all([fetch(url), fetch(`${url}/chunks`)]);
+    const paperResponse = await fetch(url);
     if (paperResponse.status === 404) {
-      status.textContent = "Статья не найдена.";
+      pageStatus.textContent = "Статья не найдена.";
+      pageStatus.hidden = false;
       return;
     }
-    if (!paperResponse.ok || !chunksResponse.ok) {
-      throw new Error("Could not load the paper and its chunks");
-    }
+    if (!paperResponse.ok) throw new Error("Could not load the paper");
 
-    const [paper, chunks] = await Promise.all([paperResponse.json(), chunksResponse.json()]);
+    const paper = await paperResponse.json();
     renderPaperIndexes(document, paper);
     const title = paper.title || paper.arxiv_id;
     document.title = `${title} · DeepSemantic`;
@@ -217,22 +280,23 @@ async function loadPaper(id) {
     }
     loadSummary(`${url}/summary`, paper.status === "texted" && textKey.endsWith(".md"), isHtml, paper.summary_index);
     const textLoading = loadText(url, textKey.endsWith(".md") || textKey.endsWith(".txt"));
-    list.replaceChildren(...chunks.map(renderChunk));
-    status.textContent = chunks.length ? `Всего чанков: ${chunks.length}` : "У этой статьи пока нет чанков.";
-    list.setAttribute("aria-busy", "false");
+    chunksUrl = `${url}/chunks`;
+    if (!debugControl.hidden && debugMode.checked) loadChunks();
     await textLoading;
-    if (["#paper-summary", "#paper-text"].includes(location.hash) || location.hash.startsWith("#chunk-")) {
+    if (["#paper-summary", "#paper-text"].includes(location.hash)) {
       document.getElementById(location.hash.slice(1))?.scrollIntoView();
     }
   } catch {
-    status.textContent = "Не удалось загрузить статью. Попробуй обновить страницу.";
-  } finally {
-    list.setAttribute("aria-busy", "false");
+    pageStatus.textContent = "Не удалось загрузить статью. Попробуй обновить страницу.";
+    pageStatus.hidden = false;
   }
 }
+
+initializeDebugMode();
 
 if (arxivId) {
   loadPaper(arxivId);
 } else {
-  status.textContent = "В ссылке отсутствует идентификатор статьи.";
+  pageStatus.textContent = "В ссылке отсутствует идентификатор статьи.";
+  pageStatus.hidden = false;
 }

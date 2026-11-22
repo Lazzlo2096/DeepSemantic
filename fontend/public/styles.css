@@ -134,6 +134,30 @@ h3 { margin: 9px 0 5px; font-size: 1.08rem; line-height: 1.4; overflow-wrap: any
 .paper-arxiv { margin-inline-start: 6px; color: var(--accent); font-size: 0.85rem; white-space: nowrap; }
 .paper-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 12px; }
 .paper-download { display: inline-flex; align-items: center; text-decoration: none; }
+.debug-switch { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 0.85rem; cursor: pointer; }
+.debug-switch input {
+  width: 36px;
+  height: 20px;
+  margin: 0;
+  appearance: none;
+  border: 1px solid #9aa8bd;
+  border-radius: 999px;
+  background: #dce2ec;
+  cursor: pointer;
+}
+.debug-switch input::before {
+  content: "";
+  display: block;
+  width: 14px;
+  height: 14px;
+  margin: 2px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(24 37 59 / 25%);
+  transition: transform 120ms ease;
+}
+.debug-switch input:checked { border-color: var(--accent); background: var(--accent); }
+.debug-switch input:checked::before { transform: translateX(16px); }
 #paper-title { font-size: clamp(1.6rem, 5vw, 2.6rem); overflow-wrap: anywhere; }
 .catalog-back { display: inline-block; margin-bottom: 14px; color: var(--accent); }
 .chunk-text { margin: 8px 0 0; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -151,6 +175,7 @@ h3 { margin: 9px 0 5px; font-size: 1.08rem; line-height: 1.4; overflow-wrap: any
 :is(#summary-result, #text-result) .katex-display > .katex { width: max-content; min-width: 100%; }
 .paper-plain-text { margin: 0; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
 .paper-authors { margin: 0 0 12px; color: var(--muted); font-size: 0.9rem; line-height: 1.5; }
+.paper-load-status { margin: 0 0 12px; color: #962e37; font-size: 0.9rem; }
 summary { width: fit-content; cursor: pointer; color: var(--accent); font-size: 0.9rem; font-weight: 600; }
 .paper-abstract { max-width: 76ch; margin: 10px 0 0; color: #334258; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
 .search-excerpt { margin: 10px 0 0; line-height: 1.6; overflow-wrap: anywhere; }

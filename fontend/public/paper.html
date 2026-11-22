@@ -5,12 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Статья arXiv · DeepSemantic</title>
     <link rel="icon" href="/icon.svg" type="image/svg+xml" sizes="any">
-    <link rel="stylesheet" href="/styles.css?v=7">
+    <link rel="stylesheet" href="/styles.css?v=8">
     <link rel="stylesheet" href="/vendor/katex/katex.min.css">
     <script defer src="/vendor/katex/katex.min.js"></script>
     <script defer src="/vendor/texmath.js"></script>
     <script type="module" src="/auth.js?v=1"></script>
-    <script type="module" src="/paper.js?v=6"></script>
+    <script type="module" src="/paper.js?v=7"></script>
   </head>
   <body>
     <header class="topbar">
@@ -29,6 +29,7 @@
         <p class="eyebrow" id="paper-id">Статья arXiv</p>
         <h1 id="paper-title">Статья</h1>
         <p id="paper-authors" hidden></p>
+        <p id="paper-load-status" class="paper-load-status" role="status" hidden></p>
         <div class="paper-meta">
           <span class="paper-stage paper-index-status" role="status">Проверяем индекс статьи…</span>
           <span class="paper-stage paper-summary-status" role="status">Проверяем индекс саммари…</span>
@@ -37,6 +38,10 @@
           <a id="paper-arxiv" class="paper-arxiv" target="_blank" rel="noopener"
              aria-label="Оригинал на arXiv, новая вкладка" hidden>Оригинал на arXiv ↗</a>
           <a id="paper-html" class="paper-download" download hidden>Скачать HTML</a>
+          <label id="debug-mode-control" class="debug-switch" hidden>
+            <input id="debug-mode" type="checkbox" role="switch" aria-controls="paper-chunks-section">
+            <span>Debug mode</span>
+          </label>
         </div>
       </header>
 
@@ -58,7 +63,7 @@
         <div id="text-result" class="formatted-text" role="region" aria-labelledby="text-title" tabindex="0" hidden></div>
       </section>
 
-      <section aria-labelledby="chunks-title">
+      <section id="paper-chunks-section" aria-labelledby="chunks-title" hidden>
         <div class="results-bar">
           <h2 id="chunks-title">Чанки статьи</h2>
           <p id="status" role="status">Загружаем статью…</p>
