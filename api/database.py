@@ -94,6 +94,7 @@ def create_database_engine() -> AsyncEngine:
         database=os.environ["POSTGRES_DB"],
         username=os.environ["POSTGRES_USER"],
         password=os.environ["POSTGRES_PASSWORD"],
+        query={"options": "-csearch_path=external_integration_arxiv,public"},
     )
     return create_async_engine(
         url,
