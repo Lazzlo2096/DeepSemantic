@@ -1,4 +1,4 @@
-import { authFetch } from "./auth.js?v=1";
+import { authFetch } from "./auth.js?v=2";
 
 const inviteForm = document.querySelector("#invite-form");
 const inviteResult = document.querySelector("#invite-result");

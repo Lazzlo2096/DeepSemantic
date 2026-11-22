@@ -1,4 +1,4 @@
-import { authFetch } from "./auth.js?v=1";
+import { authFetch } from "./auth.js?v=2";
 
 const settingsEndpoint = "/api/pipeline/settings";
 const reconciliationEndpoint = "/api/pipeline/summary-reconciliation";

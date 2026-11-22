@@ -1,5 +1,5 @@
 import { arxivPath, arxivUrl } from "./arxiv.js";
-import { authFetch, loadCurrentUser } from "./auth.js?v=1";
+import { authFetch, loadCurrentUser } from "./auth.js?v=2";
 import { renderPaperIndexes, renderSummaryStatus } from "./paper-index.js?v=2";
 import MarkdownIt from "./vendor/markdown-it.mjs";
 import { setMarkdownContent } from "./math-render.js?v=1";

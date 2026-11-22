@@ -1,4 +1,4 @@
-import { authFetch } from "./auth.js";
+import { authFetch } from "./auth.js?v=2";
 
 const status = document.querySelector("#spaces-status");
 const error = document.querySelector("#spaces-error");

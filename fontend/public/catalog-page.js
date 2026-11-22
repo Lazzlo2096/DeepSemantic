@@ -18,5 +18,5 @@ if (mode === "space") {
   document.querySelector("#space-promo").hidden = false;
 }
 
-await import("./auth.js?v=1");
+await import("./auth.js?v=2");
 await import("./app.js?v=11");

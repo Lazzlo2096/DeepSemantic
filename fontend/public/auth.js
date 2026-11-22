@@ -37,7 +37,7 @@ async function initializeNavigation() {
   if (!navigation || location.pathname === "/login.html") return;
   const spacesLink = document.createElement("a");
   spacesLink.className = "topbar-link";
-  spacesLink.href = "/spaces.html";
+  spacesLink.href = "/public-spaces.html";
   spacesLink.textContent = "Public Spaces";
   const mySpacesLink = document.createElement("a");
   mySpacesLink.className = "topbar-link";
