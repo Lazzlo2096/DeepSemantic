@@ -44,6 +44,17 @@ class ReadArguments(BaseModel):
         return self
 
 
+class DocumentListArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    limit: int = Field(default=100, ge=1, le=100)
+
+
+class FilenameSearchArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    query: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)]
+    limit: int = Field(default=20, ge=1, le=100)
+
+
 def read_utf8_slice(body, start: int, end: int) -> str:
     decoder = getincrementaldecoder("utf-8-sig")()
     position = 0
@@ -57,6 +68,73 @@ def read_utf8_slice(body, start: int, end: int) -> str:
                 return "".join(parts)
         decoder.decode(b"", final=True)
     raise HTTPException(422, f"Range exceeds the source length of {position} characters.")
+
+
+async def document_rows(
+    request: Request, *, filename_query: str | None = None, limit: int = 100,
+    space_id: UUID | None = None, public_only: bool = False,
+) -> list[dict]:
+    pattern = None
+    if filename_query is not None:
+        literal = filename_query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+        pattern = f"%{literal}%"
+    async with database_session(request) as session:
+        rows = (await session.execute(text("""
+            SELECT file.id AS space_file_id, file.space_id, file.filename, file.content_type,
+                   file.size_bytes, file.created_at, file.bucket, file.object_key,
+                   paper.arxiv_id, COALESCE(paper.title, file.filename) AS title,
+                   count(*) OVER() AS total_count
+            FROM public.space_files AS file
+            JOIN public.spaces AS space ON space.id = file.space_id
+            LEFT JOIN external_integration_arxiv.arxiv_papers AS paper
+                ON paper.space_file_id = file.id
+            WHERE (CAST(:space_id AS uuid) IS NULL OR file.space_id = CAST(:space_id AS uuid))
+              AND (NOT :public_only OR space.visibility = 'public')
+              AND (CAST(:filename_query AS text) IS NULL
+                   OR file.filename ILIKE CAST(:filename_query AS text) ESCAPE '!')
+            ORDER BY file.created_at DESC, file.id DESC
+            LIMIT :limit
+        """), {
+            "space_id": str(space_id) if space_id else None,
+            "public_only": public_only,
+            "filename_query": pattern,
+            "limit": limit,
+        })).mappings().all()
+    documents = []
+    for row in rows:
+        documents.append({
+            "document_id": row["arxiv_id"] or str(row["space_file_id"]),
+            "arxiv_id": row["arxiv_id"],
+            "space_file_id": row["space_file_id"],
+            "space_id": row["space_id"],
+            "filename": row["filename"],
+            "title": row["title"],
+            "paper_title": row["title"],
+            "content_type": row["content_type"],
+            "size_bytes": row["size_bytes"],
+            "created_at": row["created_at"],
+            "bucket": row["bucket"],
+            "object_key": row["object_key"],
+            "total_count": row["total_count"],
+            "source_kind": "article",
+            "source_start": 0,
+            "source_end": 0,
+            "chunk_index": None,
+            "text": f"Файл: {row['filename']}. Название: {row['title']}.",
+        })
+    return documents
+
+
+async def list_documents(limit: int = 100, *, request: Request, space_id: UUID | None = None,
+                         public_only: bool = False):
+    return await document_rows(request, limit=limit, space_id=space_id, public_only=public_only)
+
+
+async def search_documents_by_filename(query: str, limit: int = 20, *, request: Request,
+                                       space_id: UUID | None = None, public_only: bool = False):
+    return await document_rows(
+        request, filename_query=query, limit=limit, space_id=space_id, public_only=public_only,
+    )
 
 
 async def read_document(
@@ -73,7 +151,7 @@ async def read_document(
             LEFT JOIN paper_summaries AS summary
                 ON summary.arxiv_id = source.arxiv_id AND source.source_kind = 'summary'
             WHERE source.arxiv_id = :document_id AND source.source_kind = :source_kind
-              AND (:space_id IS NULL OR file.space_id = CAST(:space_id AS uuid))
+              AND (CAST(:space_id AS uuid) IS NULL OR file.space_id = CAST(:space_id AS uuid))
               AND (NOT :public_only OR space.visibility = 'public')
         """), {"document_id": args.document_id, "source_kind": args.source_kind,
                 "space_id": str(space_id) if space_id else None, "public_only": public_only})).one_or_none()
@@ -132,6 +210,15 @@ async def read_source(
 
 
 TOOL_SPECS = {
+    "list_documents": (
+        list_documents, DocumentListArguments,
+        "Возвращает точный список документов в текущем разрешённом Space с именами файлов и метаданными. "
+        "Используй для подсчёта и перечисления документов; это не поиск по содержимому.",
+    ),
+    "search_documents_by_filename": (
+        search_documents_by_filename, FilenameSearchArguments,
+        "Ищет документы по имени файла в текущем разрешённом Space. Используй, когда пользователь называет файл.",
+    ),
     "search_vectors": (
         search_vectors, SearchArguments,
         "Смысловой поиск. Возвращает текст чанка, векторное сходство и его координаты.",

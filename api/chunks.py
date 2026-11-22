@@ -133,7 +133,7 @@ async def find_text_chunks(
                 WHERE chunk.text ILIKE :pattern ESCAPE '!'
                   AND (link.chunk_id IS NULL OR current.chunk_id IS NOT NULL)
                   AND (NOT :located_only OR COALESCE(link.source_start, document_link.source_start) IS NOT NULL)
-                  AND (:space_id IS NULL OR paper_file.space_id = CAST(:space_id AS uuid)
+                  AND (CAST(:space_id AS uuid) IS NULL OR paper_file.space_id = CAST(:space_id AS uuid)
                        OR document_file.space_id = CAST(:space_id AS uuid))
                   AND (NOT :public_only OR COALESCE(paper_space.visibility, document_space.visibility) = 'public')
                 ORDER BY chunk.id
@@ -213,7 +213,7 @@ async def find_chunks(
                   AND chunk.qdrant_point_id = chunk.id
                   AND (link.chunk_id IS NULL OR current.chunk_id IS NOT NULL)
                   AND (NOT :located_only OR COALESCE(link.source_start, document_link.source_start) IS NOT NULL)
-                  AND (:space_id IS NULL OR paper_file.space_id = CAST(:space_id AS uuid)
+                  AND (CAST(:space_id AS uuid) IS NULL OR paper_file.space_id = CAST(:space_id AS uuid)
                        OR document_file.space_id = CAST(:space_id AS uuid))
                   AND (NOT :public_only OR COALESCE(paper_space.visibility, document_space.visibility) = 'public')
             """),

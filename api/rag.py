@@ -196,6 +196,10 @@ async def tools_node(state: RagState, runtime: Runtime[RagContext]) -> dict:
         except HTTPException as error:
             result = {"error": error.detail}
         finally:
+            # Search results contain UUID fields for Space documents. Normalize
+            # them before persisting the tool trace and sending it back to the
+            # model as JSON.
+            result = json.loads(json.dumps(result, ensure_ascii=False, default=str))
             if context.record_history:
                 await save_tool_call(context.request, context.run_id, RagToolCall(
                     position=len(search_steps) + 1, tool_name=name,
