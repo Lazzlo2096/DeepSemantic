@@ -6,8 +6,7 @@ const modeBadge = document.querySelector("#summary-mode");
 const description = document.querySelector("#pipeline-description");
 const feedback = document.querySelector("#pipeline-feedback");
 const refreshButton = document.querySelector("#refresh-pipeline");
-const enableButton = document.querySelector("#enable-summaries");
-const deferButton = document.querySelector("#defer-summaries");
+const modeButtons = [...document.querySelectorAll(".pipeline-mode-button")];
 const reconciliationStatus = document.querySelector("#reconciliation-status");
 const reconciliationError = document.querySelector("#reconciliation-error");
 const counters = document.querySelector("#reconciliation-counters");
@@ -16,10 +15,11 @@ let changing = false;
 let loading;
 
 function updateButtons() {
-  enableButton.disabled = changing || mode === null || mode === "enabled";
-  deferButton.disabled = changing || mode === null || mode === "deferred";
-  enableButton.setAttribute("aria-pressed", String(mode === "enabled"));
-  deferButton.setAttribute("aria-pressed", String(mode === "deferred"));
+  for (const button of modeButtons) {
+    const buttonMode = button.dataset.mode;
+    button.disabled = changing || mode === null || mode === buttonMode;
+    button.setAttribute("aria-pressed", String(mode === buttonMode));
+  }
   refreshButton.disabled = changing;
 }
 
@@ -136,8 +136,9 @@ async function changeMode(nextMode) {
   }
 }
 
-enableButton.addEventListener("click", () => changeMode("enabled"));
-deferButton.addEventListener("click", () => changeMode("deferred"));
+for (const button of modeButtons) {
+  button.addEventListener("click", () => changeMode(button.dataset.mode));
+}
 refreshButton.addEventListener("click", loadPipeline);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) loadPipeline();

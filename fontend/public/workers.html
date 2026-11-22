@@ -7,7 +7,7 @@
     <link rel="icon" href="/icon.svg" type="image/svg+xml" sizes="any">
     <link rel="stylesheet" href="/styles.css?v=7">
     <script type="module" src="/auth.js?v=1"></script>
-    <script type="module" src="/pipeline.js?v=2"></script>
+    <script type="module" src="/pipeline.js?v=3"></script>
   </head>
   <body>
     <header class="topbar">
@@ -43,6 +43,10 @@
               <span class="paper-stage" data-stage="completed">Всегда включена</span>
             </div>
             <p>Скачать HTML → Markdown → чанки статьи → эмбеддинги → Qdrant</p>
+            <div class="filter-actions" role="group" aria-label="Режим ветки саммари для индексации статьи">
+              <button class="pipeline-mode-button" data-mode="enabled" type="button" aria-pressed="false" disabled>Включить саммари</button>
+              <button class="pipeline-mode-button" data-mode="deferred" type="button" aria-pressed="false" disabled>Отложить саммари</button>
+            </div>
           </article>
           <article class="pipeline-path" aria-labelledby="summary-path-title">
             <div class="results-bar">
@@ -51,8 +55,8 @@
             </div>
             <p>Markdown → саммари → чанки саммари → эмбеддинги → Qdrant</p>
             <div class="filter-actions" role="group" aria-label="Режим ветки саммари">
-              <button id="enable-summaries" type="button" aria-pressed="false" disabled>Включить саммари</button>
-              <button id="defer-summaries" type="button" aria-pressed="false" disabled>Отложить саммари</button>
+              <button class="pipeline-mode-button" data-mode="enabled" type="button" aria-pressed="false" disabled>Включить саммари</button>
+              <button class="pipeline-mode-button" data-mode="deferred" type="button" aria-pressed="false" disabled>Отложить саммари</button>
             </div>
           </article>
         </div>
