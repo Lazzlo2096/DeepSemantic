@@ -39,6 +39,10 @@ def paper_workflow_id(paper, settings):
     return "paper:" + fingerprint([paper["arxiv_id"], paper["source_version"], settings])
 
 
+def document_workflow_id(document, settings):
+    return "document:" + fingerprint([str(document["space_file_id"]), document["source_version"], settings])
+
+
 async def temporal_client():
     from temporalio.client import Client
     return await Client.connect(os.getenv("TEMPORAL_ADDRESS", "temporal:7233"),

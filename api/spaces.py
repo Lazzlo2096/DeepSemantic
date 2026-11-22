@@ -15,7 +15,9 @@ from fastapi.responses import StreamingResponse
 
 from auth import AdminUser, CurrentUser, OptionalCurrentUser
 from database import database_session
+from processing.config import pipeline_settings
 from storage import USER_FILES_BUCKET
+import temporal_runtime
 
 
 router = APIRouter(prefix="/spaces", tags=["spaces"])
@@ -327,15 +329,18 @@ async def list_space_catalog(
             SELECT
                 file.id, file.filename, file.content_type, file.size_bytes,
                 file.created_at, file.bucket, file.object_key,
-                paper.arxiv_id, paper.title,
+                paper.arxiv_id, COALESCE(paper.title, file.filename) AS title,
                 COALESCE(paper.authors, ARRAY[]::text[]) AS authors,
                 paper.submitted_at,
-                COALESCE(article_chunks.total, 0) AS article_chunks,
-                COALESCE(summary_chunks.total, 0) AS summary_chunks,
-                (COALESCE(summary_chunks.total, 0) > 0) AS has_summary,
+                COALESCE(article_chunks.total, document_article_chunks.total, 0) AS article_chunks,
+                COALESCE(summary_chunks.total, document_summary_chunks.total, 0) AS summary_chunks,
+                (COALESCE(summary_chunks.total, document_summary_chunks.total, 0) > 0) AS has_summary,
                 count(*) OVER() AS total_count,
                 CASE
-                    WHEN paper.arxiv_id IS NULL THEN 'uploaded'
+                    WHEN paper.arxiv_id IS NULL AND processing.text_object_key IS NULL THEN 'uploaded'
+                    WHEN paper.arxiv_id IS NULL AND COALESCE(document_article_chunks.total, 0) = 0 THEN 'texted'
+                    WHEN paper.arxiv_id IS NULL AND COALESCE(document_summary_chunks.total, 0) > 0 THEN 'summarized'
+                    WHEN paper.arxiv_id IS NULL THEN 'chunked'
                     WHEN paper.text_object_key IS NULL THEN 'metadata'
                     WHEN COALESCE(article_chunks.total, 0) = 0 THEN 'texted'
                     WHEN COALESCE(summary_chunks.total, 0) > 0 THEN 'summarized'
@@ -356,6 +361,20 @@ async def list_space_catalog(
                 WHERE source_kind = 'summary'
                 GROUP BY arxiv_id
             ) AS summary_chunks ON summary_chunks.arxiv_id = paper.arxiv_id
+            LEFT JOIN neural_things.document_processing AS processing
+                ON processing.space_file_id = file.id
+            LEFT JOIN (
+                SELECT space_file_id, count(*) AS total
+                FROM neural_things.document_chunks
+                WHERE source_kind = 'article'
+                GROUP BY space_file_id
+            ) AS document_article_chunks ON document_article_chunks.space_file_id = file.id
+            LEFT JOIN (
+                SELECT space_file_id, count(*) AS total
+                FROM neural_things.document_chunks
+                WHERE source_kind = 'summary'
+                GROUP BY space_file_id
+            ) AS document_summary_chunks ON document_summary_chunks.space_file_id = file.id
             WHERE file.space_id = :space_id
             ORDER BY file.created_at DESC, file.id DESC
             LIMIT :limit OFFSET :offset
@@ -419,4 +438,8 @@ async def upload_space_file(
         """), {"id": file_id, "space_id": space_id, "uploaded_by": user.id, "bucket": bucket,
                "object_key": object_key, "filename": filename, "content_type": file.content_type,
                "size_bytes": file.size})).mappings().one()
+    await temporal_runtime.start(
+        request, "DocumentWorkflow", {"space_file_id": str(file_id), "settings": pipeline_settings()},
+        f"document:{file_id}", allow_completed=True,
+    )
     return row

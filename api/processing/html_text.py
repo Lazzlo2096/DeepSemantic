@@ -98,3 +98,17 @@ def extract_markdown(source, url: str) -> str:
     if not markdown:
         raise ValueError("HTML has no extractable text")
     return markdown + "\n"
+
+
+def extract_user_markdown(source, url: str) -> str:
+    """Extract readable Markdown from an arbitrary user-uploaded HTML document."""
+    document = BeautifulSoup(source, "html.parser")
+    root = document.body or document
+    for node in root.select("script, style, nav, button, template"):
+        node.decompose()
+    for link in root.select("a[href]"):
+        link["href"] = urljoin(url, link["href"])
+    markdown = ArticleConverter(url).convert_soup(root).strip()
+    if not markdown:
+        raise ValueError("HTML has no extractable text")
+    return markdown + "\n"

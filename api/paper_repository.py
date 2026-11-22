@@ -4,6 +4,7 @@ No job statuses, retries, leases or execution progress are stored here.
 """
 import os
 import mimetypes
+from hashlib import md5
 from contextlib import asynccontextmanager
 from pathlib import PurePosixPath
 from types import SimpleNamespace
@@ -53,6 +54,78 @@ async def get_paper(arxiv_id):
             FROM arxiv_papers paper JOIN space_files file ON file.id = paper.space_file_id
             WHERE paper.arxiv_id = %s
         """, (arxiv_id,))).fetchone()
+
+
+async def get_document(space_file_id):
+    async with connection() as db:
+        return await (await db.execute("""
+            SELECT file.id AS space_file_id, file.*, processing.text_object_key, processing.text_version,
+                processing.summary, processing.summary_version, processing.summary_generation,
+                jsonb_build_array(file.bucket, file.object_key, file.created_at)::text AS source_version,
+                jsonb_build_array(file.bucket, processing.text_object_key)::text AS markdown_version
+            FROM public.space_files file
+            LEFT JOIN neural_things.document_processing processing ON processing.space_file_id = file.id
+            WHERE file.id = %s
+        """, (space_file_id,))).fetchone()
+
+
+async def ensure_document(space_file_id):
+    async with connection() as db:
+        await db.execute("""
+            INSERT INTO neural_things.document_processing (space_file_id)
+            VALUES (%s) ON CONFLICT (space_file_id) DO NOTHING
+        """, (space_file_id,))
+    return await get_document(space_file_id)
+
+
+async def save_document_text(document, key):
+    async with connection() as db:
+        row = await db.execute("""
+            UPDATE neural_things.document_processing AS processing
+            SET text_object_key = %s, text_version = jsonb_build_array(file.bucket, %s::text)::text, updated_at = now()
+            FROM public.space_files AS file
+            WHERE processing.space_file_id = file.id AND processing.space_file_id = %s
+              AND jsonb_build_array(file.bucket, file.object_key, file.created_at)::text = %s
+        """, (key, key, document["space_file_id"], document["source_version"]))
+        return bool(row.rowcount)
+
+
+async def get_document_source(space_file_id, source_kind, expected_version=None):
+    async with connection() as db:
+        if source_kind == "article":
+            return await (await db.execute("""
+                SELECT file.bucket, processing.text_object_key, processing.text_version AS source_version,
+                       NULL::text AS summary, 'article'::text AS source_kind,
+                       processing.space_file_id
+                FROM neural_things.document_processing processing
+                JOIN public.space_files file ON file.id = processing.space_file_id
+                WHERE processing.space_file_id = %s AND processing.text_object_key IS NOT NULL
+                  AND (%s::text IS NULL OR processing.text_version = %s)
+            """, (space_file_id, expected_version, expected_version))).fetchone()
+        return await (await db.execute("""
+            SELECT processing.summary, processing.summary_version AS source_version,
+                   'summary'::text AS source_kind, processing.space_file_id
+            FROM neural_things.document_processing processing
+            WHERE processing.space_file_id = %s AND processing.summary IS NOT NULL
+              AND (%s::text IS NULL OR processing.summary_version = %s)
+        """, (space_file_id, expected_version, expected_version))).fetchone()
+
+
+async def save_document_summary(document, result, generation, settings):
+    async with connection() as db:
+        current = await (await db.execute("""
+            SELECT text_version FROM neural_things.document_processing
+            WHERE space_file_id = %s FOR UPDATE
+        """, (document["space_file_id"],))).fetchone()
+        if current is None or current["text_version"] != document["text_version"]:
+            return False
+        version = md5(result.encode()).hexdigest()
+        await db.execute("""
+            UPDATE neural_things.document_processing
+            SET summary = %s, summary_version = %s, summary_generation = %s, updated_at = now()
+            WHERE space_file_id = %s
+        """, (result, version, generation, document["space_file_id"]))
+        return True
 
 
 async def save_paper(article, bucket, object_key, downloaded_at, size_bytes, space_id, import_id=None):
@@ -143,6 +216,8 @@ async def get_source(arxiv_id, source_kind, expected_version=None):
 
 
 async def chunk_batch(state, source, generation, cursor, collection, force=False):
+    if "space_file_id" in source:
+        return await document_chunk_batch(state, source, generation, cursor, collection, force)
     async with state.db_sessions.begin() as session:
         return (await session.execute(text("""
             SELECT chunk.id, chunk.text FROM chunks chunk JOIN current_paper_chunks link ON link.chunk_id = chunk.id
@@ -173,6 +248,8 @@ async def connection():
 
 
 async def replace_chunks(state, source, fragments, generation):
+    if hasattr(source, "space_file_id"):
+        return await replace_document_chunks(state, source, fragments, generation)
     params = {"arxiv_id": source.arxiv_id, "source_kind": source.source_kind, "source_version": source.source_version}
     async with state.db_sessions.begin() as session:
         # Recheck the version after reading the source and lock it until the replacement commits.
@@ -252,3 +329,88 @@ async def replace_chunks(state, source, fragments, generation):
             for index, (chunk_id, fragment) in enumerate(zip(ids, fragments, strict=True))
         ])
     return len(fragments)
+
+
+async def replace_document_chunks(state, source, fragments, generation):
+    params = {"space_file_id": source.space_file_id, "source_kind": source.source_kind,
+              "source_version": source.source_version}
+    async with state.db_sessions.begin() as session:
+        current = await session.scalar(text("""
+            SELECT CASE WHEN :source_kind = 'article' THEN text_version ELSE summary_version END
+            FROM neural_things.document_processing
+            WHERE space_file_id = :space_file_id
+            FOR UPDATE
+        """), params)
+        if current != source.source_version:
+            return 0
+        existing = (await session.execute(text("""
+            SELECT chunk.id, chunk.text, chunk.qdrant_collection, link.chunk_index,
+                   link.source_version, link.generation
+            FROM neural_things.chunks AS chunk
+            JOIN neural_things.document_chunks AS link ON link.chunk_id = chunk.id
+            WHERE link.space_file_id = :space_file_id AND link.source_kind = :source_kind
+            ORDER BY link.chunk_index
+            FOR UPDATE OF chunk
+        """), params)).all()
+        if len(existing) == len(fragments) and all(
+            row.chunk_index == index and row.source_version == current and row.generation == generation and row.text == fragment.text
+            for index, (row, fragment) in enumerate(zip(existing, fragments, strict=True))
+        ):
+            await session.execute(text("""
+                UPDATE neural_things.document_chunks
+                SET source_start = :source_start, source_end = :source_end
+                WHERE chunk_id = :chunk_id
+            """), [
+                {"chunk_id": row.id, "source_start": fragment.source_start, "source_end": fragment.source_end}
+                for row, fragment in zip(existing, fragments, strict=True)
+            ])
+            return len(fragments)
+        if existing:
+            old_ids = [row.id for row in existing]
+            catalog = await state.qdrant.get("/collections")
+            catalog.raise_for_status()
+            prefix = OPENROUTER_COLLECTION_PREFIXES[source.source_kind]
+            collections = {PAPER_COLLECTIONS[source.source_kind]}
+            collections.update(row.qdrant_collection for row in existing if row.qdrant_collection)
+            collections.update(entry["name"] for entry in catalog.json()["result"]["collections"] if entry["name"].startswith(prefix))
+            for collection in sorted(collections):
+                response = await state.qdrant.post(
+                    f"/collections/{collection}/points/delete?wait=true", json={"points": old_ids},
+                )
+                if response.status_code == 404:
+                    continue
+                response.raise_for_status()
+            await session.execute(text("""
+                DELETE FROM neural_things.document_chunks
+                WHERE space_file_id = :space_file_id AND source_kind = :source_kind
+            """), params)
+            await session.execute(delete(Chunk).where(Chunk.id.in_(old_ids)))
+        ids = await session.scalars(
+            insert(Chunk).returning(Chunk.id, sort_by_parameter_order=True),
+            [{"text": fragment.text} for fragment in fragments],
+        )
+        await session.execute(text("""
+            INSERT INTO neural_things.document_chunks
+                (chunk_id, space_file_id, source_kind, source_version, chunk_index, source_start, source_end, generation)
+            VALUES (:chunk_id, :space_file_id, :source_kind, :source_version, :chunk_index, :source_start, :source_end, :generation)
+        """), [
+            {**params, "generation": generation, "chunk_id": chunk_id, "chunk_index": index,
+             "source_start": fragment.source_start, "source_end": fragment.source_end}
+            for index, (chunk_id, fragment) in enumerate(zip(ids, fragments, strict=True))
+        ])
+    return len(fragments)
+
+
+async def document_chunk_batch(state, source, generation, cursor, collection, force=False):
+    async with state.db_sessions.begin() as session:
+        return (await session.execute(text("""
+            SELECT chunk.id, chunk.text
+            FROM neural_things.chunks AS chunk
+            JOIN neural_things.document_chunks AS link ON link.chunk_id = chunk.id
+            WHERE link.space_file_id = :space_file_id AND link.source_kind = :source_kind
+              AND link.source_version = :source_version AND link.generation = :generation
+              AND chunk.id > :cursor
+              AND (:force OR chunk.qdrant_collection IS DISTINCT FROM :collection
+                   OR chunk.qdrant_point_id IS DISTINCT FROM chunk.id)
+            ORDER BY chunk.id LIMIT 8
+        """), {**source, "generation": generation, "cursor": cursor, "collection": collection, "force": force})).all()

@@ -22,7 +22,7 @@ from llm_chat import ChatSettings
 from processing.arxiv import Article, ArxivClient, ensure_bucket, store_source
 from processing.config import (CHUNKER_VERSION, SUMMARY_PROMPT_VERSION, fingerprint, paper_workflow_id,
                                pipeline_settings, summary_generation, summary_workflow_id)
-from processing.html_text import extract_markdown
+from processing.html_text import extract_markdown, extract_user_markdown
 from processing.paper_embeddings import index_batch, prepare_source
 from processing.summarizer import Summarizer, SummaryInputError
 
@@ -47,6 +47,15 @@ def paper_reference(paper):
     if paper is None:
         return None
     return {key: paper[key] for key in ("arxiv_id", "bucket", "object_key", "text_object_key", "source_version", "markdown_version")}
+
+
+def document_reference(document):
+    if document is None:
+        return None
+    return {key: (str(document[key]) if key == "space_file_id" else document[key]) for key in (
+        "space_file_id", "bucket", "object_key", "content_type", "text_object_key", "text_version",
+        "summary", "summary_version", "summary_generation", "source_version", "markdown_version",
+    )}
 
 
 class Activities:
@@ -171,6 +180,12 @@ class Activities:
     async def paper_context(self, p: dict):
         return paper_reference(await repository.get_paper(p["arxiv_id"]))
 
+    @activity.defn(name="document_context")
+    @heartbeats
+    async def document_context(self, p: dict):
+        document = await repository.ensure_document(p["space_file_id"])
+        return document_reference(document)
+
     @activity.defn(name="extract_markdown")
     @heartbeats
     async def extract(self, p: dict):
@@ -191,9 +206,36 @@ class Activities:
             return None
         return paper_reference(await repository.get_paper(paper["arxiv_id"]))
 
+    @activity.defn(name="extract_document")
+    @heartbeats
+    async def extract_document(self, p: dict):
+        document = await repository.get_document(p["space_file_id"])
+        if document is None or document["text_object_key"]:
+            return document
+        def extract():
+            obj = self.s3.get_object(Bucket=document["bucket"], Key=document["object_key"])
+            with obj["Body"] as body:
+                raw = body.read()
+            content_type = (document["content_type"] or "").lower()
+            if content_type.startswith("text/html") or document["object_key"].lower().endswith((".html", ".htm")):
+                content = extract_user_markdown(raw, f"https://storage.local/{document['object_key']}")
+            elif content_type.startswith("text/"):
+                content = raw.decode("utf-8-sig")
+            else:
+                raise ApplicationError("Для пользовательского файла поддерживаются только HTML и текстовые форматы.", non_retryable=True)
+            return content.encode("utf-8")
+        content = await asyncio.to_thread(extract)
+        key = f"spaces/{document['space_file_id']}/text-{sha256(content).hexdigest()}.md"
+        self.s3.put_object(Bucket=document["bucket"], Key=key, Body=content, ContentType="text/markdown; charset=utf-8")
+        if not await repository.save_document_text(document, key):
+            return None
+        return document_reference(await repository.get_document(document["space_file_id"]))
+
     @activity.defn(name="summarize_markdown")
     @heartbeats
     async def summarize(self, p: dict):
+        if p.get("document"):
+            return await self.summarize_document(p)
         if await self.pipeline_summary_mode({}) == "deferred":
             return {"status": "deferred"}
         paper, settings = p["paper"], p["settings"]
@@ -228,6 +270,43 @@ class Activities:
             return None
         return {"arxiv_id": paper["arxiv_id"], "source_kind": "summary", "source_version": md5(result.encode()).hexdigest()}
 
+    @activity.defn(name="summarize_document")
+    @heartbeats
+    async def summarize_document(self, p: dict):
+        if await self.pipeline_summary_mode({}) == "deferred":
+            return {"status": "deferred"}
+        document, settings = p["document"], p["settings"]
+        generation = fingerprint([str(document["space_file_id"]), document["markdown_version"], settings["summary"]])
+        if document.get("summary") and document.get("summary_generation") == generation:
+            return {"space_file_id": document["space_file_id"], "source_kind": "summary",
+                    "source_version": document["summary_version"]}
+        current = await repository.get_document(document["space_file_id"])
+        if current is None or current["markdown_version"] != document["markdown_version"]:
+            return None
+        if settings["summary"]["prompt_version"] != SUMMARY_PROMPT_VERSION:
+            raise ApplicationError("Summary prompt version changed", non_retryable=True)
+        def read():
+            obj = self.s3.get_object(Bucket=current["bucket"], Key=current["text_object_key"])
+            with obj["Body"] as body:
+                return body.read().decode("utf-8-sig")
+        chat = replace(ChatSettings.from_env(openrouter_model_env="SUMMARY_OPENROUTER_MODEL"),
+                       **{key: value for key, value in settings["summary"].items() if key in ("model", "reasoning_effort")},
+                       provider_order=tuple(settings["summary"]["provider_order"]))
+        if not chat.configured:
+            raise ApplicationError("OPENROUTER_API_KEY is required", non_retryable=True)
+        async def progress(done, total):
+            activity.heartbeat(done, total)
+        try:
+            source = await asyncio.to_thread(read)
+            async with httpx.AsyncClient(base_url=chat.base_url, timeout=httpx.Timeout(300, connect=5, read=1800)) as client:
+                result = await Summarizer(client, chat).summarize(source, progress)
+        except (SummaryInputError, UnicodeDecodeError) as error:
+            raise ApplicationError(str(error), non_retryable=True) from error
+        if not await repository.save_document_summary(current, result, generation, settings["summary"]):
+            return None
+        return {"space_file_id": current["space_file_id"], "source_kind": "summary",
+                "source_version": md5(result.encode()).hexdigest()}
+
     @activity.defn(name="prepare_index")
     @heartbeats
     async def prepare_index(self, p: dict):
@@ -238,7 +317,11 @@ class Activities:
         config = p["settings"]["index"]
         if config["max_tokens"] != self.max_tokens or config["model"] != EMBEDDING_OPENROUTER_MODEL or config["chunker"] != CHUNKER_VERSION:
             raise ApplicationError("Index worker configuration differs from this request", non_retryable=True)
-        source = await repository.get_source(p["source"]["arxiv_id"], p["source"]["source_kind"], p["source"]["source_version"])
+        source = (await repository.get_document_source(
+            p["source"]["space_file_id"], p["source"]["source_kind"], p["source"]["source_version"]
+        ) if "space_file_id" in p["source"] else await repository.get_source(
+            p["source"]["arxiv_id"], p["source"]["source_kind"], p["source"]["source_version"]
+        ))
         if source is None:
             return None
         generation = fingerprint([source["source_version"], config])
@@ -260,7 +343,11 @@ class Activities:
             return {"status": "deferred"}
         if p["source"]["source_kind"] == "article" and await self.pipeline_article_mode({}) == "deferred":
             return {"status": "deferred"}
-        source = await repository.get_source(p["source"]["arxiv_id"], p["source"]["source_kind"], p["source"]["source_version"])
+        source = (await repository.get_document_source(
+            p["source"]["space_file_id"], p["source"]["source_kind"], p["source"]["source_version"]
+        ) if "space_file_id" in p["source"] else await repository.get_source(
+            p["source"]["arxiv_id"], p["source"]["source_kind"], p["source"]["source_version"]
+        ))
         if source is None:
             return None
         collection = PAPER_COLLECTIONS[source["source_kind"]]
@@ -268,7 +355,7 @@ class Activities:
         if not batch:
             return None
         saved, failed = await index_batch(self.state, batch, collection)
-        if failed:
+        if failed and "space_file_id" not in p["source"]:
             raise ApplicationError(f"{failed} chunks were rejected", non_retryable=True)
         return {"cursor": batch[-1].id, "count": saved}
 

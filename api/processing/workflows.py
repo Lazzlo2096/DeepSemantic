@@ -5,7 +5,7 @@ from datetime import timedelta
 from temporalio import workflow
 from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
 from temporalio.exceptions import ActivityError, ApplicationError, ChildWorkflowError, WorkflowAlreadyStartedError
-from processing.config import PIPELINE_QUEUE, QUEUES, fingerprint, paper_workflow_id, summary_workflow_id
+from processing.config import PIPELINE_QUEUE, QUEUES, document_workflow_id, fingerprint, paper_workflow_id, summary_workflow_id
 
 RETRY = RetryPolicy(initial_interval=timedelta(seconds=10), maximum_interval=timedelta(minutes=2), maximum_attempts=3)
 
@@ -149,6 +149,47 @@ class PaperWorkflow:
 
 
 @workflow.defn
+class DocumentWorkflow:
+    """Process a user-uploaded Space file without creating an arXiv record."""
+    def __init__(self):
+        self.branches = {"article_index": "pending", "summary_index": "pending"}
+
+    @workflow.query
+    def progress(self):
+        return self.branches
+
+    @workflow.run
+    async def run(self, p: dict):
+        document = p.get("document") or await execute("document_context", p)
+        if document is None:
+            return {"status": "superseded"}
+        if not document["text_object_key"]:
+            document = await execute("extract_document", {"space_file_id": p["space_file_id"]}, QUEUES["text"])
+        if document is None or not document["text_object_key"]:
+            return {"status": "superseded"}
+        source = {"space_file_id": document["space_file_id"], "source_kind": "article",
+                  "source_version": document["text_version"]}
+        article_mode, summary_mode = await asyncio.gather(
+            execute("pipeline_article_mode", {}), execute("pipeline_summary_mode", {}))
+        if article_mode == "enabled":
+            self.branches["article_index"] = "queued"
+            result = await child("IndexWorkflow", {"source": source, "settings": p["settings"]},
+                                 "index:" + fingerprint([source, p["settings"]["index"]]))
+            self.branches["article_index"] = result["status"]
+        else:
+            self.branches["article_index"] = "deferred"
+        if summary_mode == "enabled":
+            self.branches["summary_index"] = "queued"
+            result = await child("SummaryWorkflow", {"document": document, "settings": p["settings"]},
+                                 "document-summary:" + fingerprint([str(document["space_file_id"]), document["markdown_version"], p["settings"]["summary"]]),
+                                 allow_completed=True)
+            self.branches["summary_index"] = result["status"]
+        else:
+            self.branches["summary_index"] = "deferred"
+        return {"status": "completed", **self.branches}
+
+
+@workflow.defn
 class SummaryWorkflow:
     def __init__(self):
         self.phase = "queued"
@@ -160,7 +201,8 @@ class SummaryWorkflow:
     @workflow.run
     async def run(self, p: dict):
         self.phase = "generating"
-        source = await execute("summarize_markdown", p, QUEUES["summary"], minutes=45)
+        source = await execute("summarize_document" if p.get("document") else "summarize_markdown",
+                               p, QUEUES["summary"], minutes=45)
         if source is None:
             return {"status": "superseded"}
         if source.get("status") == "deferred":
@@ -261,5 +303,5 @@ class SummaryReconcileWorkflow:
         workflow.continue_as_new({"after": after, "progress": self.state})
 
 
-PIPELINE_WORKFLOWS = [ImportWorkflow, PaperWorkflow, SummaryWorkflow, IndexWorkflow, ReprocessCatalogWorkflow,
+PIPELINE_WORKFLOWS = [ImportWorkflow, PaperWorkflow, DocumentWorkflow, SummaryWorkflow, IndexWorkflow, ReprocessCatalogWorkflow,
                       SummaryReconcileWorkflow]

@@ -20,9 +20,9 @@ from processing.workflows import PIPELINE_WORKFLOWS
 def worker_bindings(activities, kind):
     methods = {
         "import": [activities.discover_import, activities.manifest_page, activities.download_paper],
-        "text": [activities.extract], "summary": [activities.summarize],
+        "text": [activities.extract, activities.extract_document], "summary": [activities.summarize, activities.summarize_document],
         "index": [activities.prepare_index, activities.index_batch_activity],
-        "pipeline": [activities.paper_context, activities.dependency_result, activities.catalog_page,
+            "pipeline": [activities.paper_context, activities.document_context, activities.dependency_result, activities.catalog_page,
                      activities.pipeline_article_mode, activities.pipeline_summary_mode,
                      activities.summary_reconciliation_page],
     }
