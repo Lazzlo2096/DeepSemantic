@@ -166,11 +166,25 @@ h2 { margin: 0; font-size: 1.25rem; scroll-margin-top: 20px; }
   .catalog-sort select { min-width: 0; }
   #catalog-filters { padding: 12px; }
   .catalog-filter-fields { gap: 12px; }
+  .paper-status-row { grid-template-columns: 18px minmax(0, 1fr); }
+  .paper-status-value { grid-column: 2; }
 }
 .paper-list { display: grid; gap: 12px; }
 .paper { padding: 18px 22px; border: 1px solid var(--border); border-radius: 12px; background: #fff; }
 .paper-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; color: var(--muted); font-size: 0.83rem; }
 .paper-id { padding: 3px 7px; border-radius: 5px; background: #eff3fc; color: var(--accent); font-family: ui-monospace, monospace; }
+.paper-status-list { display: grid; gap: 5px; margin-top: 10px; }
+.paper-status-row { display: grid; grid-template-columns: 18px minmax(112px, auto) minmax(0, 1fr); align-items: center; gap: 7px; min-height: 28px; color: var(--muted); font-size: 0.84rem; }
+.paper-status-icon { display: inline-grid; place-items: center; width: 18px; height: 18px; border: 1px solid currentColor; border-radius: 50%; font-size: 0.72rem; font-weight: 800; line-height: 1; }
+.paper-status-label { color: #334258; font-weight: 700; }
+.paper-status-value { overflow-wrap: anywhere; }
+.paper-status-row[data-state="ready"] .paper-status-icon { color: #17594e; background: #def5ef; }
+.paper-status-row[data-state="ready"] .paper-status-value { color: #17594e; font-weight: 650; }
+.paper-status-row[data-state="running"] .paper-status-icon { color: #23458d; background: #e4edff; }
+.paper-status-row[data-state="running"] .paper-status-value { color: #23458d; }
+.paper-status-row[data-state="unavailable"] .paper-status-icon, .paper-status-row[data-state="error"] .paper-status-icon { color: #962e37; background: #fbe8eb; }
+.paper-status-row[data-state="unavailable"] .paper-status-value, .paper-status-row[data-state="error"] .paper-status-value { color: #962e37; }
+.paper-status-row[data-state="pending"] .paper-status-icon { color: #536177; background: #edf0f5; }
 .paper-stage { padding: 3px 8px; border-radius: 999px; background: #edf0f5; color: #3d4c63; font-weight: 600; }
 .paper-stage[data-stage="texted"] { background: #e4edff; color: #23458d; }
 .paper-stage[data-stage="texting"] { background: #efe8fb; color: #5c397f; }

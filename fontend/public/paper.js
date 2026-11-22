@@ -1,6 +1,6 @@
 import { arxivPath, arxivUrl } from "./arxiv.js";
 import { authFetch, loadCurrentUser } from "./auth.js?v=3";
-import { renderPaperIndexes, renderSummaryStatus } from "./paper-index.js?v=2";
+import { renderPaperIndexes, renderSummaryStatus } from "./paper-index.js?v=3";
 import MarkdownIt from "./vendor/markdown-it.mjs";
 import { setMarkdownContent } from "./math-render.js?v=1";
 
@@ -177,7 +177,7 @@ function loadSummary(url, hasText, isHtml, summaryIndex) {
   const button = document.querySelector("#summarize");
   const feedback = document.querySelector("#summary-status");
   const result = document.querySelector("#summary-result");
-  const summaryBadge = document.querySelector(".paper-summary-status");
+  const summaryBadge = document.querySelector('[data-status-kind="summary"]');
   panel.hidden = false;
   let refreshTimer;
 
@@ -363,22 +363,23 @@ function renderUploadedFileProcessing(processing) {
   const summaryPanel = document.querySelector("#paper-summary");
   const summaryStatusText = document.querySelector("#summary-status");
   const summaryResult = document.querySelector("#summary-result");
-  const articleStatus = document.querySelector(".paper-index-status");
-  const summaryStatus = document.querySelector(".paper-summary-status");
+  const articleStatus = document.querySelector('[data-status-kind="article-index"]');
+  const summaryStatus = document.querySelector('[data-status-kind="summary"]');
   const article = processing.article_index;
   const summary = processing.summary_index;
-  articleStatus.dataset.ready = String(article.status === "completed");
-  articleStatus.textContent = `Чанки статьи: ${article.chunks_indexed}/${article.chunks_total}`;
-  articleStatus.title = processing.text === "completed"
-    ? "Извлечённый текст разбит на чанки, указано количество чанков с embeddings в Qdrant."
-    : "Текст документа ещё не извлечён.";
-  summaryStatus.dataset.ready = String(summary.status === "completed");
-  summaryStatus.textContent = processing.summary_available
-    ? `Чанки саммари: ${summary.chunks_indexed}/${summary.chunks_total}`
-    : "Саммари ещё не создано";
-  summaryStatus.title = processing.summary_available
-    ? "Указано количество чанков саммари с embeddings в Qdrant."
-    : "Саммари будет создано после обработки текста документа.";
+  const textStatus = document.querySelector('[data-status-kind="text"]');
+  const statusState = (value) => value === "completed" ? "ready" : value === "failed" ? "error" : "running";
+  const setProcessingStatus = (row, label, state, value, detail) => {
+    row.dataset.state = state;
+    row.querySelector(".paper-status-label").textContent = label;
+    row.querySelector(".paper-status-value").textContent = value;
+    row.querySelector(".paper-status-icon").textContent = state === "ready" ? "✓" : state === "error" ? "!" : "◌";
+    row.title = detail;
+    row.setAttribute("aria-label", `${label}: ${value}`);
+  };
+  setProcessingStatus(textStatus, "Текст статьи", statusState(processing.text), processing.text === "completed" ? "Готово" : "В работе", "Состояние извлечения текста документа.");
+  setProcessingStatus(articleStatus, "Индекс статьи", statusState(article.status), `${article.chunks_indexed}/${article.chunks_total} чанков`, "Количество чанков статьи, найденных в Qdrant.");
+  setProcessingStatus(summaryStatus, "Саммари", processing.summary_available ? statusState(summary.status) : "pending", processing.summary_available ? `${summary.chunks_indexed}/${summary.chunks_total} чанков` : "Ожидает", "Количество чанков саммари, найденных в Qdrant.");
   summaryPanel.hidden = false;
   if (processing.summary) {
     summaryStatusText.textContent = "Саммари готово.";
