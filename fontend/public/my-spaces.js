@@ -1,4 +1,4 @@
-import { authFetch } from "./auth.js?v=2";
+import { authFetch, loadCurrentUser } from "./auth.js?v=2";
 
 const status = document.querySelector("#spaces-status");
 const error = document.querySelector("#spaces-error");
@@ -9,7 +9,7 @@ const dateFormat = new Intl.DateTimeFormat("ru-RU", {
   year: "numeric", month: "long", day: "numeric",
 });
 
-function renderSpace(space) {
+function renderSpace(space, currentUser) {
   const card = document.createElement("article");
   card.className = "paper";
 
@@ -18,10 +18,18 @@ function renderSpace(space) {
   const visibility = document.createElement("span");
   visibility.className = "paper-stage";
   visibility.textContent = space.visibility === "public" ? "Public" : "Private";
+  if (currentUser?.id === space.owner_id) {
+    const owner = document.createElement("span");
+    owner.className = "paper-stage";
+    owner.textContent = "Владелец";
+    meta.append(visibility, owner);
+  } else {
+    meta.append(visibility);
+  }
   const date = document.createElement("time");
   date.dateTime = space.created_at;
   date.textContent = `Создано ${dateFormat.format(new Date(space.created_at))}`;
-  meta.append(visibility, date);
+  meta.append(date);
 
   const title = document.createElement("h3");
   const link = document.createElement("a");
@@ -44,8 +52,9 @@ async function loadSpaces() {
       const body = await response.json().catch(() => ({}));
       throw new Error(typeof body.detail === "string" ? body.detail : "Не удалось загрузить Spaces.");
     }
+    const currentUser = await loadCurrentUser();
     const spaces = await response.json();
-    list.replaceChildren(...spaces.map(renderSpace));
+    list.replaceChildren(...spaces.map((space) => renderSpace(space, currentUser)));
     empty.hidden = spaces.length !== 0;
     status.textContent = `${spaces.length} ${spaces.length === 1 ? "пространство" : "пространств"}`;
   } catch (loadError) {
