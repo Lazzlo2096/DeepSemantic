@@ -95,6 +95,14 @@
 		reverse_proxy api:8000
 	}
 
+	@space_api path /api/spaces /api/spaces/*
+	handle @space_api {
+		route {
+			import authenticated
+			import api_backend
+		}
+	}
+
 	@admin_pages path /imports.html /workers.html /users.html
 	handle @admin_pages {
 		route {

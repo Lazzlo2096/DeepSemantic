@@ -34,6 +34,7 @@ main { padding-block: 36px 56px; }
 .eyebrow { margin: 0; color: var(--accent); font-size: 0.8rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
 h1 { margin: 8px 0 12px; font-size: clamp(2.2rem, 7vw, 3.5rem); line-height: 1.05; letter-spacing: -0.045em; }
 .intro > p:not(.eyebrow) { max-width: 54ch; margin: 0; line-height: 1.55; color: var(--muted); }
+.intro-actions { margin-top: 20px !important; }
 .search-form { margin-top: 22px; }
 .search-form label { display: block; margin-bottom: 7px; font-weight: 650; }
 .search-modes { min-width: 0; padding: 0; border: 0; margin: 0 0 14px; }
@@ -268,7 +269,7 @@ button:disabled { color: var(--muted); background: #eef1f6; cursor: default; }
 .auth-panel h1 { font-size: clamp(2rem, 6vw, 3rem); }
 .auth-panel form { display: grid; gap: 16px; margin-top: 24px; }
 .auth-panel label, .invite-form label { display: grid; gap: 6px; color: var(--muted); font-size: 0.88rem; }
-.auth-panel input, .invite-form input, .invite-form select, .invite-link input, .users-table select {
+.auth-panel input, .auth-panel textarea, .auth-panel select, .invite-form input, .invite-form select, .invite-link input, .users-table select {
   min-width: 0;
   min-height: 42px;
   padding: 8px 10px;

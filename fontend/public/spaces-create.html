@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Создать Space · DeepSemantic</title>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" sizes="any">
+    <link rel="stylesheet" href="/styles.css?v=8">
+    <script type="module" src="/auth.js?v=1"></script>
+    <script type="module" src="/spaces-create.js?v=1"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="shell brand">
+        <a class="brand-link" href="/">
+          <img class="brand-mark" src="/icon.svg" width="32" height="32" alt="">
+          DeepSemantic
+        </a>
+        <nav class="topbar-nav" aria-label="Разделы"></nav>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="auth-panel" aria-labelledby="page-title">
+        <p class="eyebrow">Новое пространство</p>
+        <h1 id="page-title">Создать свой Space</h1>
+        <p>Заполните информацию о пространстве. Приватность можно изменить позже.</p>
+        <form id="space-create-form">
+          <label>
+            Название
+            <input name="name" type="text" maxlength="300" required autocomplete="off">
+          </label>
+          <label>
+            Описание
+            <textarea name="description" maxlength="10000" rows="6" placeholder="О чём это пространство?"></textarea>
+          </label>
+          <label>
+            Доступ
+            <select name="visibility">
+              <option value="private">Приватный — только приглашённые пользователи</option>
+              <option value="public">Public — читать смогут все в интернете</option>
+            </select>
+          </label>
+          <div class="filter-actions">
+            <button type="submit" id="space-create-submit">Создать Space</button>
+            <a class="paper-download" href="/spaces.html">Отмена</a>
+          </div>
+          <p id="space-create-feedback" role="alert" hidden></p>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>
