@@ -18,6 +18,7 @@ const pageNumber = document.querySelector("#page-number");
 const previous = document.querySelector("#previous");
 const next = document.querySelector("#next");
 const template = document.querySelector("#paper-template");
+const spaceFileTemplate = document.querySelector("#space-file-template");
 const resultsTitle = document.querySelector("#results-title");
 const catalog = document.querySelector("#catalog");
 const catalogFilters = document.querySelector("#catalog-filters");
@@ -119,6 +120,38 @@ function renderPaper(paper) {
   return card;
 }
 
+const spaceProcessingLabels = {
+  uploaded: "Загружен",
+  metadata: "Ожидает извлечения текста",
+  texted: "Текст извлечён",
+  chunked: "Разбит на фрагменты",
+  summarized: "Саммари готово",
+};
+
+function renderSpaceFile(file) {
+  const card = spaceFileTemplate.content.cloneNode(true);
+  const title = card.querySelector(".paper-title");
+  const date = card.querySelector(".paper-date");
+  const stage = card.querySelector(".paper-stage");
+  title.textContent = file.filename;
+  card.querySelector(".paper-id").textContent = file.content_type || "Файл";
+  date.dateTime = file.created_at;
+  date.textContent = dateFormat.format(new Date(file.created_at));
+  stage.dataset.stage = file.processing_status;
+  stage.textContent = spaceProcessingLabels[file.processing_status] || file.processing_status;
+  card.querySelector(".paper-index-status").textContent = `Фрагменты: ${file.article_chunks}`;
+  card.querySelector(".paper-summary-status").textContent = `Фрагменты саммари: ${file.summary_chunks}`;
+  card.querySelector(".paper-authors").textContent = file.arxiv_id
+    ? `arXiv:${file.arxiv_id}${file.title ? ` · ${file.title}` : ""}`
+    : `Размер: ${file.size_bytes ?? "неизвестен"} байт · bucket: ${file.bucket}`;
+  card.querySelector(".paper-abstract").textContent = [
+    `Статус: ${spaceProcessingLabels[file.processing_status] || file.processing_status}`,
+    `Объект: ${file.object_key}`,
+    file.has_summary ? "Саммари: есть" : "Саммари: нет",
+  ].join("\n");
+  return card;
+}
+
 async function loadPage(page, moveFocus = false) {
   catalogRequest?.abort();
   const request = new AbortController();
@@ -127,7 +160,7 @@ async function loadPage(page, moveFocus = false) {
   previous.disabled = true;
   next.disabled = true;
   retry.hidden = true;
-  status.textContent = "Загружаем статьи…";
+  status.textContent = window.catalogSpaceId ? "Загружаем файлы…" : "Загружаем статьи…";
   list.setAttribute("aria-busy", "true");
 
   try {
@@ -135,8 +168,12 @@ async function loadPage(page, moveFocus = false) {
     const params = new URLSearchParams(appliedFilters);
     params.set("limit", PAGE_SIZE);
     params.set("offset", offset);
-    if (window.catalogSpaceId) params.set("space_id", window.catalogSpaceId);
-    const response = await fetch(`/api/papers?${params}`, { signal: request.signal, cache: "no-store" });
+    const catalogUrl = window.catalogSpaceId
+      ? `/api/spaces/${encodeURIComponent(window.catalogSpaceId)}/catalog?${params}`
+      : `/api/papers?${params}`;
+    const response = window.catalogSpaceId
+      ? await authFetch(catalogUrl, { signal: request.signal, cache: "no-store" })
+      : await fetch(catalogUrl, { signal: request.signal, cache: "no-store" });
     if (request.signal.aborted) return;
     if (response.status === 422) {
       status.textContent = "Проверь диапазон дат и примени фильтры снова.";
@@ -162,7 +199,7 @@ async function loadPage(page, moveFocus = false) {
 
     const papers = await response.json();
     if (request.signal.aborted) return;
-    list.replaceChildren(...papers.map(renderPaper));
+    list.replaceChildren(...papers.map(window.catalogSpaceId ? renderSpaceFile : renderPaper));
     currentPage = page;
     pageCount = totalPages;
     pageNumber.textContent = `Страница ${page + 1} из ${pageCount}`;
@@ -170,8 +207,8 @@ async function loadPage(page, moveFocus = false) {
     status.textContent = papers.length
       ? `Записи ${offset + 1}–${offset + papers.length} из ${total}`
       : params.has("status") || params.has("date_from") || params.has("date_to") || params.has("has_summary")
-        ? "По этим фильтрам статьи не найдены."
-        : "В каталоге пока нет статей.";
+        ? "По этим фильтрам записи не найдены."
+        : window.catalogSpaceId ? "В Space пока нет файлов." : "В каталоге пока нет статей.";
 
     if (moveFocus) {
       resultsTitle.focus();

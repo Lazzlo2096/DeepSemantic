@@ -13,10 +13,13 @@ if (mode === "space") {
   const backLink = document.querySelector("#space-back-link");
   backLink.hidden = false;
   if (spaceId) backLink.href = `/space.html?id=${encodeURIComponent(spaceId)}`;
+  document.querySelector("#results-title").textContent = "Файлы и обработка Space";
+  document.querySelector("#catalog-filters").hidden = true;
+  document.querySelector("#space-promo")?.remove();
 } else {
   document.querySelector("#catalog-intro").classList.add("catalog-home-intro");
   document.querySelector("#space-promo").hidden = false;
 }
 
 await import("./auth.js?v=2");
-await import("./app.js?v=11");
+await import("./app.js?v=12");

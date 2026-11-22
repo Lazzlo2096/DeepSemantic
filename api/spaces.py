@@ -5,7 +5,7 @@ from pathlib import PurePath
 from typing import Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Request, HTTPException, UploadFile
+from fastapi import APIRouter, Request, HTTPException, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
@@ -59,6 +59,24 @@ class SpaceFileResponse(BaseModel):
     content_type: str | None
     size_bytes: int | None
     created_at: datetime
+
+
+class SpaceCatalogItem(BaseModel):
+    id: UUID
+    filename: str
+    content_type: str | None
+    size_bytes: int | None
+    created_at: datetime
+    bucket: str
+    object_key: str
+    arxiv_id: str | None
+    title: str | None
+    authors: list[str]
+    submitted_at: datetime | None
+    processing_status: Literal["uploaded", "metadata", "texted", "chunked", "summarized"]
+    article_chunks: int
+    summary_chunks: int
+    has_summary: bool
 
 
 class ArxivImportTargetResponse(BaseModel):
@@ -247,6 +265,58 @@ async def get_space(space_id: UUID, request: Request, user: OptionalCurrentUser)
 @router.get("/{space_id}/files", response_model=list[SpaceFileResponse])
 async def list_space_files_for_user(space_id: UUID, request: Request, user: CurrentUser):
     return await list_space_files(request, space_id, user.id)
+
+
+@router.get("/{space_id}/catalog", response_model=list[SpaceCatalogItem])
+async def list_space_catalog(
+    space_id: UUID, request: Request, response: Response, user: OptionalCurrentUser,
+    limit: int = 100, offset: int = 0,
+):
+    if not 1 <= limit <= 100:
+        raise HTTPException(422, "limit должен быть от 1 до 100.")
+    if offset < 0:
+        raise HTTPException(422, "offset не может быть отрицательным.")
+    await get_accessible_space(request, space_id, user.id if user else None)
+    async with database_session(request) as session:
+        rows = (await session.execute(text("""
+            SELECT
+                file.id, file.filename, file.content_type, file.size_bytes,
+                file.created_at, file.bucket, file.object_key,
+                paper.arxiv_id, paper.title,
+                COALESCE(paper.authors, ARRAY[]::text[]) AS authors,
+                paper.submitted_at,
+                COALESCE(article_chunks.total, 0) AS article_chunks,
+                COALESCE(summary_chunks.total, 0) AS summary_chunks,
+                (COALESCE(summary_chunks.total, 0) > 0) AS has_summary,
+                count(*) OVER() AS total_count,
+                CASE
+                    WHEN paper.arxiv_id IS NULL THEN 'uploaded'
+                    WHEN paper.text_object_key IS NULL THEN 'metadata'
+                    WHEN COALESCE(article_chunks.total, 0) = 0 THEN 'texted'
+                    WHEN COALESCE(summary_chunks.total, 0) > 0 THEN 'summarized'
+                    ELSE 'chunked'
+                END AS processing_status
+            FROM public.space_files AS file
+            LEFT JOIN external_integration_arxiv.arxiv_papers AS paper
+                ON paper.space_file_id = file.id
+            LEFT JOIN (
+                SELECT arxiv_id, count(*) AS total
+                FROM neural_things.paper_chunks
+                WHERE source_kind = 'article'
+                GROUP BY arxiv_id
+            ) AS article_chunks ON article_chunks.arxiv_id = paper.arxiv_id
+            LEFT JOIN (
+                SELECT arxiv_id, count(*) AS total
+                FROM neural_things.paper_chunks
+                WHERE source_kind = 'summary'
+                GROUP BY arxiv_id
+            ) AS summary_chunks ON summary_chunks.arxiv_id = paper.arxiv_id
+            WHERE file.space_id = :space_id
+            ORDER BY file.created_at DESC, file.id DESC
+            LIMIT :limit OFFSET :offset
+        """), {"space_id": space_id, "limit": limit, "offset": offset})).mappings().all()
+    response.headers["X-Total-Count"] = str(rows[0]["total_count"] if rows else 0)
+    return rows
 
 
 @router.post("/{space_id}/members", status_code=204)
