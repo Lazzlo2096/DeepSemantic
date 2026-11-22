@@ -19,4 +19,4 @@ if (mode === "space") {
 }
 
 await import("./auth.js?v=1");
-await import("./app.js?v=10");
+await import("./app.js?v=11");
