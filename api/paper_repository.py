@@ -3,6 +3,7 @@
 No job statuses, retries, leases or execution progress are stored here.
 """
 import os
+import mimetypes
 from contextlib import asynccontextmanager
 from pathlib import PurePosixPath
 from types import SimpleNamespace
@@ -55,11 +56,12 @@ async def get_paper(arxiv_id):
 
 
 async def save_paper(article, bucket, object_key, downloaded_at, size_bytes, space_id, import_id=None):
+    content_type = mimetypes.guess_type(object_key)[0] or "application/octet-stream"
     async with connection() as db, db.transaction():
         file = await (await db.execute("""
             INSERT INTO space_files
                 (space_id, uploaded_by, bucket, object_key, filename, content_type, size_bytes, created_at)
-            SELECT %s, owner_id, %s, %s, %s, 'text/html', %s, %s
+            SELECT %s, owner_id, %s, %s, %s, %s, %s, %s
             FROM spaces WHERE id = %s
             ON CONFLICT (bucket, object_key) DO UPDATE SET
                 space_id = EXCLUDED.space_id,
@@ -69,7 +71,8 @@ async def save_paper(article, bucket, object_key, downloaded_at, size_bytes, spa
                 size_bytes = EXCLUDED.size_bytes,
                 created_at = EXCLUDED.created_at
             RETURNING id
-        """, (space_id, bucket, object_key, PurePosixPath(object_key).name, size_bytes, downloaded_at, space_id))).fetchone()
+        """, (space_id, bucket, object_key, PurePosixPath(object_key).name, content_type,
+               size_bytes, downloaded_at, space_id))).fetchone()
         if file is None:
             raise ValueError(f"Space {space_id} does not exist")
         await db.execute("""
