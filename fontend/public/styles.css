@@ -332,6 +332,29 @@ button:disabled { color: var(--muted); background: #eef1f6; cursor: default; }
 .auth-panel { width: min(100%, 430px); padding: clamp(22px, 5vw, 36px); }
 .auth-panel h1 { font-size: clamp(2rem, 6vw, 3rem); }
 .auth-panel form { display: grid; gap: 16px; margin-top: 24px; }
+.space-create-main { width: min(860px, calc(100% - 40px)); padding-block: clamp(42px, 7vw, 78px) 72px; }
+.space-create-layout { display: grid; grid-template-columns: minmax(0, 720px); justify-content: center; gap: 28px; }
+.space-create-panel { padding: clamp(24px, 4vw, 36px); border: 1px solid var(--border); border-radius: 14px; background: #fff; box-shadow: 0 14px 32px rgb(24 37 59 / 7%); }
+.space-create-panel-head { padding-bottom: 22px; border-bottom: 1px solid #edf0f5; }
+.space-create-panel-head h2 { margin-top: 8px; font-size: clamp(1.35rem, 3vw, 1.7rem); }
+#space-create-form { display: grid; gap: 20px; margin-top: 24px; }
+#space-create-form .space-create-field-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+#space-create-form label { display: grid; gap: 8px; color: #334258; font-size: 0.9rem; font-weight: 700; }
+#space-create-form input, #space-create-form textarea, #space-create-form select { width: 100%; min-width: 0; min-height: 48px; padding: 11px 13px; border: 1px solid #b7c5df; border-radius: 9px; color: inherit; background: #fff; font: inherit; font-weight: 400; }
+#space-create-form textarea { min-height: 140px; resize: vertical; }
+#space-create-form input::placeholder, #space-create-form textarea::placeholder { color: #7b8799; }
+#space-create-form input:focus, #space-create-form textarea:focus, #space-create-form select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgb(39 78 172 / 12%); outline: 0; }
+#space-create-form .filter-actions { align-items: center; gap: 10px; margin-top: 4px; }
+#space-create-form button[type="submit"] { min-height: 46px; padding-inline: 18px; background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+#space-create-form button[type="submit"]:hover { background: #1c3d91; }
+#space-create-form .paper-download { min-height: 46px; padding: 11px 14px; }
+#space-create-feedback { margin: 0; color: #962e37; line-height: 1.5; }
+@media (max-width: 760px) {
+  .space-create-main { width: min(100% - 28px, 620px); padding-block: 34px 52px; }
+  .space-create-layout { grid-template-columns: 1fr; gap: 28px; }
+  .space-create-panel { padding: 22px; }
+  #space-create-form .space-create-field-grid { grid-template-columns: 1fr; gap: 20px; }
+}
 .auth-panel label, .invite-form label { display: grid; gap: 6px; color: var(--muted); font-size: 0.88rem; }
 .auth-panel input, .auth-panel textarea, .auth-panel select, .invite-form input, .invite-form select, .invite-link input, .users-table select {
   min-width: 0;
