@@ -69,6 +69,21 @@ ANSWER_INSTRUCTIONS = """Ответь на русском языке, опира
 Иначе верни пустую строку. Не пересказывай вызовы инструментов и не перечисляй ID фрагментов в пояснении.
 Если источников недостаточно для ответа, верни пустой points и пустой source_explanation."""
 
+# OpenRouter models may support tools and reasoning without supporting the
+# response_format=json_schema parameter. Keep the contract in the prompt so
+# the application can validate the returned JSON locally.
+ANSWER_JSON_FORMAT = """
+Верни только валидный JSON без Markdown-ограждения и пояснений вне JSON.
+Структура ответа:
+{
+  "points": [
+    {"text": "связный абзац", "source_ids": [1]}
+  ],
+  "source_explanation": "краткое ограничение источников или пустая строка"
+}
+Каждый source_id должен ссылаться на существующий идентификатор фрагмента.
+"""
+
 
 PROMPT_VERSION = sha256(
     json.dumps(

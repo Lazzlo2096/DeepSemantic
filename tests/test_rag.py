@@ -154,14 +154,13 @@ class RagPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([message["tool_call_id"] for message in third["messages"] if message["role"] == "tool"],
                          ["call-1", "call-2", "call-3"])
         self.assertEqual(len(final["messages"]), 2)
-        self.assertEqual(final["messages"][0]["content"], rag.ANSWER_INSTRUCTIONS)
+        self.assertEqual(final["messages"][0]["content"], rag.ANSWER_INSTRUCTIONS + rag.ANSWER_JSON_FORMAT)
         self.assertNotIn("tools", final)
         material = json.loads(final["messages"][1]["content"])
         self.assertEqual(material["question"], "Explain the research")
         self.assertEqual(len(material["sources"]), 2)
         self.assertEqual([step["source_ids"] for step in material["search_steps"]], [[1], [1], [2]])
-        self.assertEqual(final["response_format"]["type"], "json_schema")
-        self.assertTrue(final["response_format"]["json_schema"]["strict"])
+        self.assertNotIn("response_format", final)
         for request in self.requests:
             self.assertEqual(request["model"], "test-model")
             self.assertEqual(request["reasoning"], {"effort": "none"})
@@ -281,7 +280,7 @@ class RagPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.vectors.side_effect = sources
 
         def respond(payload):
-            if payload["messages"][0]["content"] == rag.ANSWER_INSTRUCTIONS:
+            if payload["messages"][0]["content"] == rag.ANSWER_INSTRUCTIONS + rag.ANSWER_JSON_FORMAT:
                 material = json.loads(payload["messages"][1]["content"])
                 self.assertEqual(len(material["sources"]), 1)
                 self.assertEqual(material["sources"][0]["arxiv_id"], material["question"])

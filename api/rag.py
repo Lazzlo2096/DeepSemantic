@@ -18,7 +18,7 @@ from openrouter.errors import NoResponseError, OpenRouterError, ResponseValidati
 from pydantic import UUID4, BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 from typing_extensions import TypedDict
 
-from agents.prompts import ANSWER_INSTRUCTIONS, PROMPT_VERSION, RESEARCH_INSTRUCTIONS
+from agents.prompts import ANSWER_INSTRUCTIONS, ANSWER_JSON_FORMAT, PROMPT_VERSION, RESEARCH_INSTRUCTIONS
 from agents.tools import TOOLS, QueryText, create_tools
 from auth import CurrentUser
 from chunks import PaperChunkSource, require_zero_chunk_overlap
@@ -99,6 +99,14 @@ def visible_reasoning(message: AIMessage) -> list[dict]:
         if isinstance(content, str) and content.strip() and content not in texts and content != "\n".join(texts):
             parts.append({"kind": "reasoning.text", "text": content})
     return parts
+
+
+def parse_generated_answer(content: str) -> GeneratedAnswer:
+    """Parse model JSON without relying on provider-side structured output."""
+    content = content.strip()
+    if content.startswith("```") and content.endswith("```"):
+        content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content, flags=re.IGNORECASE).strip()
+    return GeneratedAnswer.model_validate_json(content)
 
 
 def model_tool_calls(message: AIMessage) -> list[dict]:
@@ -203,13 +211,12 @@ async def answer_node(state: RagState, runtime: Runtime[RagContext]) -> dict:
         "question": state["question"], "search_steps": state["search_steps"],
         "sources": [source.model_dump() for source in state["sources"].values()],
     }, ensure_ascii=False)
-    model = context.model.with_structured_output(
-        GeneratedAnswer, method="json_schema", strict=True, include_raw=True,
-    )
-    output = await model.ainvoke([
-        SystemMessage(content=ANSWER_INSTRUCTIONS), HumanMessage(content=material),
+    # Nemotron supports reasoning and tool calls, but its available OpenRouter
+    # endpoints do not support response_format=json_schema. Ask for the same
+    # contract in plain text and validate it locally instead.
+    assistant = await context.model.ainvoke([
+        SystemMessage(content=ANSWER_INSTRUCTIONS + ANSWER_JSON_FORMAT), HumanMessage(content=material),
     ])
-    assistant = output["raw"]
     check_model_response(assistant)
     content = visible_model_content(assistant)
     if context.record_history:
@@ -221,7 +228,7 @@ async def answer_node(state: RagState, runtime: Runtime[RagContext]) -> dict:
         raise ChatResponseError("Empty response")
     # Validate the full JSON, including its closing delimiter. LangChain's parser
     # can recover partial JSON; the API must reject incomplete provider output.
-    generated = GeneratedAnswer.model_validate_json(content)
+    generated = parse_generated_answer(content)
     cited_ids = {source_id for point in generated.points for source_id in point.source_ids}
     sources_by_id = {source.id: source for source in state["sources"].values()}
     if cited_ids - sources_by_id.keys():
