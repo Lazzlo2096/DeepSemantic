@@ -39,7 +39,11 @@ async function initializeNavigation() {
   spacesLink.className = "topbar-link";
   spacesLink.href = "/spaces.html";
   spacesLink.textContent = "Public Spaces";
-  navigation.append(spacesLink);
+  const mySpacesLink = document.createElement("a");
+  mySpacesLink.className = "topbar-link";
+  mySpacesLink.href = "/my-spaces.html";
+  mySpacesLink.textContent = "Мои Spaces";
+  navigation.append(spacesLink, mySpacesLink);
   try {
     const user = await loadCurrentUser();
     if (!user) {

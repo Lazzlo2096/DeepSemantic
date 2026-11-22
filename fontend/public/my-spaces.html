@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Мои Spaces · DeepSemantic</title>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" sizes="any">
+    <link rel="stylesheet" href="/styles.css?v=8">
+    <script type="module" src="/auth.js?v=1"></script>
+    <script type="module" src="/my-spaces.js?v=1"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="shell brand">
+        <a class="brand-link" href="/">
+          <img class="brand-mark" src="/icon.svg" width="32" height="32" alt="">
+          DeepSemantic
+        </a>
+        <nav class="topbar-nav" aria-label="Разделы"></nav>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow">Личная библиотека</p>
+        <h1 id="page-title">Мои Spaces</h1>
+        <p>Spaces, которые вы создали или к которым вас пригласили.</p>
+        <p class="intro-actions">
+          <a class="paper-download" href="/spaces-create.html">Создать свой Space</a>
+          <a class="paper-download" href="/spaces.html">Public Spaces</a>
+        </p>
+      </section>
+
+      <section aria-labelledby="spaces-title">
+        <div class="results-bar">
+          <h2 id="spaces-title">Доступные Spaces</h2>
+          <p id="spaces-status" role="status">Загружаем пространства…</p>
+        </div>
+        <p id="spaces-error" role="alert" hidden></p>
+        <div id="spaces-list" class="paper-list"></div>
+        <p id="spaces-empty" hidden>У вас пока нет доступных Spaces.</p>
+      </section>
+    </main>
+  </body>
+</html>
