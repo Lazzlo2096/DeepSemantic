@@ -133,7 +133,12 @@ function renderSpaceFile(file) {
   const title = card.querySelector(".paper-title");
   const date = card.querySelector(".paper-date");
   const stage = card.querySelector(".paper-stage");
-  title.textContent = file.filename;
+  const fileLink = document.createElement("a");
+  fileLink.href = file.arxiv_id
+    ? `/paper.html?id=${encodeURIComponent(file.arxiv_id)}`
+    : `/paper.html?file_id=${encodeURIComponent(file.id)}&space_id=${encodeURIComponent(window.catalogSpaceId)}`;
+  fileLink.textContent = file.filename;
+  title.replaceWith(fileLink);
   card.querySelector(".paper-id").textContent = file.content_type || "Файл";
   date.dateTime = file.created_at;
   date.textContent = dateFormat.format(new Date(file.created_at));

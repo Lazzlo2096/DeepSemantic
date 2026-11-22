@@ -3,12 +3,15 @@
 from datetime import datetime
 from pathlib import PurePath
 from typing import Literal
+from urllib.parse import quote
 from uuid import UUID, uuid4
 
+from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Request, HTTPException, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
+from fastapi.responses import StreamingResponse
 
 from auth import AdminUser, CurrentUser, OptionalCurrentUser
 from database import database_session
@@ -265,6 +268,48 @@ async def get_space(space_id: UUID, request: Request, user: OptionalCurrentUser)
 @router.get("/{space_id}/files", response_model=list[SpaceFileResponse])
 async def list_space_files_for_user(space_id: UUID, request: Request, user: CurrentUser):
     return await list_space_files(request, space_id, user.id)
+
+
+@router.get("/{space_id}/files/{file_id}")
+async def get_space_file(
+    space_id: UUID, file_id: UUID, request: Request, user: OptionalCurrentUser,
+):
+    await get_accessible_space(request, space_id, user.id if user else None)
+    async with database_session(request) as session:
+        file = (await session.execute(text("""
+            SELECT filename, content_type, bucket, object_key
+            FROM public.space_files
+            WHERE id = :file_id AND space_id = :space_id
+        """), {"file_id": file_id, "space_id": space_id})).mappings().one_or_none()
+    if file is None:
+        raise HTTPException(404, "Файл не найден.")
+    storage = request.app.state.rustfs
+    if storage is None:
+        raise HTTPException(503, "File storage is unavailable.")
+    try:
+        stored = await run_in_threadpool(
+            storage.get_object, Bucket=file["bucket"], Key=file["object_key"],
+        )
+    except ClientError as error:
+        if error.response["ResponseMetadata"]["HTTPStatusCode"] == 404:
+            raise HTTPException(404, "Файл не найден в хранилище.") from error
+        raise HTTPException(503, "File storage is unavailable.") from error
+    except BotoCoreError as error:
+        raise HTTPException(503, "File storage is unavailable.") from error
+
+    async def chunks():
+        try:
+            for chunk in stored["Body"].iter_chunks(chunk_size=64 * 1024):
+                yield chunk
+        finally:
+            stored["Body"].close()
+
+    headers = {
+        "Content-Disposition": f'inline; filename*=UTF-8\'\'{quote(file["filename"], safe="")}',
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "sandbox",
+    }
+    return StreamingResponse(chunks(), media_type=file["content_type"] or "application/octet-stream", headers=headers)
 
 
 @router.get("/{space_id}/catalog", response_model=list[SpaceCatalogItem])

@@ -17,7 +17,10 @@ const tableTextTags = new Set(["caption", "th", "td"]);
 const tableTags = new Set([...tableTextTags, "thead", "tbody", "tfoot", "tr"]);
 // The arXiv export can include memoir layout commands before the article heading.
 const layoutPreamble = /^\\isopage\s+(?:\[\d+\]\s+)?\\setlrmargins[^\n]*\n\\checkandfixthelayout\s+(?=# )/;
-const arxivId = new URLSearchParams(location.search).get("id");
+const query = new URLSearchParams(location.search);
+const arxivId = query.get("id");
+const fileId = query.get("file_id");
+const spaceId = query.get("space_id");
 const status = document.querySelector("#status");
 const pageStatus = document.querySelector("#paper-load-status");
 const list = document.querySelector("#paper-chunks");
@@ -290,9 +293,70 @@ async function loadPaper(id) {
   }
 }
 
+async function loadUploadedFile(id, currentSpaceId) {
+  if (!currentSpaceId) {
+    pageStatus.textContent = "В ссылке отсутствует Space документа.";
+    pageStatus.hidden = false;
+    return;
+  }
+  const url = `/api/spaces/${encodeURIComponent(currentSpaceId)}/files/${encodeURIComponent(id)}`;
+  try {
+    const response = await authFetch(url, { cache: "no-store" });
+    if (response.status === 404) {
+      pageStatus.textContent = "Документ не найден.";
+      pageStatus.hidden = false;
+      return;
+    }
+    if (!response.ok) throw new Error(`Document request returned ${response.status}`);
+    const disposition = response.headers.get("Content-Disposition") || "";
+    const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+    const filename = encodedName ? decodeURIComponent(encodedName) : "Документ";
+    const contentType = response.headers.get("Content-Type") || "";
+    const textPanel = document.querySelector("#paper-text");
+    const textStatus = document.querySelector("#text-status");
+    const result = document.querySelector("#text-result");
+    document.title = `${filename} · DeepSemantic`;
+    document.querySelector("#paper-id").textContent = "Документ Space";
+    document.querySelector("#paper-title").textContent = filename;
+    document.querySelector("#catalog-back").href = `/space.html?id=${encodeURIComponent(currentSpaceId)}`;
+    document.querySelector("#catalog-back").textContent = "← Вернуться к Space";
+    document.querySelector("#paper-summary").hidden = true;
+    chunksPanel.hidden = true;
+    const download = document.querySelector("#paper-html");
+    download.href = url;
+    download.textContent = "Открыть исходный файл";
+    download.target = "_blank";
+    download.removeAttribute("download");
+    download.hidden = false;
+    textPanel.hidden = false;
+    textStatus.textContent = "Загружаем документ…";
+    if (contentType.startsWith("text/html")) {
+      const frame = document.createElement("iframe");
+      frame.src = url;
+      frame.title = filename;
+      frame.setAttribute("sandbox", "");
+      frame.style.width = "100%";
+      frame.style.minHeight = "70vh";
+      frame.style.border = "0";
+      result.replaceChildren(frame);
+    } else if (contentType.startsWith("text/") || contentType.includes("json")) {
+      setMarkdownContent(result, await response.text());
+    } else {
+      result.textContent = "Предпросмотр этого типа файла недоступен. Используйте ссылку «Открыть исходный файл».";
+    }
+    result.hidden = false;
+    textStatus.textContent = "";
+  } catch {
+    pageStatus.textContent = "Не удалось загрузить документ. Попробуй обновить страницу.";
+    pageStatus.hidden = false;
+  }
+}
+
 initializeDebugMode();
 
-if (arxivId) {
+if (fileId) {
+  loadUploadedFile(fileId, spaceId);
+} else if (arxivId) {
   loadPaper(arxivId);
 } else {
   pageStatus.textContent = "В ссылке отсутствует идентификатор статьи.";

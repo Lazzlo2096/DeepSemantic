@@ -27,5 +27,5 @@ if (mode === "space") {
 }
 
 await import("./auth.js?v=2");
-await import("./app.js?v=12");
+await import("./app.js?v=13");
 if (mode === "space") await import("./space-catalog-actions.js?v=1");
