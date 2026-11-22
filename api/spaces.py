@@ -26,6 +26,14 @@ class SpaceCreate(BaseModel):
     visibility: Literal["private", "public"] = "private"
 
 
+class SpaceUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=300)
+    description: str | None = Field(default=None, max_length=10_000)
+    visibility: Literal["private", "public"] = "private"
+
+
 class SpaceMemberCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -189,6 +197,46 @@ async def disable_arxiv_import_target(space_id: UUID, request: Request, _: Admin
         await session.execute(
             text("DELETE FROM arxiv_import_targets WHERE space_id = :space_id"), {"space_id": space_id}
         )
+
+
+@router.put("/{space_id}", response_model=SpaceResponse)
+async def update_space(space_id: UUID, payload: SpaceUpdate, request: Request, user: CurrentUser):
+    async with database_session(request) as session:
+        row = (await session.execute(text("""
+            UPDATE spaces
+            SET name = :name,
+                description = :description,
+                visibility = :visibility,
+                updated_at = now()
+            WHERE id = :space_id AND owner_id = :owner_id
+            RETURNING *
+        """), {"space_id": space_id, "owner_id": user.id, **payload.model_dump()})).mappings().one_or_none()
+        if row is not None:
+            return row
+        exists = await session.scalar(
+            text("SELECT EXISTS (SELECT 1 FROM spaces WHERE id = :space_id)"), {"space_id": space_id}
+        )
+    if not exists:
+        raise HTTPException(404, "Space не найден.")
+    raise HTTPException(403, "Только автор Space может его редактировать.")
+
+
+@router.delete("/{space_id}", status_code=204)
+async def delete_space(space_id: UUID, request: Request, user: CurrentUser):
+    async with database_session(request) as session:
+        deleted = await session.scalar(text("""
+            DELETE FROM spaces
+            WHERE id = :space_id AND owner_id = :owner_id
+            RETURNING id
+        """), {"space_id": space_id, "owner_id": user.id})
+        if deleted is not None:
+            return
+        exists = await session.scalar(
+            text("SELECT EXISTS (SELECT 1 FROM spaces WHERE id = :space_id)"), {"space_id": space_id}
+        )
+    if not exists:
+        raise HTTPException(404, "Space не найден.")
+    raise HTTPException(403, "Только автор Space может его удалить.")
 
 
 @router.get("/{space_id}", response_model=SpaceResponse)

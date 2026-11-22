@@ -14,6 +14,16 @@ const uploadForm = document.querySelector("#space-upload-form");
 const fileInput = document.querySelector("#space-file-input");
 const uploadSubmit = document.querySelector("#space-upload-submit");
 const uploadStatus = document.querySelector("#space-upload-status");
+const editButton = document.querySelector("#space-edit-button");
+const deleteButton = document.querySelector("#space-delete-button");
+const editForm = document.querySelector("#space-edit-form");
+const editName = document.querySelector("#space-edit-name");
+const editDescription = document.querySelector("#space-edit-description");
+const editVisibility = document.querySelector("#space-edit-visibility");
+const editSubmit = document.querySelector("#space-edit-submit");
+const editCancel = document.querySelector("#space-edit-cancel");
+const editStatus = document.querySelector("#space-edit-status");
+let currentSpace;
 
 const dateFormat = new Intl.DateTimeFormat("ru-RU", {
   year: "numeric", month: "long", day: "numeric",
@@ -59,6 +69,7 @@ async function loadSpace() {
     throw new Error("Space не найден или больше не является публичным.");
   }
   const space = await spaceResponse.json();
+  currentSpace = space;
   const files = await filesResponse.json();
   document.title = `${space.name} · DeepSemantic`;
   title.textContent = space.name;
@@ -66,6 +77,68 @@ async function loadSpace() {
   list.replaceChildren(...files.map(renderFile));
   empty.hidden = files.length !== 0;
   status.textContent = `${files.length} ${files.length === 1 ? "файл" : "файлов"}`;
+}
+
+async function setupSpaceActions() {
+  try {
+    const user = await loadCurrentUser();
+    if (!user || !currentSpace || user.id !== currentSpace.owner_id) return;
+    editButton.hidden = false;
+    deleteButton.hidden = false;
+    editButton.addEventListener("click", () => {
+      editName.value = currentSpace.name;
+      editDescription.value = currentSpace.description || "";
+      editVisibility.value = currentSpace.visibility;
+      editStatus.textContent = "";
+      editForm.hidden = false;
+      editName.focus();
+    });
+    editCancel.addEventListener("click", () => { editForm.hidden = true; });
+    editForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      editSubmit.disabled = true;
+      editStatus.textContent = "Сохраняем…";
+      try {
+        const response = await authFetch(`/api/spaces/${encodeURIComponent(spaceId)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: editName.value,
+            description: editDescription.value || null,
+            visibility: editVisibility.value,
+          }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(typeof body.detail === "string" ? body.detail : "Не удалось сохранить Space.");
+        currentSpace = body;
+        document.title = `${body.name} · DeepSemantic`;
+        title.textContent = body.name;
+        description.textContent = body.description || "Описание отсутствует.";
+        editForm.hidden = true;
+      } catch (error) {
+        editStatus.textContent = error.message;
+      } finally {
+        editSubmit.disabled = false;
+      }
+    });
+    deleteButton.addEventListener("click", async () => {
+      if (!confirm(`Удалить Space «${currentSpace.name}»? Это действие нельзя отменить.`)) return;
+      deleteButton.disabled = true;
+      editButton.disabled = true;
+      try {
+        const response = await authFetch(`/api/spaces/${encodeURIComponent(spaceId)}`, { method: "DELETE" });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(typeof body.detail === "string" ? body.detail : "Не удалось удалить Space.");
+        location.assign("/my-spaces.html");
+      } catch (error) {
+        editStatus.textContent = error.message;
+        deleteButton.disabled = false;
+        editButton.disabled = false;
+      }
+    });
+  } catch {
+    // Anonymous visitors do not need owner controls.
+  }
 }
 
 async function setupArxivTargetButton() {
@@ -142,7 +215,7 @@ async function setupUploadForm() {
   });
 }
 
-loadSpace().catch((loadError) => {
+loadSpace().then(setupSpaceActions).catch((loadError) => {
   title.textContent = "Space недоступен";
   status.textContent = "Ошибка загрузки";
   error.textContent = loadError.message;

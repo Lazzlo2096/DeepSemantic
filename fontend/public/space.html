@@ -6,7 +6,7 @@
     <title>Space · DeepSemantic</title>
     <link rel="icon" href="/icon.svg" type="image/svg+xml" sizes="any">
     <link rel="stylesheet" href="/styles.css?v=8">
-    <script type="module" src="/space.js?v=1"></script>
+    <script type="module" src="/space.js?v=2"></script>
   </head>
   <body>
     <header class="topbar">
@@ -29,9 +29,33 @@
         <h1 id="space-title">Загружаем…</h1>
         <p id="space-description"></p>
         <p class="intro-actions">
+          <button id="space-edit-button" type="button" hidden>Редактировать Space</button>
+          <button id="space-delete-button" type="button" hidden>Удалить Space</button>
           <button id="arxiv-target-button" type="button" hidden>Сделать пространство приёмником импортов arXiv</button>
           <span id="arxiv-target-status" role="status"></span>
         </p>
+        <form id="space-edit-form" class="space-edit-form" hidden>
+          <label>
+            Название
+            <input id="space-edit-name" name="name" type="text" maxlength="300" required>
+          </label>
+          <label>
+            Описание
+            <textarea id="space-edit-description" name="description" maxlength="10000" rows="4"></textarea>
+          </label>
+          <label>
+            Доступ
+            <select id="space-edit-visibility" name="visibility">
+              <option value="private">Приватный — только приглашённые пользователи</option>
+              <option value="public">Public — читать смогут все в интернете</option>
+            </select>
+          </label>
+          <div class="filter-actions">
+            <button id="space-edit-submit" type="submit">Сохранить</button>
+            <button id="space-edit-cancel" type="button">Отмена</button>
+          </div>
+          <p id="space-edit-status" role="status"></p>
+        </form>
         <form id="space-upload-form" class="space-upload-form" hidden>
           <label>
             Документы
