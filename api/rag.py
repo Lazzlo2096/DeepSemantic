@@ -26,6 +26,7 @@ from llm_chat import ChatResponseError
 from rag_history import (
     RagModelTurn, RagRunRecord, RagToolCall, finish_run, load_run, save_model_turn, save_tool_call, start_run,
 )
+from spaces import get_accessible_space
 
 
 router = APIRouter(prefix="/rag", tags=["rag"])
@@ -54,7 +55,9 @@ class GeneratedAnswer(BaseModel):
 
 class RagSource(BaseModel):
     id: int
-    arxiv_id: str
+    arxiv_id: str | None
+    space_file_id: UUID | None = None
+    space_id: UUID | None = None
     paper_title: str | None
     chunk_index: int | None
     source_kind: PaperChunkSource
@@ -134,6 +137,8 @@ class RagContext:
     request: Request
     run_id: UUID
     model: ChatOpenRouter
+    space_id: UUID | None = None
+    public_only: bool = False
     record_history: bool = True
 
 
@@ -157,7 +162,9 @@ async def tools_node(state: RagState, runtime: Runtime[RagContext]) -> dict:
     sources = dict(state["sources"])
     versions = dict(state["versions"])
     search_steps = list(state["search_steps"])
-    tools = create_tools(context.request, versions)
+    tools = create_tools(
+        context.request, versions, space_id=context.space_id, public_only=context.public_only,
+    )
     messages = []
     # Keep execution sequential: source IDs and the UI trace follow call order.
     for call in model_tool_calls(state["messages"][-1]):
@@ -178,7 +185,10 @@ async def tools_node(state: RagState, runtime: Runtime[RagContext]) -> dict:
                 source_id = source.id if source else len(sources) + 1
                 item = {"source_id": source_id, **match}
                 if source is None:
-                    sources[key] = RagSource(id=source_id, arxiv_id=match["document_id"], **match)
+                    sources[key] = RagSource(
+                        id=source_id,
+                        **{key: value for key, value in match.items() if key != "document_id"},
+                    )
                 items.append(item)
             result = items[0] if name == "read_document" and items else {"matches": items}
         except (ValidationError, json.JSONDecodeError):
@@ -275,7 +285,10 @@ def build_rag_graph():
 RAG_GRAPH = build_rag_graph()
 
 
-async def generate_answer(payload: RagQuestion, request: Request, run_id: UUID) -> RagAnswer:
+async def generate_answer(
+    payload: RagQuestion, request: Request, run_id: UUID, *, space_id: UUID | None = None,
+    public_only: bool = False,
+) -> RagAnswer:
     state = request.app.state
     chat = state.chat_settings
 
@@ -287,7 +300,10 @@ async def generate_answer(payload: RagQuestion, request: Request, run_id: UUID) 
                 "sources": {}, "search_steps": [], "versions": {}, "position": 0,
             },
             config={"recursion_limit": RAG_RECURSION_LIMIT},
-            context=RagContext(request=request, run_id=run_id, model=state.rag_model),
+            context=RagContext(
+                request=request, run_id=run_id, model=state.rag_model,
+                space_id=space_id, public_only=public_only,
+            ),
         )
         return result["answer"]
     except NodeCancelledError as error:
@@ -317,8 +333,10 @@ async def generate_answer(payload: RagQuestion, request: Request, run_id: UUID) 
         raise HTTPException(502, f"{chat.provider} returned an incomplete answer or invalid citations.") from error
 
 
-@router.post("/answer", response_model=RagAnswer)
-async def answer_question(payload: RagQuestion, request: Request, user: CurrentUser):
+async def answer_question_impl(
+    payload: RagQuestion, request: Request, user: CurrentUser, *, space_id: UUID | None = None,
+    public_only: bool = False,
+):
     require_zero_chunk_overlap()
     chat = request.app.state.chat_settings
     if not chat.configured:
@@ -331,7 +349,7 @@ async def answer_question(payload: RagQuestion, request: Request, user: CurrentU
     )
     headers = {"X-RAG-Run-Id": str(run_id)}
     try:
-        answer = await generate_answer(payload, request, run_id)
+        answer = await generate_answer(payload, request, run_id, space_id=space_id, public_only=public_only)
     except asyncio.CancelledError:
         await finish_run(request, run_id, "failed", error="RAG request interrupted.")
         raise
@@ -345,6 +363,19 @@ async def answer_question(payload: RagQuestion, request: Request, user: CurrentU
         raise HTTPException(500, message, headers) from error
     await finish_run(request, run_id, answer.status, answer=answer.model_dump(mode="json"))
     return answer
+
+
+@router.post("/answer", response_model=RagAnswer)
+async def answer_question(payload: RagQuestion, request: Request, user: CurrentUser):
+    # The unscoped endpoint is deliberately limited to public Spaces. Private
+    # documents are available only through the explicitly scoped endpoint below.
+    return await answer_question_impl(payload, request, user, public_only=True)
+
+
+@router.post("/spaces/{space_id}/answer", response_model=RagAnswer)
+async def answer_space_question(space_id: UUID, payload: RagQuestion, request: Request, user: CurrentUser):
+    await get_accessible_space(request, space_id, user.id)
+    return await answer_question_impl(payload, request, user, space_id=space_id)
 
 
 @router.get("/runs/{run_id}", response_model=RagRunRecord)

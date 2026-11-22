@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 from typing import Annotated, Literal
 from urllib.parse import quote
+from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, HTTPException, Path, Query, Request
@@ -12,6 +13,7 @@ from sqlalchemy import select, text, update
 from auth import CurrentUser
 from database import MAX_BIGINT, Chunk, database_session
 from embedding_schemas import EMBEDDING_MODEL_KEY, EmbeddingRequest, Text
+from spaces import get_accessible_space
 
 
 router = APIRouter(prefix="/chunks", tags=["chunks"])
@@ -58,6 +60,7 @@ class ChunkDetail(ChunkResponse):
 class ChunkSearchRequest(BaseModel):
     query: Text
     limit: int = Field(default=10, ge=1, le=50)
+    space_id: UUID | None = None
 
 
 class ChunkTextSearchRequest(ChunkSearchRequest):
@@ -68,6 +71,8 @@ class ChunkMatch(BaseModel):
     chunk_id: int
     text: str
     arxiv_id: str | None
+    space_file_id: UUID | None = None
+    space_id: UUID | None = None
     paper_title: str | None
     chunk_index: int | None
     source_kind: PaperChunkSource | None = None
@@ -81,35 +86,61 @@ class ChunkSearchResult(ChunkMatch):
 
 
 @router.post("/search", response_model=list[ChunkSearchResult])
-async def search_chunks(payload: ChunkSearchRequest, request: Request, _: CurrentUser):
-    return await find_chunks(request, payload.query, payload.limit)
+async def search_chunks(payload: ChunkSearchRequest, request: Request, user: CurrentUser):
+    if payload.space_id is not None:
+        await get_accessible_space(request, payload.space_id, user.id)
+    return await find_chunks(
+        request, payload.query, payload.limit, space_id=payload.space_id, public_only=payload.space_id is None,
+    )
 
 
 @router.post("/search/text", response_model=list[ChunkMatch])
-async def search_chunk_text(payload: ChunkTextSearchRequest, request: Request):
-    return await find_text_chunks(request, payload.query, payload.limit)
+async def search_chunk_text(payload: ChunkTextSearchRequest, request: Request, user: CurrentUser):
+    if payload.space_id is not None:
+        await get_accessible_space(request, payload.space_id, user.id)
+    return await find_text_chunks(
+        request, payload.query, payload.limit, space_id=payload.space_id, public_only=payload.space_id is None,
+    )
 
 
-async def find_text_chunks(request: Request, query: str, limit: int, *, located_only: bool = False) -> list[ChunkMatch]:
+async def find_text_chunks(
+    request: Request, query: str, limit: int, *, located_only: bool = False,
+    space_id: UUID | None = None, public_only: bool = False,
+) -> list[ChunkMatch]:
     require_zero_chunk_overlap()
     literal = query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
     async with database_session(request) as session:
         rows = (await session.execute(
             text("""
                 SELECT chunk.id AS chunk_id, chunk.text, paper.arxiv_id,
-                       paper.title AS paper_title, link.chunk_index, link.source_kind,
-                       link.source_start, link.source_end, link.source_version
+                       COALESCE(paper.title, document_file.filename) AS paper_title,
+                       COALESCE(paper_file.id, document_file.id) AS space_file_id,
+                       COALESCE(paper_file.space_id, document_file.space_id) AS space_id,
+                       COALESCE(link.chunk_index, document_link.chunk_index) AS chunk_index,
+                       COALESCE(link.source_kind, document_link.source_kind) AS source_kind,
+                       COALESCE(link.source_start, document_link.source_start) AS source_start,
+                       COALESCE(link.source_end, document_link.source_end) AS source_end,
+                       COALESCE(link.source_version, document_link.source_version) AS source_version
                 FROM chunks AS chunk
                 LEFT JOIN paper_chunks AS link ON link.chunk_id = chunk.id
                 LEFT JOIN current_paper_chunks AS current ON current.chunk_id = link.chunk_id
                 LEFT JOIN arxiv_papers AS paper ON paper.arxiv_id = link.arxiv_id
+                LEFT JOIN public.space_files AS paper_file ON paper_file.id = paper.space_file_id
+                LEFT JOIN public.spaces AS paper_space ON paper_space.id = paper_file.space_id
+                LEFT JOIN neural_things.document_chunks AS document_link ON document_link.chunk_id = chunk.id
+                LEFT JOIN public.space_files AS document_file ON document_file.id = document_link.space_file_id
+                LEFT JOIN public.spaces AS document_space ON document_space.id = document_file.space_id
                 WHERE chunk.text ILIKE :pattern ESCAPE '!'
                   AND (link.chunk_id IS NULL OR current.chunk_id IS NOT NULL)
-                  AND (NOT :located_only OR link.source_start IS NOT NULL)
+                  AND (NOT :located_only OR COALESCE(link.source_start, document_link.source_start) IS NOT NULL)
+                  AND (:space_id IS NULL OR paper_file.space_id = CAST(:space_id AS uuid)
+                       OR document_file.space_id = CAST(:space_id AS uuid))
+                  AND (NOT :public_only OR COALESCE(paper_space.visibility, document_space.visibility) = 'public')
                 ORDER BY chunk.id
                 LIMIT :limit
             """),
-            {"pattern": f"%{literal}%", "limit": limit, "located_only": located_only},
+            {"pattern": f"%{literal}%", "limit": limit, "located_only": located_only,
+             "space_id": str(space_id) if space_id else None, "public_only": public_only},
         )).mappings().all()
     return [ChunkMatch(**row) for row in rows]
 
@@ -140,7 +171,10 @@ async def query_collection(qdrant: httpx.AsyncClient, collection: str, embedding
     }
 
 
-async def find_chunks(request: Request, query: str, limit: int, *, located_only: bool = False) -> list[ChunkSearchResult]:
+async def find_chunks(
+    request: Request, query: str, limit: int, *, located_only: bool = False,
+    space_id: UUID | None = None, public_only: bool = False,
+) -> list[ChunkSearchResult]:
     require_zero_chunk_overlap()
     state = request.app.state
     embedding = await state.embeddings.embed(EmbeddingRequest(texts=[query], input_type="search_query"))
@@ -158,18 +192,33 @@ async def find_chunks(request: Request, query: str, limit: int, *, located_only:
         rows = (await session.execute(
             text("""
                 SELECT chunk.id AS chunk_id, chunk.text, chunk.qdrant_collection, paper.arxiv_id,
-                       paper.title AS paper_title, link.chunk_index, link.source_kind,
-                       link.source_start, link.source_end, link.source_version
+                       COALESCE(paper.title, document_file.filename) AS paper_title,
+                       COALESCE(paper_file.id, document_file.id) AS space_file_id,
+                       COALESCE(paper_file.space_id, document_file.space_id) AS space_id,
+                       COALESCE(link.chunk_index, document_link.chunk_index) AS chunk_index,
+                       COALESCE(link.source_kind, document_link.source_kind) AS source_kind,
+                       COALESCE(link.source_start, document_link.source_start) AS source_start,
+                       COALESCE(link.source_end, document_link.source_end) AS source_end,
+                       COALESCE(link.source_version, document_link.source_version) AS source_version
                 FROM chunks AS chunk
                 LEFT JOIN paper_chunks AS link ON link.chunk_id = chunk.id
                 LEFT JOIN current_paper_chunks AS current ON current.chunk_id = link.chunk_id
                 LEFT JOIN arxiv_papers AS paper ON paper.arxiv_id = link.arxiv_id
+                LEFT JOIN public.space_files AS paper_file ON paper_file.id = paper.space_file_id
+                LEFT JOIN public.spaces AS paper_space ON paper_space.id = paper_file.space_id
+                LEFT JOIN neural_things.document_chunks AS document_link ON document_link.chunk_id = chunk.id
+                LEFT JOIN public.space_files AS document_file ON document_file.id = document_link.space_file_id
+                LEFT JOIN public.spaces AS document_space ON document_space.id = document_file.space_id
                 WHERE chunk.id = ANY(:chunk_ids)
                   AND chunk.qdrant_point_id = chunk.id
                   AND (link.chunk_id IS NULL OR current.chunk_id IS NOT NULL)
-                  AND (NOT :located_only OR link.source_start IS NOT NULL)
+                  AND (NOT :located_only OR COALESCE(link.source_start, document_link.source_start) IS NOT NULL)
+                  AND (:space_id IS NULL OR paper_file.space_id = CAST(:space_id AS uuid)
+                       OR document_file.space_id = CAST(:space_id AS uuid))
+                  AND (NOT :public_only OR COALESCE(paper_space.visibility, document_space.visibility) = 'public')
             """),
-            {"chunk_ids": list(chunk_ids), "located_only": located_only},
+            {"chunk_ids": list(chunk_ids), "located_only": located_only,
+             "space_id": str(space_id) if space_id else None, "public_only": public_only},
         )).mappings().all()
     matches = []
     for row in rows:

@@ -392,9 +392,11 @@ function renderRagAnswer(answer) {
     const isSummary = source.source_kind === "summary";
     const anchor = isSummary ? "paper-summary"
       : source.chunk_index === null ? "paper-text" : `chunk-${source.chunk_index + 1}`;
-    link.href = `${paperUrl(source.arxiv_id)}#${anchor}`;
+    link.href = source.arxiv_id
+      ? `${paperUrl(source.arxiv_id)}#${anchor}`
+      : `/paper.html?file_id=${encodeURIComponent(source.space_file_id)}&space_id=${encodeURIComponent(source.space_id)}#${anchor}`;
     link.textContent = isSummary ? "Открыть суммаризацию" : "Открыть фрагмент статьи";
-    setMarkdownContent(heading, `[${source.id}] ${source.paper_title || source.arxiv_id} · [${source.source_start}, ${source.source_end})`, { inline: true });
+    setMarkdownContent(heading, `[${source.id}] ${source.paper_title || source.arxiv_id || "Документ Space"} · [${source.source_start}, ${source.source_end})`, { inline: true });
     excerpt.className = "chunk-text formatted-text";
     setMarkdownContent(excerpt, source.text);
     details.append(heading, excerpt, link);
@@ -648,7 +650,10 @@ async function postRagSearch(query, signal) {
   const polling = new AbortController();
   const stopPolling = () => polling.abort();
   signal.addEventListener("abort", stopPolling, { once: true });
-  const pending = authFetch(searchModes.rag.endpoint, {
+  const endpoint = window.catalogSpaceId
+    ? `/api/rag/spaces/${encodeURIComponent(window.catalogSpaceId)}/answer`
+    : searchModes.rag.endpoint;
+  const pending = authFetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query, run_id: runId }),
@@ -691,7 +696,7 @@ async function loadSearch(query, mode, moveFocus, runId) {
     const response = mode === "rag" ? await postRagSearch(query, request.signal) : await authFetch(settings.endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query, ...(window.catalogSpaceId ? { space_id: window.catalogSpaceId } : {}) }),
       signal: request.signal,
     });
     if (request.signal.aborted) return;

@@ -7,6 +7,7 @@ run. Tools share this dictionary to avoid mixing different source versions.
 from codecs import getincrementaldecoder
 from functools import partial
 from typing import Annotated
+from uuid import UUID
 
 from botocore.exceptions import BotoCoreError
 from fastapi import HTTPException, Request
@@ -58,16 +59,24 @@ def read_utf8_slice(body, start: int, end: int) -> str:
     raise HTTPException(422, f"Range exceeds the source length of {position} characters.")
 
 
-async def read_document(request: Request, args: ReadArguments, versions: dict) -> dict:
+async def read_document(
+    request: Request, args: ReadArguments, versions: dict, *, space_id: UUID | None = None,
+    public_only: bool = False,
+) -> dict:
     async with database_session(request) as session:
         source = (await session.execute(text("""
             SELECT source.source_version, source.bucket, source.text_object_key, paper.title, summary.summary
             FROM paper_chunk_sources AS source
             JOIN arxiv_papers AS paper USING (arxiv_id)
+            JOIN public.space_files AS file ON file.id = paper.space_file_id
+            JOIN public.spaces AS space ON space.id = file.space_id
             LEFT JOIN paper_summaries AS summary
                 ON summary.arxiv_id = source.arxiv_id AND source.source_kind = 'summary'
             WHERE source.arxiv_id = :document_id AND source.source_kind = :source_kind
-        """), {"document_id": args.document_id, "source_kind": args.source_kind})).one_or_none()
+              AND (:space_id IS NULL OR file.space_id = CAST(:space_id AS uuid))
+              AND (NOT :public_only OR space.visibility = 'public')
+        """), {"document_id": args.document_id, "source_kind": args.source_kind,
+                "space_id": str(space_id) if space_id else None, "public_only": public_only})).one_or_none()
     if source is None:
         raise HTTPException(404, "Document text not found.")
     key = (args.document_id, args.source_kind)
@@ -86,35 +95,40 @@ async def read_document(request: Request, args: ReadArguments, versions: dict) -
     return {**args.model_dump(), "text": excerpt, "paper_title": source.title, "chunk_index": None}
 
 
-async def search_sources(request: Request, query: str, limit: int, versions: dict, *, vector: bool) -> list[dict]:
+async def search_sources(
+    request: Request, query: str, limit: int, versions: dict, *, vector: bool,
+    space_id: UUID | None = None, public_only: bool = False,
+) -> list[dict]:
     search = find_chunks if vector else find_text_chunks
-    matches = await search(request, query, limit, located_only=True)
+    matches = await search(request, query, limit, located_only=True, space_id=space_id, public_only=public_only)
     results = []
     for chunk in matches:
-        key = (chunk.arxiv_id, chunk.source_kind)
+        key = (chunk.arxiv_id or chunk.space_file_id, chunk.source_kind)
         if versions.setdefault(key, chunk.source_version) != chunk.source_version:
             continue
-        result = chunk.model_dump(exclude={"arxiv_id", "chunk_id"})
-        results.append({"document_id": chunk.arxiv_id, **result})
+        result = chunk.model_dump(exclude={"chunk_id"})
+        results.append({"document_id": chunk.arxiv_id or str(chunk.space_file_id), **result})
     return results
 
 
-async def search_vectors(query: str, limit: int = 3, *, request: Request, versions: dict):
-    return await search_sources(request, query, limit, versions, vector=True)
+async def search_vectors(query: str, limit: int = 3, *, request: Request, versions: dict,
+                         space_id: UUID | None = None, public_only: bool = False):
+    return await search_sources(request, query, limit, versions, vector=True, space_id=space_id, public_only=public_only)
 
 
-async def search_text(query: str, limit: int = 3, *, request: Request, versions: dict):
-    return await search_sources(request, query, limit, versions, vector=False)
+async def search_text(query: str, limit: int = 3, *, request: Request, versions: dict,
+                      space_id: UUID | None = None, public_only: bool = False):
+    return await search_sources(request, query, limit, versions, vector=False, space_id=space_id, public_only=public_only)
 
 
 async def read_source(
     document_id: str, source_start: int, source_end: int, source_kind: PaperChunkSource = "article",
-    *, request: Request, versions: dict,
+    *, request: Request, versions: dict, space_id: UUID | None = None, public_only: bool = False,
 ):
     args = ReadArguments(
         document_id=document_id, source_start=source_start, source_end=source_end, source_kind=source_kind,
     )
-    return [await read_document(request, args, versions)]
+    return [await read_document(request, args, versions, space_id=space_id, public_only=public_only)]
 
 
 TOOL_SPECS = {
@@ -138,10 +152,10 @@ TOOLS = [
 ]
 
 
-def create_tools(request: Request, versions: dict) -> dict[str, StructuredTool]:
+def create_tools(request: Request, versions: dict, *, space_id: UUID | None = None, public_only: bool = False) -> dict[str, StructuredTool]:
     return {
         name: StructuredTool.from_function(
-            coroutine=partial(function, request=request, versions=versions),
+            coroutine=partial(function, request=request, versions=versions, space_id=space_id, public_only=public_only),
             name=name, description=description, args_schema=arguments,
         )
         for name, (function, arguments, description) in TOOL_SPECS.items()
