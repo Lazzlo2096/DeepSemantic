@@ -78,7 +78,8 @@ function renderChunk(chunk) {
   const card = template.content.cloneNode(true);
   const chunkNumber = chunk.chunk_index + 1;
   card.querySelector("article").id = `chunk-${chunkNumber}`;
-  card.querySelector(".chunk-heading").textContent = `Чанк №${chunkNumber}`;
+  const kind = chunk.source_kind === "summary" ? "саммари" : "статьи";
+  card.querySelector(".chunk-heading").textContent = `Чанк ${kind} №${chunkNumber}`;
   setMarkdownContent(card.querySelector(".chunk-text"), chunk.text);
   return card;
 }
@@ -322,8 +323,11 @@ async function loadUploadedFile(id, currentSpaceId) {
     document.querySelector("#paper-title").textContent = filename;
     document.querySelector("#catalog-back").href = `/space.html?id=${encodeURIComponent(currentSpaceId)}`;
     document.querySelector("#catalog-back").textContent = "← Вернуться к Space";
-    document.querySelector("#paper-summary").hidden = true;
-    chunksPanel.hidden = true;
+    document.querySelector("#summarize").hidden = true;
+    document.querySelector("#summary-deferred-link").hidden = true;
+    chunksUrl = `${url}/chunks`;
+    chunksPanel.hidden = debugControl.hidden || !debugMode.checked;
+    if (!chunksPanel.hidden) loadChunks();
     if (processing) renderUploadedFileProcessing(processing);
     const download = document.querySelector("#paper-html");
     download.href = url;
@@ -356,6 +360,9 @@ async function loadUploadedFile(id, currentSpaceId) {
 }
 
 function renderUploadedFileProcessing(processing) {
+  const summaryPanel = document.querySelector("#paper-summary");
+  const summaryStatusText = document.querySelector("#summary-status");
+  const summaryResult = document.querySelector("#summary-result");
   const articleStatus = document.querySelector(".paper-index-status");
   const summaryStatus = document.querySelector(".paper-summary-status");
   const article = processing.article_index;
@@ -372,6 +379,16 @@ function renderUploadedFileProcessing(processing) {
   summaryStatus.title = processing.summary_available
     ? "Указано количество чанков саммари с embeddings в Qdrant."
     : "Саммари будет создано после обработки текста документа.";
+  summaryPanel.hidden = false;
+  if (processing.summary) {
+    summaryStatusText.textContent = "Саммари готово.";
+    summaryResult.innerHTML = summaryMarkdown.render(processing.summary);
+    summaryResult.hidden = false;
+  } else {
+    summaryStatusText.textContent = "Саммари ещё не создано.";
+    summaryResult.replaceChildren();
+    summaryResult.hidden = true;
+  }
   const runtime = processing.runtime;
   document.querySelector("#paper-load-status").textContent = runtime?.status === "failed"
     ? "Обработка завершилась с ошибкой."

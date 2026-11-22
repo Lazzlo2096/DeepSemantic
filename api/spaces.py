@@ -282,6 +282,7 @@ async def get_space_file_processing(
             SELECT
                 processing.text_object_key IS NOT NULL AS text_ready,
                 processing.summary IS NOT NULL AS summary_ready,
+                processing.summary,
                 count(chunks.chunk_id) FILTER (WHERE chunks.source_kind = 'article') AS article_chunks,
                 count(chunks.chunk_id) FILTER (WHERE chunks.source_kind = 'article' AND chunk.qdrant_collection IS NOT NULL) AS article_indexed,
                 count(chunks.chunk_id) FILTER (WHERE chunks.source_kind = 'summary') AS summary_chunks,
@@ -305,10 +306,36 @@ async def get_space_file_processing(
     return {
         "text": "completed" if row["text_ready"] else "pending",
         "summary_available": bool(row["summary_ready"]),
+        "summary": row["summary"],
         "article_index": {"status": article_status, "chunks_total": article_total, "chunks_indexed": article_indexed},
         "summary_index": {"status": summary_status, "chunks_total": summary_total, "chunks_indexed": summary_indexed},
         "runtime": runtime,
     }
+
+
+@router.get("/{space_id}/files/{file_id}/chunks")
+async def list_space_file_chunks(
+    space_id: UUID, file_id: UUID, request: Request, user: OptionalCurrentUser,
+):
+    await get_accessible_space(request, space_id, user.id if user else None)
+    async with database_session(request) as session:
+        rows = (await session.execute(text("""
+            SELECT chunks.chunk_id, chunks.source_kind, chunks.chunk_index, chunk.text,
+                   chunks.source_start, chunks.source_end
+            FROM neural_things.document_chunks chunks
+            JOIN neural_things.chunks chunk ON chunk.id = chunks.chunk_id
+            JOIN public.space_files file ON file.id = chunks.space_file_id
+            WHERE chunks.space_file_id = :file_id AND file.space_id = :space_id
+            ORDER BY chunks.source_kind, chunks.chunk_index
+        """), {"file_id": file_id, "space_id": space_id})).mappings().all()
+    if not rows:
+        async with database_session(request) as session:
+            exists = await session.scalar(text(
+                "SELECT EXISTS (SELECT 1 FROM public.space_files WHERE id = :file_id AND space_id = :space_id)"
+            ), {"file_id": file_id, "space_id": space_id})
+        if not exists:
+            raise HTTPException(404, "Файл не найден.")
+    return rows
 
 
 @router.get("/{space_id}/files/{file_id}")
