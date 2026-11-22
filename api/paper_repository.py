@@ -166,7 +166,7 @@ async def connection():
     async with await psycopg.AsyncConnection.connect(
         host=os.getenv("POSTGRES_HOST", "postgres"), dbname=os.environ["POSTGRES_DB"],
         user=os.environ["POSTGRES_USER"], password=os.environ["POSTGRES_PASSWORD"],
-        options="-csearch_path=external_integration_arxiv,public",
+        options="-csearch_path=neural_things,external_integration_arxiv,public",
         connect_timeout=5, autocommit=True, row_factory=dict_row,
     ) as db:
         yield db
