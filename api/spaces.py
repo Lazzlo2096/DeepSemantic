@@ -109,6 +109,18 @@ async def list_spaces(request: Request, user: CurrentUser):
     return rows
 
 
+@router.get("/public", response_model=list[SpaceResponse])
+async def list_public_spaces(request: Request):
+    async with database_session(request) as session:
+        rows = (await session.execute(text("""
+            SELECT *
+            FROM spaces
+            WHERE visibility = 'public'
+            ORDER BY created_at DESC
+        """))).mappings().all()
+    return rows
+
+
 @router.get("/{space_id}", response_model=SpaceResponse)
 async def get_space(space_id: UUID, request: Request, user: OptionalCurrentUser):
     return await get_accessible_space(request, space_id, user.id if user else None)

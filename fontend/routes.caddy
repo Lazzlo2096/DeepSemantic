@@ -89,6 +89,12 @@
 		reverse_proxy api:8000
 	}
 
+	@public_spaces path /api/spaces/public
+	handle @public_spaces {
+		uri strip_prefix /api
+		reverse_proxy api:8000
+	}
+
 	@admin_pages path /imports.html /workers.html /users.html
 	handle @admin_pages {
 		route {

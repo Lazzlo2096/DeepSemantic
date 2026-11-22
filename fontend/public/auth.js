@@ -35,6 +35,11 @@ function loginUrl() {
 async function initializeNavigation() {
   const navigation = document.querySelector(".topbar-nav");
   if (!navigation || location.pathname === "/login.html") return;
+  const spacesLink = document.createElement("a");
+  spacesLink.className = "topbar-link";
+  spacesLink.href = "/spaces.html";
+  spacesLink.textContent = "Public Spaces";
+  navigation.append(spacesLink);
   try {
     const user = await loadCurrentUser();
     if (!user) {
