@@ -143,7 +143,7 @@ async def query_collection(qdrant: httpx.AsyncClient, collection: str, embedding
 async def find_chunks(request: Request, query: str, limit: int, *, located_only: bool = False) -> list[ChunkSearchResult]:
     require_zero_chunk_overlap()
     state = request.app.state
-    embedding = await state.embeddings.embed(EmbeddingRequest(texts=[query]))
+    embedding = await state.embeddings.embed(EmbeddingRequest(texts=[query], input_type="search_query"))
     collections = tuple(PAPER_COLLECTIONS.values())
     candidate_limit = limit * 3 if located_only else limit
     results = await asyncio.gather(*(

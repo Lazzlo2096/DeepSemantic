@@ -49,7 +49,7 @@ class OpenRouterTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(str(request.url), "http://deepkaravan:8000/api/v1/embeddings")
             self.assertNotIn("authorization", request.headers)
             self.assertEqual(json.loads(request.content)["input"], ["first", "second"])
-            dimension = 1024 if EMBEDDING_OPENROUTER_MODEL == "baai/bge-m3" else 3
+            dimension = 4096
             return httpx.Response(200, json={"data": [
                 {"index": 1, "embedding": [0, 2] + [0] * (dimension - 2)},
                 {"index": 0, "embedding": [3, 4] + [0] * (dimension - 2)},

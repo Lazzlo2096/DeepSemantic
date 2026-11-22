@@ -12,7 +12,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "api"))
 
 from embedding_service import create_embeddings
 from embeddings_config import EmbeddingSettings
-from embedding_schemas import EmbeddingRequest
+from embedding_schemas import EMBEDDING_OPENROUTER_MODEL, EmbeddingRequest
+
+
+EMBEDDING_DIMENSIONS = 4096
 
 
 class EmbeddingProviderTests(unittest.IsolatedAsyncioTestCase):
@@ -28,11 +31,16 @@ class EmbeddingProviderTests(unittest.IsolatedAsyncioTestCase):
                     requests.append(request)
                     self.assertEqual(str(request.url), url)
                     self.assertEqual(request.headers.get("authorization"), authorization)
-                    self.assertEqual(json.loads(request.content), {
-                        "model": "baai/bge-m3", "input": ["hello"], "encoding_format": "float",
-                    })
+                    expected = {
+                        "model": EMBEDDING_OPENROUTER_MODEL,
+                        "input": ["hello"],
+                        "encoding_format": "float",
+                    }
+                    if provider == "openrouter":
+                        expected["input_type"] = "search_document"
+                    self.assertEqual(json.loads(request.content), expected)
                     return httpx.Response(200, json={"data": [
-                        {"index": 0, "embedding": [3, 4] + [0] * 1022},
+                        {"index": 0, "embedding": [3, 4] + [0] * (EMBEDDING_DIMENSIONS - 2)},
                     ]})
 
                 with patch.dict("os.environ", {
@@ -55,6 +63,20 @@ class EmbeddingProviderTests(unittest.IsolatedAsyncioTestCase):
                     await embeddings.embed(EmbeddingRequest(texts=["hello"]))
                 self.assertEqual(raised.exception.status_code, 503)
 
+    async def test_openrouter_forwards_query_input_type(self):
+        def handler(request):
+            self.assertEqual(json.loads(request.content)["input_type"], "search_query")
+            return httpx.Response(200, json={"data": [{
+                "index": 0,
+                "embedding": [1] + [0] * (EMBEDDING_DIMENSIONS - 1),
+            }]})
+
+        with patch.dict("os.environ", {
+            "EMBEDDING_PROVIDER": "openrouter", "OPENROUTER_API_KEY": "test-key",
+        }, clear=True):
+            async with create_embeddings(transport=httpx.MockTransport(handler)) as embeddings:
+                await embeddings.embed(EmbeddingRequest(texts=["hello"], input_type="search_query"))
+
     async def test_custom_url_and_timeout(self):
         def handler(request):
             self.assertEqual(str(request.url), "http://localhost:9009/api/v1/embeddings")
@@ -62,6 +84,7 @@ class EmbeddingProviderTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(503)
 
         with patch.dict("os.environ", {
+            "EMBEDDING_PROVIDER": "deepkaravan",
             "EMBEDDING_BASE_URL": "http://localhost:9009/api/v1", "EMBEDDING_TIMEOUT": "120",
             "OPENROUTER_API_KEY": "must-not-be-sent",
         }, clear=True):

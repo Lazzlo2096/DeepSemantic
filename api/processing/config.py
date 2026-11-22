@@ -20,7 +20,9 @@ def pipeline_settings():
             "reasoning_effort": os.getenv("SUMMARY_REASONING_EFFORT", ""),
             "provider_order": [value.strip() for value in os.getenv("OPENROUTER_PROVIDER_ORDER", "streamlake,sail-research,together").split(",") if value.strip()],
         },
-        "index": {"model": os.getenv("EMBEDDING_OPENROUTER_MODEL", "baai/bge-m3"),
+        "index": {"model": os.getenv(
+            "EMBEDDING_OPENROUTER_MODEL", "nvidia/nemotron-3.5-embed-8b:free",
+        ),
                   "max_tokens": int(os.getenv("EMBEDDING_MAX_TOKENS", "512")), "chunker": CHUNKER_VERSION},
     }
 

@@ -10,6 +10,7 @@ from temporalio.worker import Worker
 from tokenizers import Tokenizer
 
 from chunks import require_zero_chunk_overlap
+from embedding_schemas import EMBEDDING_OPENROUTER_MODEL
 from main import app, lifespan
 from processing.activities import Activities
 from processing.config import PIPELINE_QUEUE, QUEUES, temporal_client
@@ -48,9 +49,13 @@ async def run(kind="all"):
     tokenizer = None
     if kind in ("index", "all"):
         require_zero_chunk_overlap()
-        if not 3 <= max_tokens <= 8192:
-            raise ValueError("EMBEDDING_MAX_TOKENS must be between 3 and 8192")
-        tokenizer = Tokenizer.from_file(os.getenv("TOKENIZER_PATH", "/app/bge-m3-tokenizer.json"))
+        if not 3 <= max_tokens <= 32768:
+            raise ValueError("EMBEDDING_MAX_TOKENS must be between 3 and 32768")
+        default_tokenizer = (
+            "/app/bge-m3-tokenizer.json" if EMBEDDING_OPENROUTER_MODEL == "baai/bge-m3"
+            else "/app/nemotron-3.5-embed-8b-tokenizer.json"
+        )
+        tokenizer = Tokenizer.from_file(os.getenv("TOKENIZER_PATH", default_tokenizer))
     client = await temporal_client()
     stopped = asyncio.Event()
     loop = asyncio.get_running_loop()

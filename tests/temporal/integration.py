@@ -65,7 +65,10 @@ class NativeStateTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code, 202)
             identity = 'import:' + response.json()['id']
             await self.client.get_workflow_handle(identity).signal('set_paused', True)
-            activities = Activities(app.state, Tokenizer.from_file('/app/bge-m3-tokenizer.json'), 512, self.client)
+            activities = Activities(
+                app.state, Tokenizer.from_file('/app/nemotron-3.5-embed-8b-tokenizer.json'),
+                512, self.client,
+            )
             await self.stack.enter_async_context(processing_workers(self.client, activities, shutdown_seconds=1))
             await asyncio.sleep(.5)
             handle = self.client.get_workflow_handle(identity)
@@ -98,7 +101,10 @@ class NativeStateTests(unittest.IsolatedAsyncioTestCase):
                 return {'model': EMBEDDING_OPENROUTER_MODEL, 'revision': 'test', 'dimensions': 3,
                         'embeddings': [[1., 0., 0.] for _ in payload.texts]}
         app.state.embeddings = Embeddings()
-        activities = Activities(app.state, Tokenizer.from_file('/app/bge-m3-tokenizer.json'), 512, self.client)
+        activities = Activities(
+            app.state, Tokenizer.from_file('/app/nemotron-3.5-embed-8b-tokenizer.json'),
+            512, self.client,
+        )
         await self.stack.enter_async_context(processing_workers(self.client, activities, shutdown_seconds=1))
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test', headers={
             'X-Auth-Proxy-Secret': 'deepsemantic-local-proxy-secret',

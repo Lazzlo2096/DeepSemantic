@@ -173,7 +173,10 @@ async def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", default=os.getenv("EMBEDDING_OPENROUTER_MODEL", "baai/bge-m3"))
+    parser.add_argument(
+        "--model",
+        default=os.getenv("EMBEDDING_OPENROUTER_MODEL", "nvidia/nemotron-3.5-embed-8b:free"),
+    )
     parser.add_argument("--provider", choices=["deepinfra"], default="deepinfra",
                         help="Only DeepInfra is supported; fallback is disabled")
     parser.add_argument("--batch-sizes", nargs="+", type=positive, default=[8, 16, 32, 64, 128])

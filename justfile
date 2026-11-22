@@ -1,7 +1,7 @@
 set windows-shell := ["powershell.exe", "-NoProfile", "-Command"]
 set dotenv-load := true
 
-embedding_provider := env_var_or_default("EMBEDDING_PROVIDER", "deepkaravan")
+embedding_provider := env_var_or_default("EMBEDDING_PROVIDER", "openrouter")
 
 default:
     @just --list

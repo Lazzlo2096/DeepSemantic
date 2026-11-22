@@ -3,7 +3,7 @@ services:
     build: .
     environment:
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
-      EMBEDDING_OPENROUTER_MODEL: "${EMBEDDING_OPENROUTER_MODEL:-baai/bge-m3}"
+      EMBEDDING_OPENROUTER_MODEL: "${EMBEDDING_OPENROUTER_MODEL:-nvidia/nemotron-3.5-embed-8b:free}"
     volumes:
       - ./results:/results
       - ./data:/data:ro

@@ -12,14 +12,23 @@ from embedding_schemas import EMBEDDING_OPENROUTER_MODEL, EmbeddingRequest
 
 logger = logging.getLogger(__name__)
 
+EXPECTED_DIMENSIONS = {
+    "baai/bge-m3": 1024,
+    "nvidia/nemotron-3.5-embed-8b:free": 4096,
+}
 
-async def embed(client: httpx.AsyncClient, model: str, texts: list[str]) -> dict:
+
+async def embed(
+    client: httpx.AsyncClient,
+    model: str,
+    texts: list[str],
+    input_type: str | None = None,
+) -> dict:
+    body = {"model": model, "input": texts, "encoding_format": "float"}
+    if input_type:
+        body["input_type"] = input_type
     try:
-        response = await client.post("embeddings", json={
-            "model": model,
-            "input": texts,
-            "encoding_format": "float",
-        })
+        response = await client.post("embeddings", json=body)
         response.raise_for_status()
     except httpx.TimeoutException:
         return {"status": 504, "error": "Embedding request timed out."}
@@ -38,7 +47,7 @@ async def embed(client: httpx.AsyncClient, model: str, texts: list[str]) -> dict
         if [item["index"] for item in items] != list(range(len(texts))):
             raise ValueError("Unexpected embedding indices")
         dimensions = len(items[0]["embedding"])
-        if not dimensions or (model == "baai/bge-m3" and dimensions != 1024):
+        if not dimensions or dimensions != EXPECTED_DIMENSIONS.get(model, dimensions):
             raise ValueError("Unexpected embedding dimension")
         embeddings = [normalize(item["embedding"], dimensions) for item in items]
     except (IndexError, KeyError, TypeError, ValueError, OverflowError) as error:
@@ -69,7 +78,8 @@ class Embeddings:
 
     async def embed(self, payload: EmbeddingRequest):
         self.check_configured()
-        result = await embed(self.client, EMBEDDING_OPENROUTER_MODEL, payload.texts)
+        input_type = payload.input_type if self.settings.provider == "openrouter" else None
+        result = await embed(self.client, EMBEDDING_OPENROUTER_MODEL, payload.texts, input_type)
         if "error" in result:
             raise HTTPException(result["status"], result["error"])
         return result

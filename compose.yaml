@@ -13,8 +13,8 @@ x-llm-environment: &llm-environment
 
 x-embedding-client-environment: &embedding-client-environment
   <<: *postgres-environment
-  EMBEDDING_OPENROUTER_MODEL: "${EMBEDDING_OPENROUTER_MODEL:-baai/bge-m3}"
-  EMBEDDING_PROVIDER: "${EMBEDDING_PROVIDER:-deepkaravan}"
+  EMBEDDING_OPENROUTER_MODEL: "${EMBEDDING_OPENROUTER_MODEL:-nvidia/nemotron-3.5-embed-8b:free}"
+  EMBEDDING_PROVIDER: "${EMBEDDING_PROVIDER:-openrouter}"
   EMBEDDING_BASE_URL: "${EMBEDDING_BASE_URL:-}"
   EMBEDDING_TIMEOUT: "${EMBEDDING_TIMEOUT:-60}"
   QDRANT_URL: "${QDRANT_URL:-http://qdrant:6333}"

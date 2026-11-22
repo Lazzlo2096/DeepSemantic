@@ -6,7 +6,7 @@
 
 На Ubuntu запусти `sudo bash bootstrap.sh` из корня проекта. Запись DNS для `deep-semantic.com` должна указывать на публичный адрес сервера, а TCP-порты 80 и 443 должны быть свободны и доступны из интернета. Caddy выпустит и будет обновлять сертификат автоматически. [Каталог на сервере](https://deep-semantic.com)
 
-Укажи в `.env` ключ `OPENROUTER_API_KEY` и выбери модели `RAG_OPENROUTER_MODEL` и `SUMMARY_OPENROUTER_MODEL`. Затем запусти `sudo just up-server`. Генерация выполняется через OpenRouter. Для эмбеддингов `EMBEDDING_PROVIDER=deepkaravan` выбирает локальный контейнер без API-ключа, `EMBEDDING_PROVIDER=openrouter` — OpenRouter с ключом `OPENROUTER_API_KEY`. Оставь `EMBEDDING_BASE_URL` пустым для автоматического выбора адреса.
+Укажи в `.env` ключ `OPENROUTER_API_KEY` и выбери модели `RAG_OPENROUTER_MODEL` и `SUMMARY_OPENROUTER_MODEL`. Затем запусти `sudo just up-server`. Генерация и эмбеддинги по умолчанию выполняются через OpenRouter; embedding-модель — `nvidia/nemotron-3.5-embed-8b:free`. Оставь `EMBEDDING_BASE_URL` пустым для автоматического выбора адреса.
 
 Управление путями обработки доступно на странице [Воркеры на сервере](https://deep-semantic.com/workers.html).
 

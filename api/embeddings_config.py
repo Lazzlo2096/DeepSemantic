@@ -13,7 +13,7 @@ class EmbeddingSettings:
 
     @classmethod
     def from_env(cls) -> "EmbeddingSettings":
-        provider = os.getenv("EMBEDDING_PROVIDER", "deepkaravan").strip().lower()
+        provider = os.getenv("EMBEDDING_PROVIDER", "openrouter").strip().lower()
         urls = {
             "deepkaravan": "http://deepkaravan:8000/api/v1/",
             "openrouter": "https://openrouter.ai/api/v1/",
