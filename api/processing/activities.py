@@ -162,7 +162,7 @@ class Activities:
             return {"paper": None, "outcome": "unavailable", "attempt": activity.info().attempt}
         obj, reused = stored
         paper = await repository.save_paper(
-            article, p["bucket"], key, obj["LastModified"], p["space_id"], p["id"],
+            article, p["bucket"], key, obj["LastModified"], obj["ContentLength"], p["space_id"], p["id"],
         )
         return {"paper": paper_reference(paper), "outcome": "reused" if reused else "available", "attempt": activity.info().attempt}
 
