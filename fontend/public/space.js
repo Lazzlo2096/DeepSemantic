@@ -10,6 +10,10 @@ const empty = document.querySelector("#files-empty");
 const arxivTargetButton = document.querySelector("#arxiv-target-button");
 const arxivTargetStatus = document.querySelector("#arxiv-target-status");
 const spaceCatalogLink = document.querySelector("#space-catalog-link");
+const uploadForm = document.querySelector("#space-upload-form");
+const fileInput = document.querySelector("#space-file-input");
+const uploadSubmit = document.querySelector("#space-upload-submit");
+const uploadStatus = document.querySelector("#space-upload-status");
 
 const dateFormat = new Intl.DateTimeFormat("ru-RU", {
   year: "numeric", month: "long", day: "numeric",
@@ -96,6 +100,48 @@ async function setupArxivTargetButton() {
   }
 }
 
+async function setupUploadForm() {
+  try {
+    const user = await loadCurrentUser();
+    if (!user || !spaceId) return;
+    uploadForm.hidden = false;
+  } catch {
+    return;
+  }
+  uploadForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const files = [...fileInput.files];
+    if (!files.length) {
+      uploadStatus.textContent = "Выберите хотя бы один файл.";
+      return;
+    }
+    uploadSubmit.disabled = true;
+    uploadStatus.textContent = `Загружаем 0 из ${files.length}…`;
+    try {
+      for (const [index, file] of files.entries()) {
+        const payload = new FormData();
+        payload.append("file", file);
+        const response = await authFetch(`/api/spaces/${encodeURIComponent(spaceId)}/files`, {
+          method: "POST",
+          body: payload,
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          throw new Error(typeof body.detail === "string" ? body.detail : `Не удалось загрузить ${file.name}.`);
+        }
+        uploadStatus.textContent = `Загружаем ${index + 1} из ${files.length}…`;
+      }
+      uploadStatus.textContent = `Загружено файлов: ${files.length}.`;
+      fileInput.value = "";
+      await loadSpace();
+    } catch (error) {
+      uploadStatus.textContent = error.message;
+    } finally {
+      uploadSubmit.disabled = false;
+    }
+  });
+}
+
 loadSpace().catch((loadError) => {
   title.textContent = "Space недоступен";
   status.textContent = "Ошибка загрузки";
@@ -103,3 +149,4 @@ loadSpace().catch((loadError) => {
   error.hidden = false;
 });
 setupArxivTargetButton();
+setupUploadForm();

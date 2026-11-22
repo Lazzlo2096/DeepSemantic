@@ -48,6 +48,12 @@ h1 { margin: 8px 0 12px; font-size: clamp(2.2rem, 7vw, 3.5rem); line-height: 1.0
 .space-promo-action:hover { color: #203b88; background: #edf2ff; }
 .space-promo-action span { transition: transform 160ms ease; }
 .space-promo-action:hover span { transform: translateX(3px); }
+.space-upload-form { display: grid; gap: 10px; max-width: 440px; margin-top: 18px; padding-top: 16px; border-top: 1px solid #d8e1f2; }
+.space-upload-form label { display: grid; gap: 6px; color: var(--muted); font-size: 0.88rem; }
+.space-upload-form input[type="file"] { min-width: 0; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: #fff; font: inherit; }
+.space-upload-form button { justify-self: start; background: var(--accent); color: #fff; }
+.space-upload-form button:hover { background: #1c3d91; }
+.space-upload-form p { margin: 0; color: var(--muted); font-size: 0.85rem; }
 .space-promo-orbit { position: absolute; z-index: 0; right: 22px; top: 20px; width: 42px; height: 42px; border: 1px solid rgb(255 255 255 / 50%); border-radius: 50%; animation: space-promo-orbit 7s linear infinite; }
 .space-promo-orbit::after { content: ""; position: absolute; top: -4px; left: 18px; width: 7px; height: 7px; border-radius: 50%; background: #fff; box-shadow: 0 0 14px 3px rgb(255 255 255 / 70%); }
 @keyframes space-promo-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }

@@ -32,6 +32,14 @@
           <button id="arxiv-target-button" type="button" hidden>Сделать пространство приёмником импортов arXiv</button>
           <span id="arxiv-target-status" role="status"></span>
         </p>
+        <form id="space-upload-form" class="space-upload-form" hidden>
+          <label>
+            Документы
+            <input id="space-file-input" type="file" name="file" multiple>
+          </label>
+          <button id="space-upload-submit" type="submit">Загрузить документы</button>
+          <p id="space-upload-status" role="status"></p>
+        </form>
       </section>
 
       <section aria-labelledby="files-title">
