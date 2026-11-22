@@ -106,6 +106,9 @@ def extract_user_markdown(source, url: str) -> str:
     root = document.body or document
     for node in root.select("script, style, nav, button, template"):
         node.decompose()
+    for image in root.select("img[src]"):
+        if image["src"].lower().startswith("data:"):
+            image.replace_with("[Встроенное изображение удалено перед индексацией]")
     for link in root.select("a[href]"):
         link["href"] = urljoin(url, link["href"])
     markdown = ArticleConverter(url).convert_soup(root).strip()

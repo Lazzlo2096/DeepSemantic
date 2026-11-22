@@ -37,7 +37,8 @@ async def embed(
         return {"status": 503, "error": "Embeddings are unavailable."}
     except httpx.HTTPStatusError as error:
         status = error.response.status_code
-        logger.warning("Embeddings returned HTTP %d", status)
+        body = error.response.text.replace("\n", " ").strip()
+        logger.warning("Embeddings returned HTTP %d: %s", status, body[:2000] or "<empty response>")
         if status in (400, 413, 422):
             return {"status": 422, "error": "Embedding service rejected the embedding input."}
         return {"status": 503, "error": "Embeddings are unavailable."}

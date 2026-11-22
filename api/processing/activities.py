@@ -210,8 +210,15 @@ class Activities:
     @heartbeats
     async def extract_document(self, p: dict):
         document = await repository.get_document(p["space_file_id"])
-        if document is None or document["text_object_key"]:
+        if document is None:
             return document
+        if document["text_object_key"]:
+            def has_embedded_image():
+                obj = self.s3.get_object(Bucket=document["bucket"], Key=document["text_object_key"])
+                with obj["Body"] as body:
+                    return "data:image/" in body.read().decode("utf-8-sig").lower()
+            if not await asyncio.to_thread(has_embedded_image):
+                return document
         def extract():
             obj = self.s3.get_object(Bucket=document["bucket"], Key=document["object_key"])
             with obj["Body"] as body:
