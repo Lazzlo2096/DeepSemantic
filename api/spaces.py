@@ -53,6 +53,10 @@ class SpaceFileResponse(BaseModel):
     created_at: datetime
 
 
+class ArxivImportTargetResponse(BaseModel):
+    enabled: bool
+
+
 async def list_space_files(request: Request, space_id: UUID, user_id: UUID | None):
     await get_accessible_space(request, space_id, user_id)
     async with database_session(request) as session:
@@ -168,6 +172,15 @@ async def enable_arxiv_import_target(space_id: UUID, request: Request, user: Adm
             VALUES (:space_id, :created_by)
             ON CONFLICT (space_id) DO NOTHING
         """), {"space_id": space_id, "created_by": user.id})
+
+
+@router.get("/{space_id}/arxiv-import-target", response_model=ArxivImportTargetResponse)
+async def get_arxiv_import_target(space_id: UUID, request: Request, _: AdminUser):
+    async with database_session(request) as session:
+        enabled = await session.scalar(text(
+            "SELECT EXISTS (SELECT 1 FROM arxiv_import_targets WHERE space_id = :space_id)"
+        ), {"space_id": space_id})
+    return {"enabled": enabled}
 
 
 @router.delete("/{space_id}/arxiv-import-target", status_code=204)

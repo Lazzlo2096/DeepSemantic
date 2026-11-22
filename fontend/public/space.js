@@ -64,6 +64,14 @@ async function setupArxivTargetButton() {
     const user = await loadCurrentUser();
     if (user?.role !== "admin" || !spaceId) return;
     arxivTargetButton.hidden = false;
+    const targetResponse = await authFetch(
+      `/api/spaces/${encodeURIComponent(spaceId)}/arxiv-import-target`, { cache: "no-store" },
+    );
+    if (targetResponse.ok && (await targetResponse.json()).enabled) {
+      arxivTargetButton.disabled = true;
+      arxivTargetButton.textContent = "это пространство уже приёмник импортов архива";
+      return;
+    }
     arxivTargetButton.addEventListener("click", async () => {
       arxivTargetButton.disabled = true;
       arxivTargetStatus.textContent = "Сохраняем…";
