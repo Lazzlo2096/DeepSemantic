@@ -16,12 +16,8 @@ if [[ ! -e .env && ! -L .env ]]; then
     printf '[bootstrap] Creating .env from .env.example.\n'
     cp --update=none --no-target-directory .env.example .env
 
-    # Generate random AUTH_PROXY_SECRET if empty
-    if grep -q '^AUTH_PROXY_SECRET=$' .env; then
-        secret=$(openssl rand -hex 32)
-        sed -i "s/^AUTH_PROXY_SECRET=$/AUTH_PROXY_SECRET=$secret/" .env
-        printf '[bootstrap] Generated random AUTH_PROXY_SECRET.\n'
-    fi
+    # Generate all secure secrets
+    bash ./generate-secrets.sh .env
 else
     printf '[bootstrap] Using the existing .env.\n'
 fi
