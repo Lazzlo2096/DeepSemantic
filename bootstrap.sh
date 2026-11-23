@@ -15,6 +15,13 @@ bash ./create-swapfile.sh
 if [[ ! -e .env && ! -L .env ]]; then
     printf '[bootstrap] Creating .env from .env.example.\n'
     cp --update=none --no-target-directory .env.example .env
+
+    # Generate random AUTH_PROXY_SECRET if empty
+    if grep -q '^AUTH_PROXY_SECRET=$' .env; then
+        secret=$(openssl rand -hex 32)
+        sed -i "s/^AUTH_PROXY_SECRET=$/AUTH_PROXY_SECRET=$secret/" .env
+        printf '[bootstrap] Generated random AUTH_PROXY_SECRET.\n'
+    fi
 else
     printf '[bootstrap] Using the existing .env.\n'
 fi
@@ -32,7 +39,7 @@ cat <<'EOF'
 
 Откройте .env и укажите ключ OpenRouter в OPENROUTER_API_KEY.
 Выберите модели для поиска по RAG (RAG_OPENROUTER_MODEL) и суммаризации (SUMMARY_OPENROUTER_MODEL).
-Укажите случайный AUTH_PROXY_SECRET, например результат команды openssl rand -hex 32.
+AUTH_PROXY_SECRET уже сгенерирован автоматически.
 
 Запустите проект командой just up-server.
 Для остановки выполните just down.

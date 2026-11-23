@@ -60,7 +60,7 @@ Caddy проверяет защищённые запросы через отде
 docker compose run --rm auth-service python -m auth_service.cli create-admin admin@example.com
 ```
 
-На сервере сначала задайте случайный `AUTH_PROXY_SECRET` в `.env`. Подробности находятся в [описании auth-service](auth-service/README.md).
+На сервере `AUTH_PROXY_SECRET` генерируется автоматически скриптом `bootstrap.sh`. Подробности находятся в [описании auth-service](auth-service/README.md).
 
 ## LangSmith Studio
 

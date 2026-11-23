@@ -22,7 +22,7 @@ Caddy оставляет каталог и готовые материалы п�
 docker compose run --rm auth-service python -m auth_service.cli create-admin admin@example.com
 ```
 
-На сервере задайте `AUTH_PROXY_SECRET` в `.env`. Ссылка для следующего пользователя создаётся на странице `/users.html` и содержит одноразовый токен приглашения.
+`AUTH_PROXY_SECRET` генерируется автоматически скриптом `bootstrap.sh`. Ссылка для следующего пользователя создаётся на странице `/users.html` и содержит одноразовый токен приглашения.
 
 ## Работа с каталогом
 
